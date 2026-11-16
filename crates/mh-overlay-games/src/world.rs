@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
-use crate::model::{Health, Monster, Part};
+use crate::model::{Ailment, Health, Monster, Part};
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
 // documenta HunterPie para esta rama del lector.
@@ -48,6 +48,19 @@ const PART_INDEX: u64 = 0x6C;
 const MAX_PART_HEALTH: f32 = 10_000_000.0;
 /// Índice de parte máximo creíble; por encima, la lectura está desalineada.
 const MAX_PART_INDEX: u32 = 0x40;
+/// Primer puntero del array de estados alterados del monstruo.
+const MONSTER_AILMENTS: u64 = 0x1BC40;
+/// Hueco entre el puntero del array y la estructura del estado.
+const AILMENT_STRUCTURE: u64 = 0x148;
+/// `MHWMonsterAilmentStructure`: dueño, id, duración y acumulación.
+const AILMENT_OWNER: u64 = 0x00;
+const AILMENT_ID: u64 = 0x10;
+const AILMENT_MAX_DURATION: u64 = 0x14;
+const AILMENT_BUILDUP: u64 = 0x30;
+const AILMENT_MAX_BUILDUP: u64 = 0x40;
+const AILMENT_DURATION: u64 = 0x70;
+/// Estados que el juego puede registrar a la vez; el array termina en un puntero nulo.
+const MAX_AILMENTS: usize = 32;
 
 /// Lector de World sobre un proceso ya adjuntado.
 pub struct World<'map> {
@@ -124,9 +137,14 @@ impl<'map> World<'map> {
 
         let mut monster = Monster::new(id, health);
 
-        monster.name = Some(model);
+        // La localización es la fuente del nombre legible; el código `em` queda como respaldo
+        // para ids que todavía no tienen traducción.
+        monster.name = crate::tables::world_monster_name(id)
+            .map(str::to_owned)
+            .or(Some(model));
         monster.capture_percent = crate::tables::world_capture_percent(id);
         monster.parts = self.parts(address, id).unwrap_or_default();
+        monster.ailments = self.ailments(address).unwrap_or_default();
 
         Some(monster)
     }
@@ -138,6 +156,52 @@ impl<'map> World<'map> {
             .read_f32_array(values + MONSTER_HEALTH_VALUES, 2)?;
 
         Ok(Health::new(health[1], health[0]))
+    }
+
+    /// Los estados viven en un array de punteros que termina en nulo. La estructura se lee
+    /// desplazada del puntero y su primer campo apunta de vuelta al monstruo: si no coincide,
+    /// el array pertenece a otro monstruo y se corta.
+    fn ailments(&self, monster: u64) -> Result<Vec<Ailment>, MemoryError> {
+        let mut ailments = Vec::new();
+
+        for slot in 0..MAX_AILMENTS {
+            let element = monster + MONSTER_AILMENTS + (slot as u64) * 8;
+            let pointer = self.memory.read_u64(element)?;
+
+            if pointer <= 1 {
+                break;
+            }
+
+            let structure = pointer + AILMENT_STRUCTURE;
+            if self.memory.read_u64(structure + AILMENT_OWNER)? != monster {
+                break;
+            }
+
+            if let Ok(Some(ailment)) = self.ailment(structure)
+                && ailment.is_active()
+            {
+                ailments.push(ailment);
+            }
+        }
+
+        Ok(ailments)
+    }
+
+    /// Un id sin nombre es un estado que el juego no muestra (trampas internas, contadores):
+    /// se descarta en vez de inventarle una etiqueta.
+    fn ailment(&self, structure: u64) -> Result<Option<Ailment>, MemoryError> {
+        let id = self.memory.read_i32(structure + AILMENT_ID)?;
+        let Some(name) = crate::tables::world_ailment_name(id) else {
+            return Ok(None);
+        };
+
+        Ok(Some(Ailment {
+            name,
+            buildup: self.memory.read_f32(structure + AILMENT_BUILDUP)?,
+            max_buildup: self.memory.read_f32(structure + AILMENT_MAX_BUILDUP)?,
+            timer: self.memory.read_f32(structure + AILMENT_DURATION)?,
+            max_timer: self.memory.read_f32(structure + AILMENT_MAX_DURATION)?,
+        }))
     }
 
     /// Se reportan las partes que el juego tiene inicializadas. Las normales exponen su vida

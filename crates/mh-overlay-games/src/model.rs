@@ -76,7 +76,8 @@ impl Ailment {
 pub struct Monster {
     /// Identificador interno del juego. Estable entre parches, a diferencia de las direcciones.
     pub id: i32,
-    /// Nombre legible si se conoce; en World se guarda el código `em` del modelo.
+    /// Nombre legible según la localización; en World, si el id no está en la tabla, se
+    /// guarda el código `em` del modelo.
     pub name: Option<String>,
     pub health: Health,
     /// Porcentaje de vida por debajo del cual se puede capturar.

@@ -8,10 +8,10 @@ Es la alternativa a [HunterPie](https://github.com/HunterPie/HunterPie) en Linux
 Wine para sí mismo, no inyecta DLLs y no escribe ni un byte en el proceso del juego.
 
 ```
-id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
-  cabeza       flinch 100.0%  romper  62.4%  cortar 100.0%
-  cola         flinch  88.1%  romper  41.9%  cortar  41.9%
-  veneno  45.2%  (120 / 265)
+id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
+  Cabeza       flinch 100.0%  romper  62.4%  cortar 100.0%
+  Cola         flinch  88.1%  romper  41.9%  cortar  41.9%
+  Veneno  45.2%  (120 / 265)
 ```
 
 ## Estado
@@ -24,8 +24,8 @@ id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Umbral de captura | ✅ escrito | ✅ escrito |
 | Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
 | Nombres de parte | ✅ escrito | ✅ escrito |
-| Estados alterados | ✅ escrito | ⏳ |
-| Nombres de monstruo | ⏳ | ⏳ |
+| Estados alterados | ✅ escrito | ✅ escrito |
+| Nombres de monstruo | ✅ escrito | ✅ escrito |
 | Overlay gráfico (ventana X11) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
@@ -219,13 +219,14 @@ nombre. `--map` permite probar uno sin tocar los demás.
 ## Las tablas de datos
 
 `crates/mh-overlay-games/src/tables.rs` es un archivo generado: trae el umbral de captura de
-World y el nombre de cada parte, sacados de los `MonsterData.xml` de HunterPie. El generador
-es `scripts/generate_tables.py` y se niega a escribir la tabla si alguna parte queda sin
-transladar, para que un hueco se vea como `parte NN` y no como una etiqueta a medias:
+World, el nombre de cada parte y de cada monstruo, y los estados alterados de World. Los datos
+salen de los `MonsterData.xml` de HunterPie (Apache-2.0) y de su localización `es-es` (MIT). El
+generador es `scripts/generate_tables.py` y se niega a escribir la tabla si alguna parte
+queda sin nombre, para que un hueco se vea como `parte NN` y no como una etiqueta a medias:
 
 ```bash
 python3 scripts/generate_tables.py ruta/rise/MonsterData.xml ruta/world/MonsterData.xml \
-    crates/mh-overlay-games/src/tables.rs
+    ruta/localization/es-es.xml crates/mh-overlay-games/src/tables.rs
 ```
 
 Rise identifica las partes por su posición en el array, así que su tabla conserva el orden y
@@ -235,11 +236,12 @@ los huecos; World las identifica por el índice que reporta el juego.
 
 - **Solo lectura.** No hay escritura ni inyección; el crate no expone un writer a propósito.
 - **Wilds no está soportado** todavía, aunque sus mapas están incluidos.
-- **Los nombres de monstruo no están mapeados**: se muestran ids (y en World, el código `em`
-  del modelo). Las traducciones de HunterPie se descargan en runtime y no están en el
-  repositorio; hace falta otra fuente para el nombre legible.
+- **Los nombres están solo en castellano**: la tabla se genera desde la localización `es-es`
+  de HunterPie. Otra lengua es volver a generarla con ese archivo.
 - **Las partes sin nombre en la tabla del juego se muestran como `parte NN`**: algunos
   monstruos tienen índices que HunterPie tampoco nombra.
+- **Los estados de World se muestran sin contador**: la estructura trae cuántas veces se ha
+  aplicado el estado, pero el panel todavía no lo enseña.
 - **World solo expone la lista de monstruos desde la build 421652**; los mapas anteriores no
   definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
 - **Wayland nativo**: el panel es una ventana X11, que funciona sobre juegos de Proton (que ya
@@ -252,5 +254,6 @@ los huecos; World las identifica por el índice que reporta el juego.
 
 ## Licencia
 
-Apache-2.0. Los datos de `data/maps/` son de HunterPie, también Apache-2.0, y la tipografía
-Rajdhani es SIL OFL 1.1; los detalles de atribución están en `NOTICE`.
+Apache-2.0. Los datos de `data/maps/` y las tablas generadas son de HunterPie (Apache-2.0 y
+MIT según el archivo), y la tipografía Rajdhani es SIL OFL 1.1; los detalles de atribución
+están en `NOTICE`.

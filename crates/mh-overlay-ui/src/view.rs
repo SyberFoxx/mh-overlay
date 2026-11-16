@@ -18,6 +18,8 @@ const MAX_AILMENTS: usize = 4;
 const BASE_WIDTH: f32 = 320.0;
 /// Radio de las esquinas en unidades lógicas.
 const RADIUS: f32 = 10.0;
+/// Ancho de la columna de etiquetas dentro de una fila.
+const LABEL_WIDTH: f32 = 86.0;
 
 /// Dibuja el panel completo; el tamaño depende de la configuración y del contenido.
 pub fn render(config: &Config, text: &Text, monsters: &[Monster], status: Option<&str>) -> Canvas {
@@ -363,15 +365,15 @@ fn draw_row(
     row: Row<'_>,
 ) {
     let style = &config.style;
-    let label = row.label;
     let fraction = row.fraction;
     let color = row.color;
     let size = 12.0 * geometry.scale;
     let inner = geometry.inner_width(canvas);
+    let label = fit_label(text, row.label, size, LABEL_WIDTH * geometry.scale);
 
     text.draw(
         canvas,
-        label,
+        &label,
         geometry.padding,
         y + text.ascent(size),
         size,
@@ -380,9 +382,9 @@ fn draw_row(
 
     let bar_height = geometry.track.max(2.0);
     let bar = Rect::new(
-        geometry.padding as i32 + (86.0 * geometry.scale) as i32,
+        geometry.padding as i32 + (LABEL_WIDTH * geometry.scale) as i32,
         (y + geometry.row * 0.5 - bar_height * 0.5).round() as i32,
-        (inner - 86.0 * geometry.scale - 46.0 * geometry.scale).max(1.0) as u32,
+        (inner - LABEL_WIDTH * geometry.scale - 46.0 * geometry.scale).max(1.0) as u32,
         bar_height as u32,
     );
 
@@ -413,21 +415,47 @@ fn part_fraction(part: &Part) -> f32 {
     health.map_or(0.0, |health| (health.percent() / 100.0).clamp(0.0, 1.0))
 }
 
+/// Recorta la etiqueta con puntos suspensivos si no cabe en la columna.
+///
+/// Los nombres de la localización son más largos que `parte NN` y, sin esto, el texto se
+/// montaría encima de la barra.
+fn fit_label(text: &Text, label: &str, size: f32, max_width: f32) -> String {
+    if text.width(label, size) <= max_width {
+        return label.to_string();
+    }
+
+    let mut characters: Vec<char> = label.chars().collect();
+    while !characters.is_empty() {
+        characters.pop();
+        let candidate = format!("{}..", characters.iter().collect::<String>());
+        if text.width(&candidate, size) <= max_width {
+            return candidate;
+        }
+    }
+
+    "..".to_string()
+}
+
 /// Un color por estado, para no leer la etiqueta cuando solo se mira el borde del panel.
 fn ailment_color(style: &StyleSection, name: &str) -> Color {
-    match name {
+    match name.to_lowercase().as_str() {
         "fuego" => Color::rgb(0xf0, 0x6e, 0x3c),
-        "agua" => Color::rgb(0x4f, 0xa8, 0xe6),
-        "rayo" => Color::rgb(0xf0, 0xd0, 0x4a),
-        "hielo" => Color::rgb(0x7f, 0xd8, 0xe6),
-        "dragón" | "dragon" => Color::rgb(0xa9, 0x7a, 0xe6),
+        "agua" | "plaga de agua" => Color::rgb(0x4f, 0xa8, 0xe6),
+        "rayo" | "plaga de rayo" => Color::rgb(0xf0, 0xd0, 0x4a),
+        "hielo" | "plaga de hielo" => Color::rgb(0x7f, 0xd8, 0xe6),
+        "dragón" | "dragon" | "plaga de dragón" => Color::rgb(0xa9, 0x7a, 0xe6),
         "veneno" => Color::rgb(0xb0, 0x7a, 0xd6),
         "sueño" | "sueno" => Color::rgb(0x8f, 0x9f, 0xe6),
         "parálisis" | "paralisis" => Color::rgb(0xd8, 0xc0, 0x6a),
-        "explosión" | "explosion" => Color::rgb(0xe0, 0x6a, 0x4a),
-        "aturdimiento" | "destello" => Color::rgb(0xe6, 0xc0, 0x7a),
-        "montura" => Color::rgb(0x6f, 0xd0, 0xb0),
-        "agotamiento" => Color::rgb(0x9a, 0xa8, 0x6a),
+        "explosión" | "explosion" | "nitro" => Color::rgb(0xe0, 0x6a, 0x4a),
+        "aturdimiento" | "aturdir" | "destello" | "flash" => Color::rgb(0xe6, 0xc0, 0x7a),
+        "montura" | "montar" | "derribo" => Color::rgb(0x6f, 0xd0, 0xb0),
+        "agotamiento" | "fatiga" => Color::rgb(0x9a, 0xa8, 0x6a),
+        "trampa eléctrica" | "trampa de escollos" | "trampa de foso" => {
+            Color::rgb(0x7a, 0xc0, 0xe6)
+        }
+        "tranquilizante" | "tranquilizar" => Color::rgb(0xc0, 0xa0, 0xe6),
+        "estiércol" | "bomba boñiga" => Color::rgb(0xa8, 0x9a, 0x7a),
         _ => style.capture,
     }
 }

@@ -56,44 +56,41 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn sample() -> Vec<Monster> {
-    let mut rathalos = Monster::new(24, Health::new(11_912.0, 17_440.0));
-    rathalos.name = Some("Rathalos".to_string());
-    rathalos.capture_percent = Some(20.0);
+    // Los ids son los de World: 1 es Rathalos y 0 Anjanath. Nombres, partes y umbral de
+    // captura salen de la tabla, así que la vista previa enseña lo mismo que el juego.
+    let mut rathalos = Monster::new(1, Health::new(11_912.0, 17_440.0));
+    rathalos.name = mh_overlay_games::tables::world_monster_name(1).map(str::to_owned);
+    rathalos.capture_percent = mh_overlay_games::tables::world_capture_percent(1);
     rathalos.parts = vec![
-        part(24, 0, 90.0),
-        part(24, 1, 41.0),
-        part(24, 2, 12.0),
+        part(1, 0, 90.0),
+        part(1, 1, 41.0),
+        part(1, 2, 12.0),
         Part {
             index: 5,
-            name: mh_overlay_games::tables::world_part_name(24, 5),
+            name: mh_overlay_games::tables::world_part_name(1, 5),
             flinch: None,
             breakable: None,
             severable: Some(Health::new(180.0, 240.0)),
         },
     ];
-    rathalos.ailments = vec![
-        Ailment {
-            name: "fuego",
-            buildup: 640.0,
-            max_buildup: 1000.0,
-            timer: 0.0,
-            max_timer: 30.0,
-        },
-        Ailment {
-            name: "veneno",
-            buildup: 120.0,
-            max_buildup: 800.0,
-            timer: 0.0,
-            max_timer: 40.0,
-        },
-    ];
+    rathalos.ailments = vec![ailment(9, 640.0, 1000.0), ailment(1, 120.0, 800.0)];
 
-    let mut anjanath = Monster::new(9, Health::new(1_860.0, 15_000.0));
-    anjanath.name = Some("Anjanath".to_string());
-    anjanath.capture_percent = Some(20.0);
-    anjanath.parts = vec![part(9, 0, 68.0), part(9, 1, 5.0)];
+    let mut anjanath = Monster::new(0, Health::new(1_860.0, 15_000.0));
+    anjanath.name = mh_overlay_games::tables::world_monster_name(0).map(str::to_owned);
+    anjanath.capture_percent = mh_overlay_games::tables::world_capture_percent(0);
+    anjanath.parts = vec![part(0, 0, 68.0), part(0, 1, 5.0)];
 
     vec![rathalos, anjanath]
+}
+
+fn ailment(id: i32, buildup: f32, max_buildup: f32) -> Ailment {
+    Ailment {
+        name: mh_overlay_games::tables::world_ailment_name(id).unwrap_or("estado"),
+        buildup,
+        max_buildup,
+        timer: 0.0,
+        max_timer: 30.0,
+    }
 }
 
 fn part(monster: i32, index: usize, percent: f32) -> Part {

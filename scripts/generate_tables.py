@@ -1,189 +1,113 @@
 #!/usr/bin/env python3
-"""Genera crates/mh-overlay-games/src/tables.rs a partir de los MonsterData.xml de HunterPie.
+"""Genera crates/mh-overlay-games/src/tables.rs desde los datos de HunterPie.
 
 Uso:
-    python3 scripts/generate_tables.py rise.xml world.xml tablas.rs
+    python3 scripts/generate_tables.py rise.xml world.xml es-es.xml tablas.rs
 
-Los XML son datos de HunterPie (Apache-2.0, ver NOTICE). El script falla si alguna parte no
-tiene traducción: una tabla con etiquetas a medias es peor que no tener nombres, porque el
-usuario no puede distinguir "sin nombre" de "nombre equivocado". Después de generarlo, pasa
-`cargo fmt --all`: el formato final del archivo lo decide rustfmt.
+Los XML son de HunterPie: `MonsterData.xml` (Apache-2.0) describe qué parte y qué estado
+tiene cada id, y `es-es.xml` del repositorio de localización (MIT) trae los nombres que el
+juego muestra en castellano. El script falla si una parte no tiene nombre: una tabla con
+etiquetas a medias es peor que no tener nombres, porque el usuario no puede distinguir
+"sin nombre" de "nombre equivocado". Después de generarlo, pasa `cargo fmt --all`: el
+formato final del archivo lo decide rustfmt.
 """
 
 import sys
 import xml.etree.ElementTree as ET
 
-# Nombre corto de cada tipo de parte. Las variantes (roca, lodo, hielo…) se añaden entre
-# paréntesis y el lado como sufijo.
-BASE = {
-    "HEAD": "cabeza",
-    "TAIL": "cola",
-    "TAIL_TIP": "punta de la cola",
-    "BODY": "cuerpo",
-    "ABDOMEN": "abdomen",
-    "CHEST": "pecho",
-    "TORSO": "torso",
-    "NECK": "cuello",
-    "BACK": "espalda",
-    "UPPER_BACK": "lomo",
-    "LOWER_BACK": "lomo bajo",
-    "UPPER_BODY": "cuerpo alto",
-    "LOWER_BODY": "cuerpo bajo",
-    "LOWER_TORSO": "torso bajo",
-    "REAR": "zona trasera",
-    "JAW": "mandíbula",
-    "MANE": "melena",
-    "FIN": "aleta",
-    "DORSAL_FIN": "aleta dorsal",
-    "CREST": "cresta",
-    "ANTENNA": "antena",
-    "ANTLERS": "astas",
-    "HORN": "cuerno",
-    "HORNS": "cuernos",
-    "HORNS_2": "cuernos 2",
-    "HORNS_GOLD": "cuernos dorados",
-    "SHELL": "caparazón",
-    "CLAW": "garra",
-    "WING_CLAW": "garra alar",
-    "WING": "ala",
-    "WINGS": "alas",
-    "CUTWING": "membrana",
-    "LEG": "pata",
-    "LEGS": "patas",
-    "ARM": "brazo",
-    "ARMS": "brazos",
-    "FORELEG": "pata delantera",
-    "FORELEGS": "patas delanteras",
-    "H_LEG": "pata trasera",
-    "H_LEGS": "patas traseras",
-    "B_LEG_FINS": "aletas de la pata trasera",
-    "LIMBS": "extremidades",
-    "BONE": "hueso",
-    "SPONGE": "esponja",
-    "POT": "olla",
-    "BALLOON": "globo",
-    "EMISSIONS": "emisiones",
-    "CHARGE": "carga",
-    "COUNTERATTACK": "contraataque",
-    "RAGE": "furia",
-    "ROLLING": "rodadura",
-    "KNOCKDOWN": "derribo",
-    "REPEL": "rechazo",
-    "BIG_FLINCH": "gran tambaleo",
-    "SKY_FALL": "caída",
-    "MUD_BALL": "bola de lodo",
-    "WINDSAC": "saco de viento",
-    "THUNDERBALLS": "bolas de trueno",
-    "GLOWING_HEAD": "cabeza brillante",
-    "GLOWING_TAIL": "cola brillante",
-    "INFLATED_TAIL": "cola inflada",
-}
+# Claves que HunterPie deja sin nombre a propósito: no son una parte física.
+NON_PARTS = {"PART_UNKNOWN", "PART_TO_BE_MAPPED"}
 
-# Variantes de estado de la misma parte: se muestran entre paréntesis.
+# Estados de una misma parte, para completar las claves que la localización no trae.
 VARIANTS = {
-    "ROCK": "roca",
     "MUD": "lodo",
-    "ICE": "hielo",
-    "SNOW": "nieve",
-    "GOLD": "dorada",
-}
-
-# Claves que no son una parte física o que necesitan un nombre propio.
-EXPLICIT = {
-    "SILVER_SPIKES_HEAD": "cabeza con púas",
-    "SILVER_SPIKES_L_ARM": "brazo izq. con púas",
-    "SILVER_SPIKES_R_ARM": "brazo der. con púas",
-    "SILVER_SPIKES_L_WING": "ala izq. con púas",
-    "SILVER_SPIKES_R_WING": "ala der. con púas",
-    "WEAK_L_SHELL": "caparazón débil izq.",
-    "WEAK_R_SHELL": "caparazón débil der.",
-    "EMERGE_SNOW_HEAD": "cabeza al emerger",
-    "EMERGE_SNOW_BODY": "cuerpo al emerger",
-    "EMERGE_SNOW_TAIL": "cola al emerger",
-    "EXHAUST_ORGAN_HEAD": "órgano de gas frontal",
-    "EXHAUST_ORGAN_CENTRAL": "órgano de gas central",
-    "EXHAUST_ORGAN_REAR": "órgano de gas trasero",
-    "EXHAUST_ORGAN_CRATER": "órgano de gas del cráter",
-    "TAIL_WINDSAC": "cola con saco de viento",
-    "CHEST_WINDSAC": "pecho con saco de viento",
-    "BACK_WINDSAC": "espalda con saco de viento",
-    "BODY_LEGS": "cuerpo y patas",
-    "EXPLOSION_WEAKENING": "explosión debilitada",
-    "THROAT": "garganta",
     "ROCK": "roca",
-    "MUD": "lodo",
     "ICE": "hielo",
     "SNOW": "nieve",
     "GOLD": "dorado",
 }
-
-# Sin nombre: no es una parte que el jugador reconozca.
-IGNORED = {"TO_BE_MAPPED", "UNKNOWN"}
-
-
-def translate(key):
-    name = key.removeprefix("PART_")
-
-    if name in IGNORED:
-        return None
-    if name in EXPLICIT:
-        return EXPLICIT[name]
-
-    side = ""
-    if name.startswith("L_"):
-        side, name = " izq.", name[2:]
-    elif name.startswith("R_"):
-        side, name = " der.", name[2:]
-
-    variant = ""
-    for suffix, label in VARIANTS.items():
-        if name.endswith("_" + suffix):
-            variant, name = f" ({label})", name[: -len(suffix) - 1]
-            break
-
-    if name not in BASE:
-        raise SystemExit(f"sin traducción para la parte {key}")
-
-    return BASE[name] + side + variant
 
 
 def rust_str(text):
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def parse(path, severable_needed):
+def strings(root, path):
+    """El nombre vive en el atributo `String`; el texto del nodo está vacío."""
+    return {
+        node.get("Id"): node.get("String")
+        for node in root.findall(path)
+        if node.get("String")
+    }
+
+
+def localized(root, game):
+    return {
+        int(key): name
+        for key, name in strings(root, f"./Monsters/{game}/Monster").items()
+    }
+
+
+def part_names(root):
+    return strings(root, "./Monsters/Shared/Part")
+
+
+def ailment_names(root):
+    return strings(root, "./Ailments/Rise/Ailment")
+
+
+def parse_monsters(path):
     root = ET.parse(path).getroot()
+    ailments = [
+        (int(ailment.get("Id")), ailment.get("String"))
+        for ailment in root.findall(".//Ailments/Ailment")
+    ]
+
     monsters = []
-
     for monster in root.findall(".//Monster"):
-        monster_id = int(monster.get("Id"))
-        parts = []
-        for part in monster.findall("./Parts/Part"):
-            parts.append(
-                (
-                    int(part.get("Id")),
-                    translate(part.get("String")),
-                    part.get("IsSeverable") == "True",
-                )
-            )
-        monsters.append((monster_id, monster.get("Capture"), parts))
+        parts = [
+            (int(part.get("Id")), part.get("String"))
+            for part in monster.findall("./Parts/Part")
+        ]
+        monsters.append((int(monster.get("Id")), monster.get("Capture"), parts))
 
-    return monsters
+    return monsters, ailments
 
 
 def main():
-    rise_path, world_path, output = sys.argv[1:4]
-    rise = parse(rise_path, False)
-    world = parse(world_path, True)
+    rise_path, world_path, locale_path, output = sys.argv[1:5]
+
+    locale = ET.parse(locale_path).getroot()
+    parts = part_names(locale)
+    ailments = ailment_names(locale)
+    rise_names = localized(locale, "Rise")
+    world_names = localized(locale, "World")
+
+    rise, _ = parse_monsters(rise_path)
+    world, world_ailments = parse_monsters(world_path)
+
+    def name_of(key, origin):
+        if key in NON_PARTS:
+            return None
+        if key in parts:
+            return parts[key]
+
+        # Variantes que HunterPie tampoco traduce: "PART_BODY_MUD" es el cuerpo con lodo.
+        base, _, variant = key.rpartition("_")
+        if base in parts and variant in VARIANTS:
+            return f"{parts[base]} ({VARIANTS[variant]})"
+
+        raise SystemExit(f"sin nombre en la localización para {key} ({origin})")
 
     lines = [
-        "//! Tablas derivadas de los `MonsterData.xml` de HunterPie (Apache-2.0, ver `NOTICE`).",
+        "//! Tablas derivadas de los datos de HunterPie: `MonsterData.xml` (Apache-2.0) y la",
+        "//! localización `es-es.xml` (MIT), ver `NOTICE`.",
         "//!",
         "//! Generado por `scripts/generate_tables.py`; no editar a mano. Rise identifica las",
         "//! partes por su posición en el array (igual que `MHRMonster.Parts[i]`); World las",
         "//! identifica por el índice que reporta el juego (`MHWMonsterPart`).",
         "",
-        "/// Parte de World: índice del juego y nombre corto en castellano.",
+        "/// Parte de World: índice del juego y nombre en castellano.",
         "pub struct WorldPart {",
         "    pub index: usize,",
         "    pub name: &'static str,",
@@ -200,10 +124,12 @@ def main():
 
     lines += ["];", "", "const WORLD_PARTS: &[(i32, &[WorldPart])] = &["]
 
-    for monster_id, _, parts in sorted(world, key=lambda entry: entry[0]):
-        named = sorted(
-            (part_id, name) for part_id, name, _ in parts if name is not None
-        )
+    for monster_id, _, parts_list in sorted(world, key=lambda entry: entry[0]):
+        named = [
+            (part_id, name)
+            for part_id, key in sorted(parts_list)
+            if (name := name_of(key, f"World {monster_id}")) is not None
+        ]
         if not named:
             continue
         lines.append(f"    ({monster_id}, &[")
@@ -215,39 +141,71 @@ def main():
 
     lines += ["];", "", "const RISE_PARTS: &[(i32, &[Option<&'static str>])] = &["]
 
-    for monster_id, _, parts in sorted(rise, key=lambda entry: entry[0]):
+    for monster_id, _, parts_list in sorted(rise, key=lambda entry: entry[0]):
         lines.append(f"    ({monster_id}, &[")
-        for _, name, _ in parts:
-            rendered = "None" if name is None else f"Some({rust_str(name)})"
-            lines.append(f"        {rendered},")
+        for _, key in parts_list:
+            name = name_of(key, f"Rise {monster_id}")
+            lines.append(f"        {('None' if name is None else 'Some(' + rust_str(name) + ')')},")
         lines.append("    ]),")
 
     lines += [
         "];",
         "",
-        "fn capture(monster: i32) -> Option<u8> {",
-        "    WORLD_CAPTURE",
-        "        .binary_search_by_key(&monster, |entry| entry.0)",
+        "/// Nombres de los monstruos de World por el id que reporta el juego.",
+        "const WORLD_MONSTERS: &[(i32, &str)] = &[",
+    ]
+    for monster_id, name in sorted(world_names.items()):
+        lines.append(f"    ({monster_id}, {rust_str(name)}),")
+
+    lines += [
+        "];",
+        "",
+        "/// Nombres de los monstruos de Rise por `MHRMonster.Id`.",
+        "const RISE_MONSTERS: &[(i32, &str)] = &[",
+    ]
+    for monster_id, name in sorted(rise_names.items()):
+        lines.append(f"    ({monster_id}, {rust_str(name)}),")
+
+    lines += [
+        "];",
+        "",
+        "/// Estados alterados de World por `MHWMonsterAilmentStructure.Id`.",
+        "const WORLD_AILMENTS: &[(i32, &str)] = &[",
+    ]
+
+    for ailment_id, key in sorted(world_ailments):
+        if key not in ailments:
+            # Los ids sin nombre vienen con el propio número como clave; el lector los
+            # ignora en vez de mostrar un estado que no puede nombrar.
+            continue
+        lines.append(f"    ({ailment_id}, {rust_str(ailments[key])}),")
+
+    lines += [
+        "];",
+        "",
+        "fn lookup(table: &[(i32, &'static str)], key: i32) -> Option<&'static str> {",
+        "    table",
+        "        .binary_search_by_key(&key, |entry| entry.0)",
         "        .ok()",
-        "        .map(|index| WORLD_CAPTURE[index].1)",
+        "        .map(|index| table[index].1)",
         "}",
         "",
         "/// Umbral de captura de World en porcentaje de vida, o `None` si el id no está en la tabla.",
         "pub fn world_capture_percent(monster: i32) -> Option<f32> {",
-        "    capture(monster).map(f32::from)",
+        "    WORLD_CAPTURE",
+        "        .binary_search_by_key(&monster, |entry| entry.0)",
+        "        .ok()",
+        "        .map(|index| f32::from(WORLD_CAPTURE[index].1))",
         "}",
         "",
         "/// Nombre de la parte de World con ese índice, si la tabla lo conoce.",
         "pub fn world_part_name(monster: i32, index: usize) -> Option<&'static str> {",
-        "    let entry = WORLD_PARTS",
+        "    let parts = WORLD_PARTS",
         "        .binary_search_by_key(&monster, |entry| entry.0)",
         "        .ok()",
         "        .map(|position| WORLD_PARTS[position].1)?;",
         "",
-        "    entry",
-        "        .iter()",
-        "        .find(|part| part.index == index)",
-        "        .map(|part| part.name)",
+        "    parts.iter().find(|part| part.index == index).map(|part| part.name)",
         "}",
         "",
         "/// Nombre de la parte de Rise por su posición en el array de partes.",
@@ -258,6 +216,21 @@ def main():
         "        .map(|index| RISE_PARTS[index].1)?;",
         "",
         "    parts.get(position).copied().flatten()",
+        "}",
+        "",
+        "/// Nombre legible del monstruo, si la localización trae ese id.",
+        "pub fn world_monster_name(monster: i32) -> Option<&'static str> {",
+        "    lookup(WORLD_MONSTERS, monster)",
+        "}",
+        "",
+        "/// Lo mismo para Rise.",
+        "pub fn rise_monster_name(monster: i32) -> Option<&'static str> {",
+        "    lookup(RISE_MONSTERS, monster)",
+        "}",
+        "",
+        "/// Nombre del estado alterado de World, si el id corresponde a uno conocido.",
+        "pub fn world_ailment_name(ailment: i32) -> Option<&'static str> {",
+        "    lookup(WORLD_AILMENTS, ailment)",
         "}",
         "",
         "#[cfg(test)]",
@@ -271,16 +244,31 @@ def main():
         "    }",
         "",
         "    #[test]",
+        "    fn known_monsters_have_their_localized_name() {",
+        "        assert_eq!(world_monster_name(0), Some(\"Anjanath\"));",
+        "        assert_eq!(rise_monster_name(0), Some(\"Rathian\"));",
+        "    }",
+        "",
+        "    #[test]",
         "    fn known_parts_resolve_to_names() {",
-        "        assert!(world_part_name(0, 0).is_some());",
+        "        assert_eq!(world_part_name(1, 1), Some(\"Cabeza\"));",
         "        assert!(rise_part_name(110, 0).is_some());",
         "    }",
         "",
         "    #[test]",
         "    fn unknown_ids_and_positions_are_none() {",
         "        assert_eq!(world_capture_percent(-1), None);",
+        "        assert_eq!(world_monster_name(-1), None);",
+        "        assert_eq!(rise_monster_name(-1), None);",
         "        assert_eq!(world_part_name(0, 999), None);",
         "        assert_eq!(rise_part_name(-1, 0), None);",
+        "    }",
+        "",
+        "    #[test]",
+        "    fn world_ailments_resolve_except_the_ones_the_game_does_not_name() {",
+        "        assert_eq!(world_ailment_name(1), Some(\"Veneno\"));",
+        "        assert_eq!(world_ailment_name(0), None);",
+        "        assert_eq!(world_ailment_name(13), None);",
         "    }",
         "",
         "    #[test]",
@@ -295,7 +283,10 @@ def main():
     with open(output, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines))
 
-    print(f"{output}: {len(world)} monstruos de World, {len(rise)} de Rise")
+    print(
+        f"{output}: {len(world)} monstruos de World, {len(rise)} de Rise, "
+        f"{len(world_names)} nombres de World y {len(rise_names)} de Rise"
+    )
 
 
 if __name__ == "__main__":

@@ -99,6 +99,7 @@ impl<'map> Rise<'map> {
         let health = self.health(address)?;
         let mut monster = Monster::new(id, health);
 
+        monster.name = crate::tables::rise_monster_name(id).map(str::to_owned);
         monster.parts = self.parts(address, id).unwrap_or_default();
         monster.ailments = self.ailments(address).unwrap_or_default();
         monster.capture_percent = self.capture_percent(address, health);
