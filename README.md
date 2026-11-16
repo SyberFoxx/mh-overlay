@@ -8,9 +8,10 @@ Es la alternativa a [HunterPie](https://github.com/HunterPie/HunterPie) en Linux
 Wine para sí mismo, no inyecta DLLs y no escribe ni un byte en el proceso del juego.
 
 ```
-Monster  id 12    HP 74.3%   (16 420 / 22 100)      captura en 20%
-  cabeza      romper 62%    cortar  —         aturdimiento 100%
-  cola        romper 88%    cortar 41%
+id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
+  parte 0    flinch 100.0%  romper  62.4%  cortar 100.0%
+  parte 6    flinch  88.1%  romper  41.9%  cortar  41.9%
+  veneno  45.2%  (120 / 265)
 ```
 
 ## Estado
@@ -82,16 +83,8 @@ sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
 ./target/release/mh-overlay --game world --watch --interval 250
 ```
 
-Salida:
-
-```
-mh-overlay · rise · 1 monstruo(s)
-
-id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
-  parte 0    flinch 100.0%  romper  62.4%  cortar 100.0%
-  parte 6    flinch  88.1%  romper  41.9%  cortar  41.9%
-  veneno  45.2%  (120 / 265)
-```
+Cada ejecución imprime una línea por monstruo, una por parte y una por estado activo; el
+README abre con un ejemplo de esa salida.
 
 ## Arquitectura
 
