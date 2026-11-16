@@ -31,12 +31,26 @@ impl Process {
             .collect::<Vec<_>>();
         pids.sort_unstable();
 
+        let mut matched: Option<i32> = None;
+
         for pid in pids {
             if !process_matches(pid, names) {
                 continue;
             }
 
-            let base = module_base(pid, module)?;
+            matched = Some(pid);
+
+            // Steam/Proton pone el nombre del ejecutable en la línea de comandos de procesos
+            // auxiliares que nunca mapean el módulo: un candidato sin base no es definitivo,
+            // hay que seguir buscando el que sí lo tiene mapeado.
+            let Ok(base) = module_base(pid, module) else {
+                continue;
+            };
+
+            if base == 0 {
+                continue;
+            }
+
             return Ok(Self {
                 pid,
                 module: module.to_string(),
@@ -44,9 +58,15 @@ impl Process {
             });
         }
 
-        Err(MemoryError::ProcessNotFound {
-            names: names.join(", "),
-        })
+        match matched {
+            Some(pid) => Err(MemoryError::ModuleBaseNotFound {
+                pid,
+                module: module.to_string(),
+            }),
+            None => Err(MemoryError::ProcessNotFound {
+                names: names.join(", "),
+            }),
+        }
     }
 
     /// Attaches to a known pid and resolves the module base from `/proc/<pid>/maps`.

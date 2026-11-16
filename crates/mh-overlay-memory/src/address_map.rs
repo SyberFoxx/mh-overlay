@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::MemoryError;
+use crate::memory::Memory;
 
 /// Parsed `.map` file: static addresses and pointer offsets for one game version.
 ///
@@ -14,6 +15,9 @@ use crate::error::MemoryError;
 /// Offset  MONSTER_LIST_OFFSETS 0x80,0x10,0x0
 /// Instruction CRC_ORIGINAL_FUNC_1A 0x0F,0x31,0x48
 /// ```
+///
+/// Every number is hexadecimal and the `0x` prefix is optional, because HunterPie parses the
+/// values with base 16 regardless; a component without prefix (`48`) means `0x48`, not decimal.
 #[derive(Debug, Clone, Default)]
 pub struct AddressMap {
     game: String,
@@ -22,6 +26,17 @@ pub struct AddressMap {
     addresses: HashMap<String, u64>,
     offsets: HashMap<String, Vec<i32>>,
     instructions: HashMap<String, Vec<u8>>,
+}
+
+/// Resultado de contrastar las huellas `Instruction` de un mapa con la memoria del juego.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapValidation {
+    /// Al menos un par CRC coincidió con la memoria del proceso.
+    Verified,
+    /// Al menos un par CRC no coincide: el `.map` pertenece a otra build.
+    Mismatch,
+    /// El `.map` no trae pares CRC, así que no hay nada que contrastar.
+    Unavailable,
 }
 
 impl AddressMap {
@@ -113,10 +128,18 @@ impl AddressMap {
         game: &str,
         directory: impl AsRef<Path>,
     ) -> Result<PathBuf, MemoryError> {
+        Self::candidates_for_game(game, directory).map(|mut candidates| candidates.remove(0))
+    }
+
+    /// Every `.map` of `game` in `directory`, newest version first.
+    pub fn candidates_for_game(
+        game: &str,
+        directory: impl AsRef<Path>,
+    ) -> Result<Vec<PathBuf>, MemoryError> {
         let directory = directory.as_ref();
         let prefix = format!("{game}.");
 
-        let newest = fs::read_dir(directory)?
+        let mut candidates = fs::read_dir(directory)?
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|path| {
@@ -126,17 +149,49 @@ impl AddressMap {
                         .and_then(|name| name.to_str())
                         .is_some_and(|name| name.starts_with(&prefix))
             })
-            .max_by_key(|path| {
-                path.file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .map(version_key)
-                    .unwrap_or_default()
-            });
+            .collect::<Vec<_>>();
 
-        newest.ok_or_else(|| MemoryError::NoMapsForGame {
-            game: game.to_string(),
-            directory: directory.display().to_string(),
-        })
+        candidates.sort_by_key(|path| std::cmp::Reverse(version_key_of(path)));
+
+        if candidates.is_empty() {
+            return Err(MemoryError::NoMapsForGame {
+                game: game.to_string(),
+                directory: directory.display().to_string(),
+            });
+        }
+
+        Ok(candidates)
+    }
+
+    /// Compares the map's `CRC_ORIGINAL_*` fingerprints against the running process.
+    ///
+    /// A `.map` whose bytes are still the original ones belongs to the build that is running;
+    /// bytes that differ mean the file describes another version and its addresses are stale.
+    pub fn validate(&self, memory: &Memory) -> MapValidation {
+        let mut compared = 0;
+
+        for (key, expected) in &self.instructions {
+            let Some(rest) = key.strip_prefix("CRC_ORIGINAL_") else {
+                continue;
+            };
+            let address_key = format!("CRC_{rest}");
+            let Some(address) = self.addresses.get(&address_key) else {
+                continue;
+            };
+
+            compared += 1;
+
+            match memory.read_vec(self.base + address, expected.len()) {
+                Ok(actual) if actual == *expected => {}
+                _ => return MapValidation::Mismatch,
+            }
+        }
+
+        if compared == 0 {
+            MapValidation::Unavailable
+        } else {
+            MapValidation::Verified
+        }
     }
 
     /// Module base the `Address` entries are relative to.
@@ -197,6 +252,13 @@ fn split_file_stem(stem: &str) -> (String, String) {
     }
 }
 
+fn version_key_of(path: &Path) -> Vec<u64> {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(version_key)
+        .unwrap_or_default()
+}
+
 fn version_key(stem: &str) -> Vec<u64> {
     let (_, version) = split_file_stem(stem);
 
@@ -206,35 +268,29 @@ fn version_key(stem: &str) -> Vec<u64> {
         .collect()
 }
 
-fn parse_hex_u64(value: &str) -> Option<u64> {
-    let digits = value
+/// Hex digits with the `0x` prefix optional; `48` is `0x48`.
+fn hex_digits(value: &str) -> &str {
+    value
         .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))?;
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value)
+}
 
-    u64::from_str_radix(digits, 16).ok()
+fn parse_hex_u64(value: &str) -> Option<u64> {
+    u64::from_str_radix(hex_digits(value), 16).ok()
 }
 
 fn parse_hex_i32_list(value: &str) -> Option<Vec<i32>> {
     value
         .split(',')
-        .map(|component| {
-            let digits = component
-                .strip_prefix("0x")
-                .or_else(|| component.strip_prefix("0X"))?;
-            i32::from_str_radix(digits, 16).ok()
-        })
+        .map(|component| i32::from_str_radix(hex_digits(component.trim()), 16).ok())
         .collect()
 }
 
 fn parse_hex_u8_list(value: &str) -> Option<Vec<u8>> {
     value
         .split(',')
-        .map(|component| {
-            let digits = component
-                .strip_prefix("0x")
-                .or_else(|| component.strip_prefix("0X"))?;
-            u8::from_str_radix(digits, 16).ok()
-        })
+        .map(|component| u8::from_str_radix(hex_digits(component.trim()), 16).ok())
         .collect()
 }
 
@@ -283,6 +339,13 @@ mod tests {
     }
 
     #[test]
+    fn an_offset_without_hex_prefix_is_still_hex() {
+        let map = AddressMap::parse("Offset GUI::Flag 0x58,48,0x68", "g", "v").unwrap();
+
+        assert_eq!(map.offsets("GUI::Flag").unwrap(), &[0x58, 0x48, 0x68]);
+    }
+
+    #[test]
     fn a_missing_key_names_the_key() {
         let error = sample_map().offsets("NO_EXISTE").unwrap_err();
 
@@ -304,5 +367,101 @@ mod tests {
         assert!(
             version_key("MonsterHunterWorld.421810") > version_key("MonsterHunterWorld.410013")
         );
+    }
+
+    #[test]
+    fn a_matching_crc_verifies_the_map() {
+        let original: [u8; 4] = [0x0F, 0x31, 0x48, 0xC1];
+        let mut map = AddressMap::parse(
+            "Address CRC_FUNC_1A 0x0\nInstruction CRC_ORIGINAL_FUNC_1A 0x0F,0x31,0x48,0xC1\n",
+            "g",
+            "v",
+        )
+        .unwrap();
+        map.set_base(original.as_ptr() as u64);
+        let memory = Memory::new(std::process::id() as i32);
+
+        assert_eq!(map.validate(&memory), MapValidation::Verified);
+    }
+
+    #[test]
+    fn a_crc_from_another_build_is_a_mismatch() {
+        let patched: [u8; 4] = [0x90, 0x90, 0x90, 0x90];
+        let mut map = AddressMap::parse(
+            "Address CRC_FUNC_1A 0x0\nInstruction CRC_ORIGINAL_FUNC_1A 0x0F,0x31,0x48,0xC1\n",
+            "g",
+            "v",
+        )
+        .unwrap();
+        map.set_base(patched.as_ptr() as u64);
+        let memory = Memory::new(std::process::id() as i32);
+
+        assert_eq!(map.validate(&memory), MapValidation::Mismatch);
+    }
+
+    #[test]
+    fn a_map_without_crc_pairs_cannot_be_verified() {
+        let memory = Memory::new(std::process::id() as i32);
+
+        assert_eq!(sample_map().validate(&memory), MapValidation::Unavailable);
+    }
+
+    #[test]
+    fn every_shipped_map_parses() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/maps");
+        let mut parsed = 0;
+
+        for entry in fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+
+            if !path.extension().is_some_and(|extension| extension == "map") {
+                continue;
+            }
+
+            let map = AddressMap::load(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            assert!(
+                !map.game().is_empty(),
+                "{} sin nombre de juego",
+                path.display()
+            );
+            parsed += 1;
+        }
+
+        assert!(parsed >= 60, "solo se encontraron {parsed} mapas");
+    }
+
+    #[test]
+    fn candidate_maps_come_newest_first_and_only_for_the_requested_game() {
+        let directory =
+            std::env::temp_dir().join(format!("mh-overlay-maps-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+
+        for name in [
+            "MonsterHunterRise.1.0.0.0.map",
+            "MonsterHunterRise.10.0.0.0.map",
+            "MonsterHunterRise.2.0.0.0.map",
+            "MonsterHunterWorld.9.0.0.0.map",
+        ] {
+            fs::write(directory.join(name), "").unwrap();
+        }
+
+        let names = AddressMap::candidates_for_game("MonsterHunterRise", &directory)
+            .unwrap()
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            [
+                "MonsterHunterRise.10.0.0.0.map",
+                "MonsterHunterRise.2.0.0.0.map",
+                "MonsterHunterRise.1.0.0.0.map"
+            ]
+        );
+
+        fs::remove_dir_all(&directory).unwrap();
     }
 }

@@ -69,7 +69,7 @@ cargo build --release
 ```
 -g, --game <JUEGO>      rise o world (por defecto rise)
     --pid <PID>         pid explícito, si hay más de una instancia corriendo
-    --map <ARCHIVO>     address map concreto; por defecto el más nuevo de data/maps
+    --map <ARCHIVO>     address map concreto; por defecto, el más nuevo que coincida con el juego
     --base <HEX>        base del módulo, si /proc no la expone
     --watch             refresco continuo en lugar de una sola lectura
     --interval <MS>     periodo de refresco en modo --watch (por defecto 500)
@@ -114,8 +114,15 @@ Para añadir un juego: un módulo en `mh-overlay-games` y una variante en `GameK
 
 Los archivos de `data/maps/` vienen de HunterPie (Apache-2.0, ver `NOTICE`) y son el resultado
 de su reverse engineering. Este repositorio no reutiliza su código C#, pero sí esas tablas:
-son la parte cara del problema y ya están resueltas para 17 builds de World, 20 de Rise y 30 de
+son la parte cara del problema y ya están resueltas para 16 builds de World, 19 de Rise y 31 de
 Wilds (Wilds aún sin lector).
+
+Un mapa y una build no son intercambiables: usar el archivo más nuevo contra un juego viejo no
+falla, devuelve basura plausible. Por eso el binario elige el mapa más nuevo cuyo par
+`Address CRC_FUNC_*` + `Instruction CRC_ORIGINAL_*` coincide byte a byte con la memoria del
+juego, y avisa por stderr de la versión elegida. Un mapa que no trae CRC no se puede verificar;
+`--map` sigue permitiendo forzar uno. Los números de los mapas son hexadecimales aunque les
+falte el `0x`, igual que en HunterPie.
 
 Si actualizas un mapa a mano, sube el archivo con el número de versión del ejecutable en el
 nombre. `--map` permite probar uno sin tocar los demás.
@@ -127,7 +134,9 @@ nombre. `--map` permite probar uno sin tocar los demás.
 - **Los nombres de monstruo y de parte no están mapeados**: se muestran ids. Las traducciones
   de HunterPie se descargan en runtime y no están en el repositorio.
 - **World reporta las partes sin nombre** porque su tabla de partes depende de datos por
-  monstruo que aún no se han portado.
+  monstruo que aún no se han portado. Las partes cortables solo muestran la barra de corte.
+- **World solo expone la lista de monstruos desde la build 421652**; los mapas anteriores no
+  definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
 - **Wayland nativo**: el overlay futuro será una ventana X11, que funciona sobre juegos de
   Proton (que ya son XWayland). En Wayland puro haría falta `wlr-layer-shell`.
 - **Online**: leer memoria no modifica el juego, pero ningún método de este tipo tiene garantía

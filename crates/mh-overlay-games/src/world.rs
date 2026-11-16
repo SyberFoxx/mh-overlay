@@ -4,9 +4,14 @@
 //! recorre hasta 128 entradas, el prefijo `em` del modelo identifica a los monstruos grandes
 //! y las partes son arrays de tamaño fijo con dos strides distintos.
 
+use std::collections::HashSet;
+
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
 use crate::model::{Health, Monster, Part};
+
+// Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
+// documenta HunterPie para esta rama del lector.
 
 /// Componentes que el juego puede tener registrados a la vez.
 const MAX_COMPONENTS: usize = 128;
@@ -31,13 +36,18 @@ const NORMAL_PART_STRIDE: u64 = 0x1F8;
 /// Array de partes cortables y su stride.
 const SEVERABLE_PARTS: u64 = 0x1FC8;
 const SEVERABLE_PART_STRIDE: u64 = 0x78;
-const MAX_PARTS: usize = 16;
+/// Ventana donde HunterPie busca las partes cortables: 0x120 * 32 bytes.
+const SEVERABLE_WINDOW: u64 = 0x120 * 32;
+/// Slots de partes normales que se recorren antes de darse por terminado el array.
+const MAX_NORMAL_PARTS: usize = 16;
 /// `MHWMonsterPartStructure`: vida máxima, vida actual e índice.
 const PART_MAX_HEALTH: u64 = 0x0C;
 const PART_HEALTH: u64 = 0x10;
 const PART_INDEX: u64 = 0x6C;
 /// Tope de cordura para descartar lecturas corruptas.
 const MAX_PART_HEALTH: f32 = 10_000_000.0;
+/// Índice de parte máximo creíble; por encima, la lectura está desalineada.
+const MAX_PART_INDEX: u32 = 0x40;
 
 /// Lector de World sobre un proceso ya adjuntado.
 pub struct World<'map> {
@@ -59,10 +69,15 @@ impl<'map> World<'map> {
 
         let components = self.memory.read_pointers(list, MAX_COMPONENTS)?;
         let mut monsters: Vec<Monster> = Vec::new();
+        let mut seen: HashSet<u64> = HashSet::new();
 
         for component in components {
-            if component == 0 || monsters.len() >= MAX_MONSTERS {
+            if component == 0 {
                 continue;
+            }
+
+            if monsters.len() >= MAX_MONSTERS {
+                break;
             }
 
             let Ok(monster) = self.memory.read_u64(component + COMPONENT_MONSTER) else {
@@ -84,10 +99,9 @@ impl<'map> World<'map> {
                 continue;
             }
 
-            if monsters
-                .iter()
-                .any(|known| known.name.as_deref() == Some(&model))
-            {
+            // El puntero identifica la instancia: dos monstruos de la misma especie comparten
+            // ruta de modelo y aun así son dos barras distintas.
+            if !seen.insert(monster) {
                 continue;
             }
 
@@ -102,6 +116,12 @@ impl<'map> World<'map> {
     fn monster(&self, address: u64, model: String) -> Option<Monster> {
         let id = self.memory.read_i32(address + MONSTER_ID).ok()?;
         let health = self.health(address).ok()?;
+
+        // Una vida imposible viene de un desplazamiento desfasado, no de un monstruo.
+        if !health.is_plausible() {
+            return None;
+        }
+
         let mut monster = Monster::new(id, health);
 
         monster.name = Some(model);
@@ -120,7 +140,7 @@ impl<'map> World<'map> {
     }
 
     /// Sin la tabla de partes por monstruo, se reportan las que el juego tiene inicializadas.
-    /// `breakable` es la vida de la parte; `severable` solo existe para las cortables.
+    /// Las normales exponen su vida como `breakable`; las cortables, solo como `severable`.
     fn parts(&self, monster: u64) -> Result<Vec<Part>, MemoryError> {
         let block = self.memory.read_u64(monster + MONSTER_PARTS)?;
         if block == 0 {
@@ -129,18 +149,46 @@ impl<'map> World<'map> {
 
         let mut parts = Vec::new();
 
-        for slot in 0..MAX_PARTS {
+        // Las partes normales son un array contiguo: la primera entrada sin vida marca el
+        // final, no un hueco que haya que saltar.
+        for slot in 0..MAX_NORMAL_PARTS {
             let address = block + NORMAL_PARTS + (slot as u64) * NORMAL_PART_STRIDE;
-            if let Some(part) = self.part(address, false) {
-                parts.push(part);
-            }
+            let Some((index, health)) = self.part(address) else {
+                break;
+            };
+
+            parts.push(Part {
+                index,
+                flinch: None,
+                breakable: Some(health),
+                severable: None,
+            });
         }
 
-        for slot in 0..MAX_PARTS {
-            let address = block + SEVERABLE_PARTS + (slot as u64) * SEVERABLE_PART_STRIDE;
-            if let Some(part) = self.part(address, true) {
-                parts.push(part);
+        // Las cortables viven en otra zona y sus entradas aparecen desplazadas 8 bytes cuando
+        // la referencia inicial es pequeña; HunterPie aplica el mismo ajuste antes de leer.
+        let mut address = block + SEVERABLE_PARTS;
+        let window_end = address + SEVERABLE_WINDOW;
+
+        while address < window_end && parts.len() < MAX_NORMAL_PARTS * 4 {
+            if self
+                .memory
+                .read_u32(address)
+                .is_ok_and(|reference| reference <= 0xA0)
+            {
+                address += 8;
             }
+
+            if let Some((index, health)) = self.part(address) {
+                parts.push(Part {
+                    index,
+                    flinch: None,
+                    breakable: None,
+                    severable: Some(health),
+                });
+            }
+
+            address += SEVERABLE_PART_STRIDE;
         }
 
         // El índice del juego se repite entre las dos listas; se prefiere la entrada cortable,
@@ -151,7 +199,7 @@ impl<'map> World<'map> {
         Ok(parts)
     }
 
-    fn part(&self, address: u64, severable: bool) -> Option<Part> {
+    fn part(&self, address: u64) -> Option<(usize, Health)> {
         let max = self.memory.read_f32(address + PART_MAX_HEALTH).ok()?;
         if !max.is_finite() || max <= 0.0 || max > MAX_PART_HEALTH {
             return None;
@@ -163,13 +211,11 @@ impl<'map> World<'map> {
             return None;
         }
 
-        let index = self.memory.read_u32(address + PART_INDEX).ok()? as usize;
+        let index = self.memory.read_u32(address + PART_INDEX).ok()?;
+        if index > MAX_PART_INDEX {
+            return None;
+        }
 
-        Some(Part {
-            index,
-            flinch: None,
-            breakable: Some(health),
-            severable: severable.then_some(health),
-        })
+        Some((index as usize, health))
     }
 }

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use mh_overlay_games::{GameKind, Monster};
-use mh_overlay_memory::{AddressMap, MemoryError, Process};
+use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process};
 
 #[derive(Parser)]
 #[command(
@@ -22,7 +22,7 @@ struct Arguments {
     #[arg(long, value_name = "PID")]
     pid: Option<i32>,
 
-    /// Address map concreto; por defecto, el más nuevo del juego en data/maps
+    /// Address map concreto; por defecto, el más nuevo compatible de data/maps
     #[arg(long, value_name = "ARCHIVO")]
     map: Option<PathBuf>,
 
@@ -74,31 +74,111 @@ fn run(arguments: &Arguments) -> Result<(), MemoryError> {
     }
 
     let kind = arguments.game.unwrap_or(GameKind::Rise);
-    let map_path = match &arguments.map {
-        Some(path) => path.clone(),
-        None => AddressMap::newest_for_game(kind.map_prefix(), &maps_directory)?,
-    };
 
     let process = match arguments.pid {
         Some(pid) => Process::from_pid(pid, kind.module())?,
         None => Process::find(&[kind.module()])?,
     };
-
-    let mut map = AddressMap::load(&map_path)?;
-    map.set_base(arguments.base.unwrap_or_else(|| process.base()));
     let memory = process.memory();
+    let base = arguments.base.unwrap_or_else(|| process.base());
+
+    let map = match &arguments.map {
+        Some(path) => {
+            let map = load_map(path, base)?;
+            report_validation(path, map.validate(&memory));
+            map
+        }
+        None => select_map(kind, &maps_directory, memory, base)?,
+    };
 
     if !arguments.watch {
-        let monsters = mh_overlay_games::monsters(kind, memory, &map)?;
+        let monsters = read_monsters(kind, memory, &map)?;
         emit(&render(kind, &monsters));
         return Ok(());
     }
 
     loop {
-        let monsters = mh_overlay_games::monsters(kind, memory, &map)?;
+        let monsters = read_monsters(kind, memory, &map)?;
         emit(&format!("\x1b[2J\x1b[H{}", render(kind, &monsters)));
         sleep(Duration::from_millis(arguments.interval));
     }
+}
+
+fn load_map(path: &Path, base: u64) -> Result<AddressMap, MemoryError> {
+    let mut map = AddressMap::load(path)?;
+    map.set_base(base);
+    Ok(map)
+}
+
+/// Elige el mapa más nuevo cuyo CRC coincida con la memoria del juego.
+///
+/// Una build y un mapa no son intercambiables: usar el archivo más nuevo contra un juego viejo
+/// no falla, devuelve basura plausible, que es el peor resultado posible.
+fn select_map(
+    kind: GameKind,
+    directory: &Path,
+    memory: Memory,
+    base: u64,
+) -> Result<AddressMap, MemoryError> {
+    let candidates = AddressMap::candidates_for_game(kind.map_prefix(), directory)?;
+    let mut fallback = None;
+
+    for path in &candidates {
+        let map = load_map(path, base)?;
+        let validation = map.validate(&memory);
+
+        if validation == MapValidation::Verified {
+            report_validation(path, validation);
+            return Ok(map);
+        }
+
+        if fallback.is_none() {
+            fallback = Some((path.clone(), map, validation));
+        }
+    }
+
+    let (path, map, validation) = fallback.ok_or_else(|| MemoryError::NoMapsForGame {
+        game: kind.map_prefix().to_string(),
+        directory: directory.display().to_string(),
+    })?;
+
+    report_validation(&path, validation);
+    Ok(map)
+}
+
+fn report_validation(path: &Path, validation: MapValidation) {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+
+    match validation {
+        MapValidation::Verified => eprintln!("mapa: {name} (versión verificada por CRC)"),
+        MapValidation::Mismatch => eprintln!(
+            "aviso: {name} no coincide con los CRC del juego: es de otra build.\n       \
+             si los números salen mal, pasa --map con el mapa de tu versión."
+        ),
+        MapValidation::Unavailable => {
+            eprintln!("aviso: {name} no trae CRC; no se pudo verificar que corresponda a tu build.")
+        }
+    }
+}
+
+fn read_monsters(
+    kind: GameKind,
+    memory: Memory,
+    map: &AddressMap,
+) -> Result<Vec<Monster>, MemoryError> {
+    mh_overlay_games::monsters(kind, memory, map).inspect_err(|error| {
+        if let MemoryError::MissingKey { key } = error {
+            eprintln!(
+                "aviso: el mapa {} (versión {}) no define '{key}';\n       \
+                 esa build no está soportada por este lector, prueba --map con otra versión.",
+                map.game(),
+                map.version()
+            );
+        }
+    })
 }
 
 fn render(kind: GameKind, monsters: &[Monster]) -> String {

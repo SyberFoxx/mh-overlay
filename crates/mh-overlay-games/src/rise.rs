@@ -82,7 +82,9 @@ impl<'map> Rise<'map> {
             }
 
             match self.monster(pointer) {
-                Ok(monster) => monsters.push(monster),
+                // Una vida imposible viene de un desplazamiento desfasado, no de un monstruo.
+                Ok(monster) if monster.health.is_plausible() => monsters.push(monster),
+                Ok(_) => continue,
                 // Un monstruo despawnando deja punteros a medio limpiar.
                 Err(MemoryError::NullPointer { .. }) => continue,
                 Err(error) => return Err(error),

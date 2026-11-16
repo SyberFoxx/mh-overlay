@@ -95,4 +95,43 @@ mod tests {
 
         assert!(error.to_string().contains("rise, world"));
     }
+
+    #[test]
+    fn the_newest_maps_define_the_keys_each_reader_needs() {
+        use std::path::Path;
+
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/maps");
+
+        let rise_path =
+            AddressMap::newest_for_game(GameKind::Rise.map_prefix(), &directory).unwrap();
+        let rise = AddressMap::load(rise_path).unwrap();
+
+        for key in [
+            "MONSTERS_ADDRESS",
+            "MONSTER_LIST_OFFSETS",
+            "MONSTER_HEALTH_COMPONENT_OFFSETS",
+            "MONSTER_HEALTH_COMPONENT_ENCODED_OFFSETS",
+            "MONSTER_CAPTURE_HEALTH_THRESHOLD",
+            "MONSTER_AILMENTS_OFFSETS",
+            "MONSTER_FLINCH_HEALTH_COMPONENT_OFFSETS",
+            "MONSTER_BREAK_HEALTH_COMPONENT_OFFSETS",
+            "MONSTER_SEVER_HEALTH_COMPONENT_OFFSETS",
+        ] {
+            assert!(
+                rise.address(key).is_ok() || rise.offsets(key).is_ok(),
+                "el mapa más nuevo de Rise no define '{key}'"
+            );
+        }
+
+        let world_path =
+            AddressMap::newest_for_game(GameKind::World.map_prefix(), &directory).unwrap();
+        let world = AddressMap::load(world_path).unwrap();
+
+        for key in ["MONSTER_LIST_ADDRESS", "MONSTER_LIST_OFFSETS"] {
+            assert!(
+                world.address(key).is_ok() || world.offsets(key).is_ok(),
+                "el mapa más nuevo de World no define '{key}'"
+            );
+        }
+    }
 }
