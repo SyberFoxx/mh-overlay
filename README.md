@@ -27,6 +27,7 @@ id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Nombres de monstruo y de parte | ⏳ | ⏳ |
 | Overlay gráfico (ventana X11) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
+| Editor de ajustes | ✅ probado | ✅ probado |
 
 Leyenda: ✅ hecho · ⚠️ parcial · ⏳ pendiente
 
@@ -73,6 +74,7 @@ cargo build --release
     --map <ARCHIVO>     address map concreto; por defecto, el más nuevo que coincida con el juego
     --base <HEX>        base del módulo, si /proc no la expone
     --overlay           dibujar el panel encima del juego en una ventana X11
+    --settings          abrir el editor de ajustes (no necesita el juego)
     --position <POS>    top-left, top-right, bottom-left, bottom-right o center
     --config <ARCHIVO>  configuración a usar (por defecto ~/.config/mh-overlay/config.toml)
     --init-config       escribir la configuración documentada y salir
@@ -149,6 +151,23 @@ severable = "#d69a4f"
 Los colores admiten `#rgb`, `#rrggbb` y `#rrggbbaa`. El alfa se compone sobre negro antes de
 subir la imagen, así que el panel se ve igual con o sin compositor.
 
+### Editor de ajustes
+
+```bash
+./target/release/mh-overlay --settings
+```
+
+Una ventana normal, con ratón y teclado, que edita lo que más se toca a mano: posición,
+márgenes, escala, monstruos a la vez, refresco y los cuatro interruptores (partes, estados,
+clics que atraviesan, ocultar sin monstruos). Cada cambio se guarda en el TOML al instante, así
+que un overlay que esté corriendo lo aplica en el siguiente refresco sin reiniciar nada. Con el
+ratón se pulsa `-`/`+` o el interruptor; con el teclado, `arriba`/`abajo` eligen fila,
+`izquierda`/`derecha` cambian el valor y `Esc` cierra.
+
+Los colores no están en el editor: son cinco selectores hexadecimales que se tocan una vez y se
+olvidan, y meterlos en la misma ventana sin un selector de color de verdad habría sido peor que
+editarlos en el TOML.
+
 ## Arquitectura
 
 ```
@@ -210,7 +229,7 @@ nombre. `--map` permite probar uno sin tocar los demás.
   son XWayland). En Wayland puro haría falta `wlr-layer-shell` y no está soportado.
 - **El panel es opaco**: la translucidez del TOML se compone sobre negro en vez de dejar ver el
   juego a través, porque debajo de un juego a pantalla completa no hay compositor garantizado.
-- **Sin editor gráfico todavía**: la configuración se edita en el TOML y se aplica en caliente.
+- **Los colores se editan solo en el TOML**: el editor cubre posición, tamaño y visibilidad.
 - **Online**: leer memoria no modifica el juego, pero ningún método de este tipo tiene garantía
   del publisher. Úsalo bajo tu criterio.
 

@@ -4,6 +4,7 @@
 //! [`window`] solo la sube a una ventana. Así el diseño del panel se prueba sin servidor X.
 
 pub mod canvas;
+pub mod editor;
 pub mod text;
 pub mod view;
 pub mod window;

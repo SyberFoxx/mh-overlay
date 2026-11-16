@@ -10,13 +10,19 @@ use std::error::Error;
 
 use mh_overlay_config::Config;
 use mh_overlay_games::{Ailment, Health, Monster, Part};
+use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
 use mh_overlay_ui::{view, window::OverlayWindow};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::default();
     let text = Text::bundled()?;
-    let canvas = view::render(&config, &text, &sample(), None);
+    let editor = std::env::args().nth(2).as_deref() == Some("editor");
+    let canvas = if editor {
+        Editor::new(config.clone()).view(&text, "~/.config/mh-overlay/config.toml")
+    } else {
+        view::render(&config, &text, &sample(), None)
+    };
 
     let Some(path) = std::env::args().nth(1) else {
         let mut window = OverlayWindow::open("mh-overlay · vista previa")?;

@@ -4,7 +4,10 @@
 //! forma (`SHAPE`) recorta las esquinas redondeadas y, con el mismo mecanismo, deja la región
 //! de entrada vacía para que los clics lleguen al juego.
 
+use std::collections::HashMap;
+
 use x11rb::connection::{Connection, RequestConnection};
+use x11rb::protocol::Event;
 use x11rb::protocol::shape::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{
     AtomEnum, ClipOrdering, ConnectionExt as _, CreateWindowAux, EventMask, Gcontext, ImageFormat,
@@ -16,6 +19,7 @@ use x11rb::wrapper::ConnectionExt as _;
 
 use crate::OverlayError;
 use crate::canvas::{Canvas, Rect, rounded_rect_coverage};
+use crate::editor::Key;
 
 const WINDOW_TYPE_UTILITY: &str = "_NET_WM_WINDOW_TYPE_UTILITY";
 const NET_WM_WINDOW_TYPE: &str = "_NET_WM_WINDOW_TYPE";
@@ -367,6 +371,257 @@ impl Atoms {
             skip_pager: intern(NET_WM_STATE_SKIP_PAGER)?,
             name: intern(NET_WM_NAME)?,
             utf8_string: intern(UTF8_STRING)?,
+        })
+    }
+}
+
+/// Lo que la ventana de ajustes entrega a quien la conduce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiEvent {
+    Click {
+        x: i32,
+        y: i32,
+    },
+    Move {
+        x: i32,
+        y: i32,
+    },
+    Key(Key),
+    /// El gestor de ventanas pidió cerrar, o la ventana desapareció.
+    Close,
+    /// Eventos que el editor no usa (exposición, configuración, foco…).
+    Ignored,
+}
+
+/// Ventana normal con entrada: el editor de ajustes sí recibe clics y teclas.
+///
+/// Es decorada y enfocable, al contrario que el panel: editar números es una tarea de ratón.
+pub struct SettingsWindow {
+    connection: RustConnection,
+    window: Window,
+    gc: Gcontext,
+    screen: usize,
+    size: (u32, u32),
+    keysyms: HashMap<u8, u32>,
+    protocols: u32,
+    delete: u32,
+}
+
+const KEY_ESCAPE: u32 = 0xff1b;
+const KEY_RETURN: u32 = 0xff0d;
+const KEY_SPACE: u32 = 0x0020;
+const KEY_UP: u32 = 0xff52;
+const KEY_DOWN: u32 = 0xff54;
+const KEY_LEFT: u32 = 0xff51;
+const KEY_RIGHT: u32 = 0xff53;
+
+impl SettingsWindow {
+    pub fn open(title: &str) -> Result<Self, OverlayError> {
+        let (connection, screen) =
+            x11rb::connect(None).map_err(|source| OverlayError::Connect { source })?;
+        let root = connection.setup().roots[screen].root;
+        let depth = connection.setup().roots[screen].root_depth;
+        let intern = |name: &str| -> Result<u32, OverlayError> {
+            connection
+                .intern_atom(false, name.as_bytes())
+                .map_err(|source| OverlayError::X11 { source })?
+                .reply()
+                .map_err(|source| OverlayError::X11Reply { source })
+                .map(|reply| reply.atom)
+        };
+
+        let window = connection
+            .generate_id()
+            .map_err(|source| OverlayError::X11Id { source })?;
+
+        connection
+            .create_window(
+                depth,
+                window,
+                root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new().background_pixel(0).event_mask(
+                    EventMask::EXPOSURE
+                        | EventMask::BUTTON_PRESS
+                        | EventMask::POINTER_MOTION
+                        | EventMask::KEY_PRESS
+                        | EventMask::STRUCTURE_NOTIFY,
+                ),
+            )
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        let name = intern(NET_WM_NAME)?;
+        let utf8 = intern(UTF8_STRING)?;
+        let wm_class = intern("WM_CLASS")?;
+        let protocols = intern("WM_PROTOCOLS")?;
+        let delete = intern("WM_DELETE_WINDOW")?;
+
+        connection
+            .change_property8(PropMode::REPLACE, window, name, utf8, title.as_bytes())
+            .map_err(|source| OverlayError::X11 { source })?;
+        connection
+            .change_property8(
+                PropMode::REPLACE,
+                window,
+                AtomEnum::WM_NAME,
+                AtomEnum::STRING,
+                title.as_bytes(),
+            )
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        // WM_CLASS son dos cadenas terminadas en NUL: instancia y clase.
+        let mut class = b"mh-overlay\0MHOverlay\0".to_vec();
+        class.pop();
+        connection
+            .change_property8(
+                PropMode::REPLACE,
+                window,
+                wm_class,
+                AtomEnum::STRING,
+                &class,
+            )
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        connection
+            .change_property32(
+                PropMode::REPLACE,
+                window,
+                protocols,
+                AtomEnum::ATOM,
+                &[delete],
+            )
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        let setup = connection.setup();
+        let mapping = connection
+            .get_keyboard_mapping(setup.min_keycode, setup.max_keycode - setup.min_keycode + 1)
+            .map_err(|source| OverlayError::X11 { source })?
+            .reply()
+            .map_err(|source| OverlayError::X11Reply { source })?;
+
+        let per_keycode = usize::from(mapping.keysyms_per_keycode);
+        let mut keysyms = HashMap::new();
+
+        for (index, chunk) in mapping.keysyms.chunks(per_keycode.max(1)).enumerate() {
+            let keycode = setup.min_keycode + index as u8;
+
+            if let Some(keysym) = chunk.iter().find(|keysym| **keysym != 0) {
+                keysyms.insert(keycode, *keysym);
+            }
+        }
+
+        let gc = connection
+            .generate_id()
+            .map_err(|source| OverlayError::X11Id { source })?;
+        connection
+            .create_gc(gc, window, &Default::default())
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        connection
+            .map_window(window)
+            .map_err(|source| OverlayError::X11 { source })?;
+        connection
+            .flush()
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        Ok(Self {
+            connection,
+            window,
+            gc,
+            screen,
+            size: (1, 1),
+            keysyms,
+            protocols,
+            delete,
+        })
+    }
+
+    pub fn screen_size(&self) -> (u32, u32) {
+        let screen = &self.connection.setup().roots[self.screen];
+        (
+            u32::from(screen.width_in_pixels),
+            u32::from(screen.height_in_pixels),
+        )
+    }
+
+    pub fn present(&mut self, canvas: &Canvas) -> Result<(), OverlayError> {
+        let size = (canvas.width(), canvas.height());
+
+        if size != self.size {
+            self.connection
+                .configure_window(
+                    self.window,
+                    &x11rb::protocol::xproto::ConfigureWindowAux::new()
+                        .width(u32::from(u16::try_from(size.0).unwrap_or(u16::MAX)))
+                        .height(u32::from(u16::try_from(size.1).unwrap_or(u16::MAX))),
+                )
+                .map_err(|source| OverlayError::X11 { source })?;
+            self.size = size;
+        }
+
+        self.connection
+            .put_image(
+                ImageFormat::Z_PIXMAP,
+                self.window,
+                self.gc,
+                u16::try_from(size.0).unwrap_or(u16::MAX),
+                u16::try_from(size.1).unwrap_or(u16::MAX),
+                0,
+                0,
+                0,
+                self.connection.setup().roots[self.screen].root_depth,
+                &canvas.to_pixmap_bytes(),
+            )
+            .map_err(|source| OverlayError::X11 { source })?;
+        self.connection
+            .flush()
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        Ok(())
+    }
+
+    /// Espera un evento y lo traduce a algo que el editor entiende.
+    pub fn next_event(&self) -> Result<UiEvent, OverlayError> {
+        let event = self
+            .connection
+            .wait_for_event()
+            .map_err(|source| OverlayError::X11 { source })?;
+
+        Ok(match event {
+            Event::ButtonPress(press) => UiEvent::Click {
+                x: i32::from(press.event_x),
+                y: i32::from(press.event_y),
+            },
+            Event::MotionNotify(motion) => UiEvent::Move {
+                x: i32::from(motion.event_x),
+                y: i32::from(motion.event_y),
+            },
+            Event::KeyPress(press) => match self.keysyms.get(&press.detail).copied() {
+                Some(KEY_UP) => UiEvent::Key(Key::Up),
+                Some(KEY_DOWN) => UiEvent::Key(Key::Down),
+                Some(KEY_LEFT) => UiEvent::Key(Key::Left),
+                Some(KEY_RIGHT) => UiEvent::Key(Key::Right),
+                Some(KEY_RETURN) | Some(KEY_SPACE) => UiEvent::Key(Key::Toggle),
+                Some(KEY_ESCAPE) => UiEvent::Close,
+                _ => UiEvent::Ignored,
+            },
+            Event::ClientMessage(message) => {
+                if message.type_ == self.protocols
+                    && message.data.as_data32().first() == Some(&self.delete)
+                {
+                    UiEvent::Close
+                } else {
+                    UiEvent::Ignored
+                }
+            }
+            Event::DestroyNotify(_) => UiEvent::Close,
+            _ => UiEvent::Ignored,
         })
     }
 }

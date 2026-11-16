@@ -9,8 +9,9 @@ use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
 use mh_overlay_games::{GameKind, Monster};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process};
 use mh_overlay_ui::OverlayError;
+use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
-use mh_overlay_ui::window::OverlayWindow;
+use mh_overlay_ui::window::{OverlayWindow, SettingsWindow, UiEvent};
 
 /// Cualquiera de las capas puede fallar al arrancar; la CLI las presenta igual.
 #[derive(Debug, thiserror::Error)]
@@ -53,6 +54,10 @@ struct Arguments {
     /// Dibujar el panel sobre el juego en una ventana X11
     #[arg(long)]
     overlay: bool,
+
+    /// Abrir el editor de ajustes; no necesita el juego abierto
+    #[arg(long)]
+    settings: bool,
 
     /// Periodo de refresco en milisegundos; por defecto, el del archivo de configuración
     #[arg(long, value_name = "MS")]
@@ -117,6 +122,11 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
 
     let loaded = Config::load_or_default(&config_path)?;
     let config = configured(&config_path, loaded, arguments)?;
+
+    if arguments.settings {
+        return run_settings(&config_path, config);
+    }
+
     let kind = config.game_kind()?;
 
     let process = match arguments.pid {
@@ -152,6 +162,44 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
     }
 }
 
+/// Editor de ajustes: guarda cada cambio en el TOML, que un overlay en marcha relee solo.
+fn run_settings(config_path: &Path, config: Config) -> Result<(), AppError> {
+    let text = Text::bundled()?;
+    let mut window = SettingsWindow::open("mh-overlay · ajustes")?;
+    let mut editor = Editor::new(config);
+    let label = display_path(config_path);
+
+    loop {
+        window.present(&editor.view(&text, &label))?;
+
+        let changed = match window.next_event()? {
+            UiEvent::Click { x, y } => editor.click(x, y),
+            UiEvent::Move { x, y } => {
+                editor.motion(x, y);
+                false
+            }
+            UiEvent::Key(key) => editor.key(key),
+            UiEvent::Close => return Ok(()),
+            UiEvent::Ignored => false,
+        };
+
+        if changed && let Err(error) = editor.config().save(config_path) {
+            eprintln!("aviso: {error}");
+        }
+    }
+}
+
+/// La ruta con `~` delante si cuelga del home, para que quepa en la ventana.
+fn display_path(path: &Path) -> String {
+    if let Some(home) = std::env::var_os("HOME")
+        && let Ok(rest) = path.strip_prefix(Path::new(&home))
+    {
+        return format!("~/{}", rest.display());
+    }
+
+    path.display().to_string()
+}
+
 /// Escribe la plantilla documentada y no toca un archivo que ya existe.
 fn init_config(path: &Path) -> Result<(), AppError> {
     if path.exists() {
@@ -174,7 +222,9 @@ fn configured(
 
     // Con el archivo ausente se escribe la plantilla: así el usuario tiene algo que editar con
     // los valores que de verdad están en uso, en vez de buscarlos en la documentación.
-    if loaded.origin == Origin::Defaults && (arguments.overlay || arguments.watch) {
+    if loaded.origin == Origin::Defaults
+        && (arguments.overlay || arguments.watch || arguments.settings)
+    {
         match Config::write_template(config_path) {
             Ok(()) => eprintln!("configuración creada en {}", config_path.display()),
             Err(error) => eprintln!("aviso: {error}"),
