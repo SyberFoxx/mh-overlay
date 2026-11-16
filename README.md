@@ -192,9 +192,16 @@ interruptores y todos los colores con un selector de color real, con el panel de
 lado: lo que ves es lo que se dibuja. Los cambios se guardan solos en el TOML en cuanto sueltas
 el control, así que un overlay abierto los aplica en el siguiente refresco.
 
+El juego se cambia desde la barra superior, sin pasar por Ajustes, y en «Mapa» puedes elegir a
+mano cualquiera de los `.map` de `data/maps` en vez de dejar que se use el más nuevo: es la
+salida cuando la build del juego es más nueva que el último mapa y el CRC no coincide. Con
+`--game` y `--map` el hub arranca ya apuntando a ese juego y ese archivo, y esos dos flags **no**
+se guardan en el TOML: son de la ejecución, no de la configuración.
+
 El hub necesita OpenGL y una sesión X11 o Wayland; el panel sobre el juego **no**: ese sigue
 siendo el lienzo propio con X11 puro, para no depender de GL ni de un compositor encima del
-juego.
+juego. En Arch, `mesa` ya trae `swrast`, así que funciona incluso sin aceleración; si la ventana
+falla al abrir, el error dice qué falta y el panel sigue disponible con `--overlay`.
 
 ## Arquitectura
 

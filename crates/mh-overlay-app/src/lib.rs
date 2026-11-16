@@ -2,36 +2,63 @@
 //!
 //! El panel sobre el juego se sigue dibujando con el lienzo de `mh-overlay-ui`, que no depende
 //! de GL ni de un compositor. Esta ventana cubre lo que no cabe en una tira: saber por qué no
-//! se lee la memoria y ajustar colores y disposición viendo el resultado antes de aplicarlo.
+//! se lee la memoria, elegir el mapa cuando el CRC no coincide y ajustar colores y disposición
+//! viendo el resultado antes de aplicarlo.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use mh_overlay_config::{Color, Config, Position};
+use mh_overlay_config::{Color, Config, OverlaySection, Position, StyleSection};
 use mh_overlay_games::{Ailment, GameKind, Health, Hunt, Monster, Part, Player, Snapshot};
-use mh_overlay_memory::{AddressMap, MapValidation, Process, maps_directory};
+use mh_overlay_memory::{
+    AddressMap, MapValidation, Memory, MemoryError, Process, SelectedMap, maps_directory,
+};
 use mh_overlay_ui::OverlayError;
 use mh_overlay_ui::text::Text;
 use mh_overlay_ui::view;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("no se pudo abrir la ventana del hub: {0}")]
+    #[error(
+        "no se pudo abrir la ventana del hub: {0}\n\n\
+         pista: el hub necesita OpenGL (Mesa o el driver de tu tarjeta) y una sesión X11 o \
+         Wayland. El panel sobre el juego no lo necesita: `mh-overlay --overlay` sigue \
+         funcionando sin GL."
+    )]
     Window(#[from] eframe::Error),
+    #[error(
+        "no hay pantalla: define DISPLAY o WAYLAND_DISPLAY. El hub es una ventana normal; \
+         para leer sin ventana usa `mh-overlay --watch`."
+    )]
+    NoDisplay,
     #[error(transparent)]
     Overlay(#[from] OverlayError),
     #[error("no se pudo localizar data/maps: {0}")]
-    Maps(#[from] mh_overlay_memory::MemoryError),
+    Maps(#[from] MemoryError),
 }
 
 /// Abre el hub con la configuración ya cargada y la guarda en `config_path`.
-pub fn run(config_path: PathBuf, config: Config) -> Result<(), AppError> {
+///
+/// `initial_map` fuerza un `.map` concreto (el `--map` de la CLI); `None` elige el más nuevo que
+/// verifique contra la build en curso.
+pub fn run(
+    config_path: PathBuf,
+    config: Config,
+    initial_map: Option<PathBuf>,
+) -> Result<(), AppError> {
+    let has_display =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+
+    if !has_display {
+        return Err(AppError::NoDisplay);
+    }
+
     let text = Text::bundled()?;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([920.0, 660.0])
-            .with_min_inner_size([640.0, 480.0])
+            .with_inner_size([960.0, 680.0])
+            .with_min_inner_size([680.0, 500.0])
             .with_title("mh-overlay · hub"),
         ..Default::default()
     };
@@ -45,6 +72,7 @@ pub fn run(config_path: PathBuf, config: Config) -> Result<(), AppError> {
                 config,
                 text,
                 maps_directory().ok(),
+                initial_map,
             )))
         }),
     )
@@ -71,6 +99,17 @@ struct Status {
     checked_at: Option<Instant>,
 }
 
+/// Proceso y mapa ya resueltos, para no volver a parsear y validar cada `.map` en cada refresco:
+/// con 100 ms de intervalo eso sería releer todos los archivos cinco veces por segundo.
+struct Attachment {
+    pid: i32,
+    base: u64,
+    path: PathBuf,
+    from_auto: bool,
+    map: AddressMap,
+    validation: MapValidation,
+}
+
 struct Hub {
     config_path: PathBuf,
     config: Config,
@@ -78,6 +117,10 @@ struct Hub {
     maps_directory: Option<PathBuf>,
     tab: Tab,
     status: Status,
+    attachment: Option<Attachment>,
+    /// `.map` elegido a mano; `None` es “el más nuevo que verifique”.
+    map_override: Option<PathBuf>,
+    maps: Vec<PathBuf>,
     /// `None` fuerza una lectura en el siguiente fotograma (al arrancar o al cambiar de juego).
     last_refresh: Option<Instant>,
     last_saved: Option<Instant>,
@@ -94,14 +137,18 @@ impl Hub {
         config: Config,
         text: Text,
         maps_directory: Option<PathBuf>,
+        map_override: Option<PathBuf>,
     ) -> Self {
-        Self {
+        let mut hub = Self {
             config_path,
             config,
             text,
             maps_directory,
             tab: Tab::Diagnostics,
             status: Status::default(),
+            attachment: None,
+            map_override,
+            maps: Vec::new(),
             last_refresh: None,
             last_saved: None,
             save_error: None,
@@ -109,22 +156,83 @@ impl Hub {
             preview: None,
             preview_size: egui::Vec2::ZERO,
             preview_stale: true,
-        }
+        };
+
+        hub.refresh_maps();
+        hub
     }
 
     fn game(&self) -> GameKind {
         self.config.game_kind().unwrap_or(GameKind::Rise)
     }
 
-    fn probe(&self) -> Status {
+    fn set_game(&mut self, kind: GameKind) {
+        if self.game() == kind {
+            return;
+        }
+
+        self.config.game.kind = kind.to_string();
+        self.map_override = None;
+        self.attachment = None;
+        self.status = Status::default();
+        self.refresh_maps();
+        self.dirty = true;
+        self.last_refresh = None;
+    }
+
+    fn refresh_maps(&mut self) {
+        self.maps = self
+            .maps_directory
+            .as_deref()
+            .and_then(|directory| {
+                AddressMap::candidates_for_game(self.game().map_prefix(), directory).ok()
+            })
+            .unwrap_or_default();
+
+        // Un mapa de World no sirve para Rise: al cambiar de juego se descarta el elegido.
+        if let Some(path) = self.map_override.clone()
+            && !self.maps.contains(&path)
+        {
+            self.map_override = None;
+            self.attachment = None;
+        }
+    }
+
+    fn select_map(&self, memory: &Memory, base: u64) -> Result<SelectedMap, MemoryError> {
+        if let Some(path) = &self.map_override {
+            let mut map = AddressMap::load(path)?;
+            map.set_base(base);
+            let validation = map.validate(memory);
+
+            return Ok(SelectedMap {
+                path: path.clone(),
+                map,
+                validation,
+            });
+        }
+
+        let directory =
+            self.maps_directory
+                .as_deref()
+                .ok_or_else(|| MemoryError::NoMapsForGame {
+                    game: self.game().map_prefix().to_string(),
+                    directory: "data/maps".to_string(),
+                })?;
+
+        AddressMap::select_for_game(self.game().map_prefix(), directory, memory, base)
+    }
+
+    fn probe(&mut self) -> Status {
         let mut status = Status {
             checked_at: Some(Instant::now()),
             ..Default::default()
         };
+        let kind = self.game();
 
-        let process = match Process::find(&[self.game().module()]) {
+        let process = match Process::find(&[kind.module()]) {
             Ok(process) => process,
             Err(error) => {
+                self.attachment = None;
                 status.error = Some(error.to_string());
                 return status;
             }
@@ -134,35 +242,50 @@ impl Hub {
         status.base = Some(process.base());
 
         let memory = process.memory();
-        let directory = match &self.maps_directory {
-            Some(directory) => directory,
-            None => {
-                status.error = Some("no se encontró data/maps".to_string());
-                return status;
+        let base = process.base();
+
+        let reusable = self.attachment.as_ref().is_some_and(|attachment| {
+            attachment.pid == process.pid()
+                && attachment.base == base
+                && match &self.map_override {
+                    Some(path) => !attachment.from_auto && &attachment.path == path,
+                    None => attachment.from_auto,
+                }
+        });
+
+        if !reusable {
+            match self.select_map(&memory, base) {
+                Ok(selected) => {
+                    self.attachment = Some(Attachment {
+                        pid: process.pid(),
+                        base,
+                        path: selected.path,
+                        from_auto: self.map_override.is_none(),
+                        map: selected.map,
+                        validation: selected.validation,
+                    });
+                }
+                Err(error) => {
+                    self.attachment = None;
+                    status.error = Some(error.to_string());
+                    return status;
+                }
             }
+        }
+
+        let Some(attachment) = &self.attachment else {
+            status.error = Some("no hay mapa cargado".to_string());
+            return status;
         };
 
-        let selected = match AddressMap::select_for_game(
-            self.game().map_prefix(),
-            directory,
-            &memory,
-            process.base(),
-        ) {
-            Ok(selected) => selected,
-            Err(error) => {
-                status.error = Some(error.to_string());
-                return status;
-            }
-        };
-
-        status.map = selected
+        status.map = attachment
             .path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned());
-        status.validation = Some(selected.validation);
+        status.validation = Some(attachment.validation);
 
         let started = Instant::now();
-        match mh_overlay_games::snapshot(self.game(), memory, &selected.map) {
+        match mh_overlay_games::snapshot(kind, memory, &attachment.map) {
             Ok(snapshot) => {
                 status.snapshot = snapshot;
                 status.read_ms = Some(started.elapsed().as_millis());
@@ -221,20 +344,38 @@ impl Hub {
         ui.horizontal(|ui| {
             ui.heading("mh-overlay");
             ui.separator();
+
+            let mut choice = self.game();
+            egui::ComboBox::from_id_salt("juego-barra")
+                .width(190.0)
+                .selected_text(display_game(choice))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut choice, GameKind::Rise, display_game(GameKind::Rise));
+                    ui.selectable_value(
+                        &mut choice,
+                        GameKind::World,
+                        display_game(GameKind::World),
+                    );
+                });
+            if choice != self.game() {
+                self.set_game(choice);
+            }
+
+            ui.separator();
             ui.selectable_value(&mut self.tab, Tab::Diagnostics, "Diagnóstico");
             ui.selectable_value(&mut self.tab, Tab::Settings, "Ajustes");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let state = match (&self.status.error, self.status.pid) {
-                    (None, Some(_)) => {
-                        egui::RichText::new("● leyendo").color(egui::Color32::LIGHT_GREEN)
-                    }
-                    (Some(_), _) => {
-                        egui::RichText::new("● sin juego").color(egui::Color32::LIGHT_RED)
-                    }
-                    _ => egui::RichText::new("● sin leer").color(egui::Color32::GRAY),
+                let (state, color) = match (&self.status.error, self.status.pid) {
+                    (None, Some(_)) => ("● leyendo", egui::Color32::LIGHT_GREEN),
+                    (Some(_), Some(_)) => (
+                        "● error de lectura",
+                        egui::Color32::from_rgb(0xe6, 0xb4, 0x5e),
+                    ),
+                    (Some(_), None) => ("● sin juego", egui::Color32::GRAY),
+                    _ => ("● sin leer", egui::Color32::GRAY),
                 };
-                ui.label(state);
+                ui.label(egui::RichText::new(state).color(color));
                 if ui.button("Actualizar ahora").clicked() {
                     self.refresh();
                 }
@@ -242,8 +383,42 @@ impl Hub {
         });
     }
 
+    fn map_row(&mut self, ui: &mut egui::Ui) {
+        ui.label("Mapa");
+
+        let mut choice = self.map_override.clone();
+        let maps = self.maps.clone();
+        let auto_label = "Automático (el más nuevo que verifique)";
+
+        egui::ComboBox::from_id_salt("mapa")
+            .width(320.0)
+            .selected_text(match &choice {
+                Some(path) => file_name(path),
+                None => auto_label.to_string(),
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut choice, None, auto_label);
+
+                for path in &maps {
+                    ui.selectable_value(&mut choice, Some(path.clone()), file_name(path));
+                }
+            });
+
+        if choice != self.map_override {
+            self.map_override = choice;
+            self.attachment = None;
+            self.last_refresh = None;
+        }
+    }
+
     fn diagnostics(&mut self, ui: &mut egui::Ui) {
-        let status = &self.status;
+        if self.status.checked_at.is_none() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("leyendo…");
+            });
+            ui.add_space(8.0);
+        }
 
         egui::Grid::new("diagnostico")
             .num_columns(2)
@@ -258,41 +433,35 @@ impl Hub {
                 ui.end_row();
 
                 ui.label("Proceso");
-                match (status.pid, status.base) {
+                match (self.status.pid, self.status.base) {
                     (Some(pid), Some(base)) => {
-                        ui.label(format!("pid {pid} · base módulo 0x{base:08X}"))
+                        ui.label(format!("pid {pid} · base módulo 0x{base:08X}"));
                     }
-                    _ => ui.label("no encontrado").on_hover_text(
-                        "es normal si el juego está cerrado; bajo Proton el ejecutable es un proceso normal",
-                    ),
-                };
+                    _ => {
+                        ui.label("no encontrado").on_hover_text(
+                            "es normal si el juego está cerrado; bajo Proton el juego es un \
+                             proceso normal de Linux",
+                        );
+                    }
+                }
                 ui.end_row();
 
-                ui.label("Mapa");
-                ui.label(status.map.clone().unwrap_or_else(|| "—".to_string()));
+                self.map_row(ui);
                 ui.end_row();
 
                 ui.label("Verificación");
-                ui.label(match status.validation {
-                    Some(MapValidation::Verified) => {
-                        "CRC verificado: el mapa es de esta build".to_string()
-                    }
-                    Some(MapValidation::Mismatch) => {
-                        "el mapa NO coincide con esta build: los números serán basura".to_string()
-                    }
-                    Some(MapValidation::Unavailable) => {
-                        "sin CRC: no se puede verificar la build".to_string()
-                    }
-                    None => "—".to_string(),
-                });
+                ui.label(validation_text(self.status.validation));
                 ui.end_row();
 
                 ui.label("Monstruos");
-                ui.label(format!("{} en la zona", status.snapshot.monsters.len()));
+                ui.label(format!(
+                    "{} en la zona",
+                    self.status.snapshot.monsters.len()
+                ));
                 ui.end_row();
 
                 ui.label("Jugador");
-                ui.label(match &status.snapshot.player {
+                ui.label(match &self.status.snapshot.player {
                     Some(player) => format!(
                         "vida {:.0} % · aguante {:.0} %",
                         player.health.percent(),
@@ -303,7 +472,7 @@ impl Hub {
                 ui.end_row();
 
                 ui.label("Cacería");
-                ui.label(match &status.snapshot.hunt {
+                ui.label(match &self.status.snapshot.hunt {
                     Some(hunt) => format!(
                         "{} restante · vidas {}/{}",
                         hunt.time_label(),
@@ -315,7 +484,7 @@ impl Hub {
                 ui.end_row();
 
                 ui.label("Última lectura");
-                ui.label(match (status.checked_at, status.read_ms) {
+                ui.label(match (self.status.checked_at, self.status.read_ms) {
                     (Some(at), Some(ms)) => {
                         format!("hace {} · {} ms", seconds_ago(at.elapsed()), ms)
                     }
@@ -325,9 +494,19 @@ impl Hub {
                 ui.end_row();
             });
 
-        if let Some(error) = &status.error {
+        if let Some(error) = &self.status.error {
             ui.add_space(8.0);
             ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+
+        if self.status.validation == Some(MapValidation::Mismatch) {
+            ui.add_space(8.0);
+            ui.colored_label(
+                egui::Color32::from_rgb(0xe6, 0xb4, 0x5e),
+                "El mapa elegido no coincide con la build en curso: los números que salgan \
+                 serán basura plausible. Elige a mano el mapa de tu versión en «Mapa» o pon el \
+                 archivo correcto en data/maps.",
+            );
         }
 
         ui.add_space(12.0);
@@ -350,11 +529,11 @@ impl Hub {
         ui.heading("Juego");
         ui.horizontal(|ui| {
             for kind in [GameKind::Rise, GameKind::World] {
-                let selected = self.game() == kind;
-                if ui.selectable_label(selected, display_game(kind)).clicked() && !selected {
-                    self.config.game.kind = kind.to_string();
-                    self.status = Status::default();
-                    self.last_refresh = None;
+                if ui
+                    .selectable_label(self.game() == kind, display_game(kind))
+                    .clicked()
+                {
+                    self.set_game(kind);
                 }
             }
 
@@ -375,6 +554,7 @@ impl Hub {
             .show(ui, |ui| {
                 ui.label("Anclaje");
                 egui::ComboBox::from_id_salt("posicion")
+                    .width(220.0)
                     .selected_text(display_position(self.config.overlay.position))
                     .show_ui(ui, |ui| {
                         for position in [
@@ -460,6 +640,14 @@ impl Hub {
             );
         });
 
+        ui.add_space(8.0);
+        if ui.button("Restaurar panel y colores por defecto").clicked() {
+            self.config.overlay = OverlaySection::default();
+            self.config.style = StyleSection::default();
+            self.dirty = true;
+            self.preview_stale = true;
+        }
+
         if self.config != before {
             self.dirty = true;
             self.preview_stale = true;
@@ -467,7 +655,7 @@ impl Hub {
 
         ui.add_space(12.0);
         ui.separator();
-        ui.horizontal(|ui| match (&self.save_error, self.last_saved) {
+        ui.horizontal_wrapped(|ui| match (&self.save_error, self.last_saved) {
             (Some(error), _) => {
                 ui.colored_label(egui::Color32::LIGHT_RED, error);
             }
@@ -497,10 +685,11 @@ impl Hub {
         ui.add_space(8.0);
 
         let Some(texture) = &self.preview else {
+            ui.spinner();
             return;
         };
 
-        let available = ui.available_width();
+        let available = (ui.available_width() - 8.0).max(80.0);
         let scale = (available / self.preview_size.x).clamp(0.2, 1.0);
         ui.image(egui::load::SizedTexture::new(
             texture.id(),
@@ -535,13 +724,15 @@ impl eframe::App for Hub {
             ui.add_space(4.0);
         });
 
-        egui::Panel::right("preview")
-            .resizable(true)
-            .default_size(380.0)
-            .show(ui, |ui| {
-                ui.add_space(8.0);
-                self.preview(ui);
-            });
+        if self.tab == Tab::Settings {
+            egui::Panel::right("preview")
+                .resizable(true)
+                .default_size(380.0)
+                .show(ui, |ui| {
+                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical().show(ui, |ui| self.preview(ui));
+                });
+        }
 
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
@@ -566,6 +757,21 @@ fn color_row(ui: &mut egui::Ui, label: &str, color: &mut Color) {
         };
     }
     ui.end_row();
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn validation_text(validation: Option<MapValidation>) -> &'static str {
+    match validation {
+        Some(MapValidation::Verified) => "CRC verificado: el mapa es de esta build",
+        Some(MapValidation::Mismatch) => "el mapa NO coincide con esta build",
+        Some(MapValidation::Unavailable) => "sin CRC: no se puede verificar la build",
+        None => "—",
+    }
 }
 
 fn display_game(kind: GameKind) -> &'static str {
@@ -666,5 +872,13 @@ mod tests {
         assert!(snapshot.hunt.is_some());
         assert_eq!(snapshot.monsters.len(), 2);
         assert!(snapshot.monsters[0].capture_percent.is_some());
+    }
+
+    #[test]
+    fn both_games_have_a_readable_name_and_a_module() {
+        for kind in [GameKind::Rise, GameKind::World] {
+            assert!(display_game(kind).starts_with("Monster Hunter"));
+            assert!(kind.module().ends_with(".exe"));
+        }
     }
 }

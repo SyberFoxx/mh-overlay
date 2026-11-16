@@ -131,7 +131,16 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
     // El hub edita el archivo tal cual está; los ajustes de la CLI son de esta ejecución y no
     // deben acabar guardados en él.
     if arguments.hub {
-        return mh_overlay_app::run(config_path, loaded.config).map_err(AppError::from);
+        let mut config = loaded.config;
+
+        // El juego y el mapa de esta ejecución sirven para inspeccionar el otro título sin
+        // tocar la configuración guardada.
+        if let Some(kind) = arguments.game {
+            config.game.kind = kind.to_string();
+        }
+
+        return mh_overlay_app::run(config_path, config, arguments.map.clone())
+            .map_err(AppError::from);
     }
 
     let config = configured(&config_path, loaded, arguments)?;
