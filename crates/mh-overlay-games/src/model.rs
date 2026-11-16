@@ -39,6 +39,8 @@ impl Health {
 pub struct Part {
     /// Índice de la parte en el monstruo, tal como lo reporta el juego.
     pub index: usize,
+    /// Nombre corto de la parte cuando la tabla del juego la conoce.
+    pub name: Option<&'static str>,
     pub flinch: Option<Health>,
     pub breakable: Option<Health>,
     pub severable: Option<Health>,

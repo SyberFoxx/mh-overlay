@@ -60,11 +60,12 @@ fn sample() -> Vec<Monster> {
     rathalos.name = Some("Rathalos".to_string());
     rathalos.capture_percent = Some(20.0);
     rathalos.parts = vec![
-        part(0, 90.0),
-        part(1, 41.0),
-        part(2, 12.0),
+        part(24, 0, 90.0),
+        part(24, 1, 41.0),
+        part(24, 2, 12.0),
         Part {
             index: 5,
+            name: mh_overlay_games::tables::world_part_name(24, 5),
             flinch: None,
             breakable: None,
             severable: Some(Health::new(180.0, 240.0)),
@@ -90,14 +91,15 @@ fn sample() -> Vec<Monster> {
     let mut anjanath = Monster::new(9, Health::new(1_860.0, 15_000.0));
     anjanath.name = Some("Anjanath".to_string());
     anjanath.capture_percent = Some(20.0);
-    anjanath.parts = vec![part(0, 68.0), part(1, 5.0)];
+    anjanath.parts = vec![part(9, 0, 68.0), part(9, 1, 5.0)];
 
     vec![rathalos, anjanath]
 }
 
-fn part(index: usize, percent: f32) -> Part {
+fn part(monster: i32, index: usize, percent: f32) -> Part {
     Part {
         index,
+        name: mh_overlay_games::tables::world_part_name(monster, index),
         flinch: None,
         breakable: Some(Health::new(percent, 100.0)),
         severable: None,

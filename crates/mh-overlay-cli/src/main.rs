@@ -444,7 +444,12 @@ fn render(kind: GameKind, monsters: &[Monster]) -> String {
         ));
 
         for part in &monster.parts {
-            output.push_str(&format!("  parte {:<2}", part.index));
+            output.push_str(&format!(
+                "  {:<14}",
+                part.name
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("parte {:02}", part.index))
+            ));
 
             if let Some(flinch) = part.flinch {
                 output.push_str(&format!("  flinch {:>5.1}%", flinch.percent()));

@@ -99,7 +99,7 @@ impl<'map> Rise<'map> {
         let health = self.health(address)?;
         let mut monster = Monster::new(id, health);
 
-        monster.parts = self.parts(address).unwrap_or_default();
+        monster.parts = self.parts(address, id).unwrap_or_default();
         monster.ailments = self.ailments(address).unwrap_or_default();
         monster.capture_percent = self.capture_percent(address, health);
 
@@ -142,7 +142,7 @@ impl<'map> Rise<'map> {
 
     /// Las tres resistencias de una parte viven en arrays paralelos: flinch, romper y cortar.
     /// Se recorren juntos porque el índice `i` describe la misma parte en los tres.
-    fn parts(&self, monster: u64) -> Result<Vec<Part>, MemoryError> {
+    fn parts(&self, monster: u64, id: i32) -> Result<Vec<Part>, MemoryError> {
         let flinch = self.part_array(monster, "MONSTER_FLINCH_HEALTH_COMPONENT_OFFSETS")?;
         let breakable = self.part_array(monster, "MONSTER_BREAK_HEALTH_COMPONENT_OFFSETS")?;
         let severable = self.part_array(monster, "MONSTER_SEVER_HEALTH_COMPONENT_OFFSETS")?;
@@ -175,6 +175,7 @@ impl<'map> Rise<'map> {
 
             parts.push(Part {
                 index,
+                name: crate::tables::rise_part_name(id, index),
                 flinch: self.current_component(flinch[index], encoded, max_flinch),
                 breakable: self.current_component(breakable[index], encoded, max_breakable),
                 severable: self.current_component(severable[index], encoded, max_severable),

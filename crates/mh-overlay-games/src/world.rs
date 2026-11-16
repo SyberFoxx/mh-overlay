@@ -125,7 +125,8 @@ impl<'map> World<'map> {
         let mut monster = Monster::new(id, health);
 
         monster.name = Some(model);
-        monster.parts = self.parts(address).unwrap_or_default();
+        monster.capture_percent = crate::tables::world_capture_percent(id);
+        monster.parts = self.parts(address, id).unwrap_or_default();
 
         Some(monster)
     }
@@ -139,9 +140,10 @@ impl<'map> World<'map> {
         Ok(Health::new(health[1], health[0]))
     }
 
-    /// Sin la tabla de partes por monstruo, se reportan las que el juego tiene inicializadas.
-    /// Las normales exponen su vida como `breakable`; las cortables, solo como `severable`.
-    fn parts(&self, monster: u64) -> Result<Vec<Part>, MemoryError> {
+    /// Se reportan las partes que el juego tiene inicializadas. Las normales exponen su vida
+    /// como `breakable`; las cortables, solo como `severable`. La tabla del monstruo pone el
+    /// nombre que el juego solo guarda como índice.
+    fn parts(&self, monster: u64, id: i32) -> Result<Vec<Part>, MemoryError> {
         let block = self.memory.read_u64(monster + MONSTER_PARTS)?;
         if block == 0 {
             return Ok(Vec::new());
@@ -159,6 +161,7 @@ impl<'map> World<'map> {
 
             parts.push(Part {
                 index,
+                name: crate::tables::world_part_name(id, index),
                 flinch: None,
                 breakable: Some(health),
                 severable: None,
@@ -182,6 +185,7 @@ impl<'map> World<'map> {
             if let Some((index, health)) = self.part(address) {
                 parts.push(Part {
                     index,
+                    name: crate::tables::world_part_name(id, index),
                     flinch: None,
                     breakable: None,
                     severable: Some(health),

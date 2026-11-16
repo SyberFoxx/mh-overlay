@@ -82,6 +82,7 @@ pub fn render(config: &Config, text: &Text, monsters: &[Monster], status: Option
         y = draw_health_bar(&mut canvas, config, &geometry, monster, y);
 
         for part in visible_parts(monster) {
+            let fallback = format!("parte {:02}", part.index);
             draw_row(
                 &mut canvas,
                 config,
@@ -89,7 +90,7 @@ pub fn render(config: &Config, text: &Text, monsters: &[Monster], status: Option
                 &geometry,
                 y,
                 Row {
-                    label: &format!("parte {:02}", part.index),
+                    label: part.name.unwrap_or(&fallback),
                     fraction: part_fraction(part),
                     color: if part.severable.is_some() {
                         config.style.severable
@@ -487,6 +488,7 @@ mod tests {
         for index in 0..6 {
             detailed.parts.push(Part {
                 index,
+                name: None,
                 flinch: None,
                 breakable: Some(Health::new(40.0, 100.0)),
                 severable: None,
@@ -546,6 +548,7 @@ mod tests {
         let mut detailed = monster(60.0);
         detailed.parts.push(Part {
             index: 1,
+            name: Some("cola"),
             flinch: None,
             breakable: Some(Health::new(40.0, 100.0)),
             severable: None,

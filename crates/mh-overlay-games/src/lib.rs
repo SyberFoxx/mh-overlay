@@ -5,6 +5,7 @@
 
 pub mod model;
 pub mod rise;
+pub mod tables;
 pub mod world;
 
 use std::fmt;

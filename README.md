@@ -9,8 +9,8 @@ Wine para sí mismo, no inyecta DLLs y no escribe ni un byte en el proceso del j
 
 ```
 id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
-  parte 0    flinch 100.0%  romper  62.4%  cortar 100.0%
-  parte 6    flinch  88.1%  romper  41.9%  cortar  41.9%
+  cabeza       flinch 100.0%  romper  62.4%  cortar 100.0%
+  cola         flinch  88.1%  romper  41.9%  cortar  41.9%
   veneno  45.2%  (120 / 265)
 ```
 
@@ -21,10 +21,11 @@ id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Capa de memoria (`process_vm_readv`, cadenas, `.map`) | ✅ probado | ✅ probado |
 | Adjuntar al proceso y resolver la base del módulo | ✅ probado | ✅ probado |
 | Vida actual / máxima y porcentaje | ✅ escrito | ✅ escrito |
-| Umbral de captura | ✅ escrito | ⏳ |
-| Partes: flinch / romper / cortar | ✅ escrito | ⚠️ romper y cortar, sin nombres |
+| Umbral de captura | ✅ escrito | ✅ escrito |
+| Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
+| Nombres de parte | ✅ escrito | ✅ escrito |
 | Estados alterados | ✅ escrito | ⏳ |
-| Nombres de monstruo y de parte | ⏳ | ⏳ |
+| Nombres de monstruo | ⏳ | ⏳ |
 | Overlay gráfico (ventana X11) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
@@ -215,14 +216,30 @@ falte el `0x`, igual que en HunterPie.
 Si actualizas un mapa a mano, sube el archivo con el número de versión del ejecutable en el
 nombre. `--map` permite probar uno sin tocar los demás.
 
+## Las tablas de datos
+
+`crates/mh-overlay-games/src/tables.rs` es un archivo generado: trae el umbral de captura de
+World y el nombre de cada parte, sacados de los `MonsterData.xml` de HunterPie. El generador
+es `scripts/generate_tables.py` y se niega a escribir la tabla si alguna parte queda sin
+transladar, para que un hueco se vea como `parte NN` y no como una etiqueta a medias:
+
+```bash
+python3 scripts/generate_tables.py ruta/rise/MonsterData.xml ruta/world/MonsterData.xml \
+    crates/mh-overlay-games/src/tables.rs
+```
+
+Rise identifica las partes por su posición en el array, así que su tabla conserva el orden y
+los huecos; World las identifica por el índice que reporta el juego.
+
 ## Límites conocidos
 
 - **Solo lectura.** No hay escritura ni inyección; el crate no expone un writer a propósito.
 - **Wilds no está soportado** todavía, aunque sus mapas están incluidos.
-- **Los nombres de monstruo y de parte no están mapeados**: se muestran ids. Las traducciones
-  de HunterPie se descargan en runtime y no están en el repositorio.
-- **World reporta las partes sin nombre** porque su tabla de partes depende de datos por
-  monstruo que aún no se han portado. Las partes cortables solo muestran la barra de corte.
+- **Los nombres de monstruo no están mapeados**: se muestran ids (y en World, el código `em`
+  del modelo). Las traducciones de HunterPie se descargan en runtime y no están en el
+  repositorio; hace falta otra fuente para el nombre legible.
+- **Las partes sin nombre en la tabla del juego se muestran como `parte NN`**: algunos
+  monstruos tienen índices que HunterPie tampoco nombra.
 - **World solo expone la lista de monstruos desde la build 421652**; los mapas anteriores no
   definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
 - **Wayland nativo**: el panel es una ventana X11, que funciona sobre juegos de Proton (que ya
