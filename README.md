@@ -17,15 +17,22 @@ Monster  id 12    HP 74.3%   (16 420 / 22 100)      captura en 20%
 
 | | Rise | World |
 | --- | --- | --- |
-| Capa de memoria (`process_vm_readv`, cadenas, `.map`) | ✅ | ✅ |
-| Adjuntar al proceso y resolver la base del módulo | ✅ | ✅ |
-| Lectura de vida, partes y estados | ⏳ | ⏳ |
+| Capa de memoria (`process_vm_readv`, cadenas, `.map`) | ✅ probado | ✅ probado |
+| Adjuntar al proceso y resolver la base del módulo | ✅ probado | ✅ probado |
+| Vida actual / máxima y porcentaje | ✅ escrito | ✅ escrito |
+| Umbral de captura | ✅ escrito | ⏳ |
+| Partes: flinch / romper / cortar | ✅ escrito | ⚠️ romper y cortar, sin nombres |
+| Estados alterados | ✅ escrito | ⏳ |
+| Nombres de monstruo y de parte | ⏳ | ⏳ |
 | Overlay gráfico | ⏳ | ⏳ |
 
-Hoy el repositorio entrega la capa de memoria y el parser de address maps. Los lectores por
-juego y la CLI están en construcción.
-
 Leyenda: ✅ hecho · ⚠️ parcial · ⏳ pendiente
+
+> **Sin validar en juego.** El entorno donde se escribió esto no tiene ninguno de los dos
+títulos instalados. La capa de memoria, el parser de `.map` y la CLI están probados con tests;
+los lectores de Rise y World están escritos contra el layout documentado por HunterPie y la
+primera ejecución contra un juego real es lo primero que hay que hacer. Si un número sale
+mal, el sospechoso es el `.map` o el desplazamiento fijo, no la capa de memoria.
 
 ## Requisitos
 
@@ -55,9 +62,36 @@ ignora y hay que usar la B.
 
 ```bash
 cargo build --release
+./target/release/mh-overlay --game rise
 ```
 
-La CLI aún no reporta datos: los lectores por juego son el siguiente paso (ver **Estado**).
+```
+-g, --game <JUEGO>      rise o world (por defecto rise)
+    --pid <PID>         pid explícito, si hay más de una instancia corriendo
+    --map <ARCHIVO>     address map concreto; por defecto el más nuevo de data/maps
+    --base <HEX>        base del módulo, si /proc no la expone
+    --watch             refresco continuo en lugar de una sola lectura
+    --interval <MS>     periodo de refresco en modo --watch (por defecto 500)
+    --list-maps         muestra los address maps disponibles
+```
+
+Ejemplo con refresco cada cuarto de segundo:
+
+```bash
+sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
+./target/release/mh-overlay --game world --watch --interval 250
+```
+
+Salida:
+
+```
+mh-overlay · rise · 1 monstruo(s)
+
+id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
+  parte 0    flinch 100.0%  romper  62.4%  cortar 100.0%
+  parte 6    flinch  88.1%  romper  41.9%  cortar  41.9%
+  veneno  45.2%  (120 / 265)
+```
 
 ## Arquitectura
 
