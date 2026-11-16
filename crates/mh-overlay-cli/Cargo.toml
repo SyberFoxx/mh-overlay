@@ -14,4 +14,7 @@ path = "src/main.rs"
 [dependencies]
 mh-overlay-games.workspace = true
 mh-overlay-memory.workspace = true
+mh-overlay-config.workspace = true
+mh-overlay-ui.workspace = true
 clap.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "mh-overlay-config"
+description = "Configuración del overlay: valores por defecto, archivo TOML y validación"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mh-overlay-games = { workspace = true }
+# Serde y toml: el archivo de configuración es TOML documentado; escribirlo a mano sería un
+# parser propio con los mismos errores que ya resuelve la biblioteca estándar del formato.
+serde = { version = "1", features = ["derive"] }
+thiserror = { workspace = true }
+toml = "0.9"

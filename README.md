@@ -25,7 +25,8 @@ id 12     HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Partes: flinch / romper / cortar | ✅ escrito | ⚠️ romper y cortar, sin nombres |
 | Estados alterados | ✅ escrito | ⏳ |
 | Nombres de monstruo y de parte | ⏳ | ⏳ |
-| Overlay gráfico | ⏳ | ⏳ |
+| Overlay gráfico (ventana X11) | ✅ escrito | ✅ escrito |
+| Configuración en caliente | ✅ probado | ✅ probado |
 
 Leyenda: ✅ hecho · ⚠️ parcial · ⏳ pendiente
 
@@ -63,28 +64,90 @@ ignora y hay que usar la B.
 
 ```bash
 cargo build --release
-./target/release/mh-overlay --game rise
+./target/release/mh-overlay --overlay --game rise
 ```
 
 ```
--g, --game <JUEGO>      rise o world (por defecto rise)
+-g, --game <JUEGO>      rise o world (por defecto, el del archivo de configuración)
     --pid <PID>         pid explícito, si hay más de una instancia corriendo
     --map <ARCHIVO>     address map concreto; por defecto, el más nuevo que coincida con el juego
     --base <HEX>        base del módulo, si /proc no la expone
+    --overlay           dibujar el panel encima del juego en una ventana X11
+    --position <POS>    top-left, top-right, bottom-left, bottom-right o center
+    --config <ARCHIVO>  configuración a usar (por defecto ~/.config/mh-overlay/config.toml)
+    --init-config       escribir la configuración documentada y salir
     --watch             refresco continuo en lugar de una sola lectura
-    --interval <MS>     periodo de refresco en modo --watch (por defecto 500)
+    --interval <MS>     periodo de refresco; por defecto, el de la configuración
     --list-maps         muestra los address maps disponibles
 ```
 
-Ejemplo con refresco cada cuarto de segundo:
+Sin `--overlay` la ejecución imprime una línea por monstruo, una por parte y una por estado
+activo; el README abre con un ejemplo de esa salida.
 
 ```bash
 sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
 ./target/release/mh-overlay --game world --watch --interval 250
 ```
 
-Cada ejecución imprime una línea por monstruo, una por parte y una por estado activo; el
-README abre con un ejemplo de esa salida.
+### El panel
+
+```bash
+./target/release/mh-overlay --overlay --game rise
+```
+
+El panel es una ventana X11 sin decorar (`override-redirect`), siempre por encima de la
+ventana del juego, sin robar el foco y con los clics atravesándola. Por monstruo muestra el
+nombre o el id, la vida en porcentaje, una barra con la marca del umbral de captura y, debajo,
+las barras finas de partes (azul, rompible; ámbar, cortable) y de estados activos, cada uno con
+su color. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
+si el servidor no la tiene, el panel sale rectangular y sigue funcionando.
+
+El tamaño se deriva del contenido y de `overlay.scale`; la posición, de `overlay.position` y
+los márgenes. Con `overlay.hide_on_empty` desaparece cuando no hay monstruos grandes en la zona.
+
+Para ver el diseño sin abrir el juego:
+
+```bash
+cargo run -p mh-overlay-ui --example preview
+```
+
+### Configuración
+
+La primera vez que se ejecuta `--overlay` o `--watch` se escribe una plantilla comentada en
+`$XDG_CONFIG_HOME/mh-overlay/config.toml` (o en la ruta de `--config`). El archivo se relee al
+guardarlo: cambiar un color o la posición con el juego abierto se aplica en el siguiente
+refresco, sin reiniciar.
+
+Los flags de la CLI ganan al archivo, y el archivo gana a los valores por defecto. Un valor sin
+sentido (una escala de 12, un juego que no existe, un color mal escrito) es un error con el
+campo culpable: al arrancar aborta, y en caliente se descarta el archivo nuevo y se sigue con el
+anterior, porque cerrar el overlay en mitad de una cacería es peor que quedarse con el último
+estado bueno.
+
+```toml
+[overlay]
+position = "top-left"
+margin_x = 24
+margin_y = 24
+scale = 1.0
+max_monsters = 4
+show_parts = true
+show_ailments = true
+click_through = true
+hide_on_empty = true
+
+[style]
+panel = "#0b0d12e6"
+health = "#7fd47f"
+low_health = "#e2565c"
+low_health_percent = 25.0
+capture = "#e6b45e"
+part = "#4f8dd6"
+severable = "#d69a4f"
+```
+
+Los colores admiten `#rgb`, `#rrggbb` y `#rrggbbaa`. El alfa se compone sobre negro antes de
+subir la imagen, así que el panel se ve igual con o sin compositor.
 
 ## Arquitectura
 
@@ -92,9 +155,15 @@ README abre con un ejemplo de esa salida.
 crates/
 ├── mh-overlay-memory   proceso, /proc, process_vm_readv, cadenas de punteros, parser .map
 ├── mh-overlay-games    rise.rs, world.rs, modelo compartido
+├── mh-overlay-config   TOML documentado, validación, recarga y ruta XDG
+├── mh-overlay-ui       lienzo, tipografía y ventana X11 con SHAPE
 └── mh-overlay-cli      binario mh-overlay
 data/maps/              66 address maps por versión de juego (ver NOTICE)
 ```
+
+El dibujo está separado de X a propósito: `mh-overlay-ui::view` produce una imagen a partir
+del estado del juego y `window` solo la sube, así que la maquetación se prueba con tests sin
+servidor gráfico.
 
 Tres ideas sostienen todo lo demás:
 
@@ -137,12 +206,15 @@ nombre. `--map` permite probar uno sin tocar los demás.
   monstruo que aún no se han portado. Las partes cortables solo muestran la barra de corte.
 - **World solo expone la lista de monstruos desde la build 421652**; los mapas anteriores no
   definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
-- **Wayland nativo**: el overlay futuro será una ventana X11, que funciona sobre juegos de
-  Proton (que ya son XWayland). En Wayland puro haría falta `wlr-layer-shell`.
+- **Wayland nativo**: el panel es una ventana X11, que funciona sobre juegos de Proton (que ya
+  son XWayland). En Wayland puro haría falta `wlr-layer-shell` y no está soportado.
+- **El panel es opaco**: la translucidez del TOML se compone sobre negro en vez de dejar ver el
+  juego a través, porque debajo de un juego a pantalla completa no hay compositor garantizado.
+- **Sin editor gráfico todavía**: la configuración se edita en el TOML y se aplica en caliente.
 - **Online**: leer memoria no modifica el juego, pero ningún método de este tipo tiene garantía
   del publisher. Úsalo bajo tu criterio.
 
 ## Licencia
 
-Apache-2.0. Los datos de `data/maps/` son de HunterPie, también Apache-2.0; los detalles de
-atribución están en `NOTICE`.
+Apache-2.0. Los datos de `data/maps/` son de HunterPie, también Apache-2.0, y la tipografía
+Rajdhani es SIL OFL 1.1; los detalles de atribución están en `NOTICE`.

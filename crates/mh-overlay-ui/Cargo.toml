@@ -1,0 +1,19 @@
+[package]
+name = "mh-overlay-ui"
+description = "Panel del overlay: dibujo en un lienzo propio y ventana X11"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mh-overlay-config = { workspace = true }
+mh-overlay-games = { workspace = true }
+# fontdue: rasteriza la tipografía incluida a un mapa de cobertura; dibujar texto sin esto
+# significa escribir un motor de fuentes.
+fontdue = "0.9"
+# x11rb: protocolo X11 puro en Rust, sin enlazar libX11 ni exigir cabeceras para compilar.
+# Los juegos de Proton son ventanas XWayland, así que la ventana del panel tiene que ser X11.
+x11rb = { version = "0.13", features = ["shape"] }
+thiserror = { workspace = true }

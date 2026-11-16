@@ -1,11 +1,27 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use clap::Parser;
+use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
 use mh_overlay_games::{GameKind, Monster};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process};
+use mh_overlay_ui::OverlayError;
+use mh_overlay_ui::text::Text;
+use mh_overlay_ui::window::OverlayWindow;
+
+/// Cualquiera de las capas puede fallar al arrancar; la CLI las presenta igual.
+#[derive(Debug, thiserror::Error)]
+enum AppError {
+    #[error(transparent)]
+    Memory(#[from] MemoryError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Overlay(#[from] OverlayError),
+}
 
 #[derive(Parser)]
 #[command(
@@ -34,9 +50,25 @@ struct Arguments {
     #[arg(long)]
     watch: bool,
 
-    /// Periodo de refresco en milisegundos
-    #[arg(long, default_value_t = 500, value_name = "MS")]
-    interval: u64,
+    /// Dibujar el panel sobre el juego en una ventana X11
+    #[arg(long)]
+    overlay: bool,
+
+    /// Periodo de refresco en milisegundos; por defecto, el del archivo de configuración
+    #[arg(long, value_name = "MS")]
+    interval: Option<u64>,
+
+    /// Anclaje del panel: top-left, top-right, bottom-left, bottom-right o center
+    #[arg(long, value_name = "POSICIÓN")]
+    position: Option<Position>,
+
+    /// Archivo de configuración; por defecto, $XDG_CONFIG_HOME/mh-overlay/config.toml
+    #[arg(long, value_name = "ARCHIVO")]
+    config: Option<PathBuf>,
+
+    /// Escribir la configuración documentada por defecto y salir
+    #[arg(long)]
+    init_config: bool,
 
     /// Mostrar los address maps disponibles y salir
     #[arg(long)]
@@ -51,7 +83,7 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("error: {error}");
 
-            if let MemoryError::Read { source, .. } = &error
+            if let AppError::Memory(MemoryError::Read { source, .. }) = &error
                 && source.kind() == std::io::ErrorKind::PermissionDenied
             {
                 eprintln!(
@@ -65,7 +97,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(arguments: &Arguments) -> Result<(), MemoryError> {
+fn run(arguments: &Arguments) -> Result<(), AppError> {
     let maps_directory = maps_directory()?;
 
     if arguments.list_maps {
@@ -73,7 +105,19 @@ fn run(arguments: &Arguments) -> Result<(), MemoryError> {
         return Ok(());
     }
 
-    let kind = arguments.game.unwrap_or(GameKind::Rise);
+    let config_path = arguments
+        .config
+        .clone()
+        .unwrap_or_else(Config::default_path);
+
+    if arguments.init_config {
+        init_config(&config_path)?;
+        return Ok(());
+    }
+
+    let loaded = Config::load_or_default(&config_path)?;
+    let config = configured(&config_path, loaded, arguments)?;
+    let kind = config.game_kind()?;
 
     let process = match arguments.pid {
         Some(pid) => Process::from_pid(pid, kind.module())?,
@@ -91,6 +135,10 @@ fn run(arguments: &Arguments) -> Result<(), MemoryError> {
         None => select_map(kind, &maps_directory, memory, base)?,
     };
 
+    if arguments.overlay {
+        return run_overlay(&config_path, config, arguments, kind, memory, map);
+    }
+
     if !arguments.watch {
         let monsters = read_monsters(kind, memory, &map)?;
         emit(&render(kind, &monsters));
@@ -100,8 +148,145 @@ fn run(arguments: &Arguments) -> Result<(), MemoryError> {
     loop {
         let monsters = read_monsters(kind, memory, &map)?;
         emit(&format!("\x1b[2J\x1b[H{}", render(kind, &monsters)));
-        sleep(Duration::from_millis(arguments.interval));
+        sleep(Duration::from_millis(config.game.interval_ms));
     }
+}
+
+/// Escribe la plantilla documentada y no toca un archivo que ya existe.
+fn init_config(path: &Path) -> Result<(), AppError> {
+    if path.exists() {
+        eprintln!("ya existe {}; no se sobrescribe", path.display());
+        return Ok(());
+    }
+
+    Config::write_template(path)?;
+    eprintln!("configuración escrita en {}", path.display());
+
+    Ok(())
+}
+
+fn configured(
+    config_path: &Path,
+    loaded: Loaded,
+    arguments: &Arguments,
+) -> Result<Config, ConfigError> {
+    let mut config = loaded.config;
+
+    // Con el archivo ausente se escribe la plantilla: así el usuario tiene algo que editar con
+    // los valores que de verdad están en uso, en vez de buscarlos en la documentación.
+    if loaded.origin == Origin::Defaults && (arguments.overlay || arguments.watch) {
+        match Config::write_template(config_path) {
+            Ok(()) => eprintln!("configuración creada en {}", config_path.display()),
+            Err(error) => eprintln!("aviso: {error}"),
+        }
+    }
+
+    apply_overrides(&mut config, arguments);
+    config.validate()?;
+
+    Ok(config)
+}
+
+fn apply_overrides(config: &mut Config, arguments: &Arguments) {
+    if let Some(game) = arguments.game {
+        config.game.kind = game.to_string();
+    }
+
+    if let Some(interval) = arguments.interval {
+        config.game.interval_ms = interval;
+    }
+
+    if let Some(position) = arguments.position {
+        config.overlay.position = position;
+    }
+}
+
+/// Bucle del panel: lee, dibuja y sube la imagen; sobrevive a errores de lectura y a
+/// configuraciones a medio guardar, porque cerrar el overlay en mitad de una cacería es peor
+/// que quedarse con el último estado conocido.
+fn run_overlay(
+    config_path: &Path,
+    config: Config,
+    arguments: &Arguments,
+    kind: GameKind,
+    memory: Memory,
+    map: AddressMap,
+) -> Result<(), AppError> {
+    let text = Text::bundled()?;
+    let mut window = OverlayWindow::open("mh-overlay")?;
+    let mut config = config;
+    let mut stamp = modified_at(config_path);
+    let mut last_error: Option<String> = None;
+
+    loop {
+        if let Some(modified) = modified_at(config_path)
+            && stamp.as_ref() != Some(&modified)
+        {
+            stamp = Some(modified);
+
+            match Config::load_or_default(config_path) {
+                Ok(loaded) => {
+                    let mut reloaded = loaded.config;
+                    apply_overrides(&mut reloaded, arguments);
+
+                    match reloaded.validate() {
+                        Ok(()) => {
+                            config = reloaded;
+                            eprintln!("configuración recargada");
+                        }
+                        Err(error) => {
+                            eprintln!("aviso: {error}; sigo con la configuración anterior")
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("aviso: {error}; sigo con la configuración anterior")
+                }
+            }
+        }
+
+        let monsters = match mh_overlay_games::monsters(kind, memory, &map) {
+            Ok(monsters) => {
+                last_error = None;
+                monsters
+            }
+            Err(error) => {
+                let message = error.to_string();
+
+                if last_error.as_deref() != Some(&message) {
+                    eprintln!("aviso: {message}");
+                    last_error = Some(message);
+                }
+
+                Vec::new()
+            }
+        };
+
+        let status = last_error.as_deref().map(|_| "sin conexión con el juego");
+
+        if monsters.is_empty() && status.is_none() && config.overlay.hide_on_empty {
+            window.hide()?;
+            sleep(Duration::from_millis(config.game.interval_ms));
+            continue;
+        }
+
+        let canvas = mh_overlay_ui::view::render(&config, &text, &monsters, status);
+        let origin = config.overlay.position.origin(
+            window.screen_size(),
+            (canvas.width(), canvas.height()),
+            (config.overlay.margin_x, config.overlay.margin_y),
+        );
+
+        window.present(&canvas, origin, true, config.overlay.click_through)?;
+
+        sleep(Duration::from_millis(config.game.interval_ms));
+    }
+}
+
+fn modified_at(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
 }
 
 fn load_map(path: &Path, base: u64) -> Result<AddressMap, MemoryError> {
