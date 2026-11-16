@@ -5,7 +5,7 @@
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
 use mh_overlay_config::{Color, Config, StyleSection};
-use mh_overlay_games::{Monster, Part};
+use mh_overlay_games::{Hunt, Monster, Part, Player, Snapshot};
 
 use crate::canvas::{Canvas, Rect};
 use crate::text::Text;
@@ -22,11 +22,11 @@ const RADIUS: f32 = 10.0;
 const LABEL_WIDTH: f32 = 86.0;
 
 /// Dibuja el panel completo; el tamaño depende de la configuración y del contenido.
-pub fn render(config: &Config, text: &Text, monsters: &[Monster], status: Option<&str>) -> Canvas {
+pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<&str>) -> Canvas {
     let geometry = Geometry::new(config.overlay.scale);
-    let monsters = &monsters[..monsters.len().min(config.overlay.max_monsters)];
-    let width = geometry.width(text, monsters);
-    let mut canvas = Canvas::new(width, geometry.height(config, text, monsters));
+    let monsters = &snapshot.monsters[..snapshot.monsters.len().min(config.overlay.max_monsters)];
+    let width = geometry.width(text, snapshot, monsters);
+    let mut canvas = Canvas::new(width, geometry.height(config, text, snapshot, monsters));
 
     // Borde de un píxel: sobre un juego claro o oscuro, es lo que separa el panel del fondo.
     canvas.fill_rounded(
@@ -46,8 +46,21 @@ pub fn render(config: &Config, text: &Text, monsters: &[Monster], status: Option
     );
 
     let mut y = geometry.padding;
+    let has_session = snapshot.hunt.is_some() || snapshot.player.is_some();
+
+    if let Some(hunt) = snapshot.hunt {
+        y = draw_hunt(&mut canvas, config, text, &geometry, &hunt, y);
+    }
+
+    if let Some(player) = snapshot.player {
+        y = draw_player(&mut canvas, config, text, &geometry, &player, y);
+    }
 
     if monsters.is_empty() {
+        if has_session {
+            y += geometry.small;
+        }
+
         let size = 14.0 * geometry.scale;
         let label = status.unwrap_or("sin monstruos grandes en la zona");
         text.draw(
@@ -65,18 +78,16 @@ pub fn render(config: &Config, text: &Text, monsters: &[Monster], status: Option
         return canvas;
     }
 
+    if has_session {
+        y += geometry.gap;
+        draw_divider(&mut canvas, config, &geometry, y);
+        y += geometry.divider + geometry.gap;
+    }
+
     for (index, monster) in monsters.iter().enumerate() {
         if index > 0 {
             y += geometry.gap;
-            canvas.fill_rect(
-                Rect::new(
-                    geometry.padding as i32,
-                    y.round() as i32,
-                    (canvas.width() as f32 - geometry.padding * 2.0).max(1.0) as u32,
-                    geometry.divider.max(1.0) as u32,
-                ),
-                lighten(config.style.panel, 0.12),
-            );
+            draw_divider(&mut canvas, config, &geometry, y);
             y += geometry.divider + geometry.gap;
         }
 
@@ -170,7 +181,7 @@ impl Geometry {
             + rows as f32 * geometry.row
     }
 
-    fn width(&self, text: &Text, monsters: &[Monster]) -> u32 {
+    fn width(&self, text: &Text, snapshot: &Snapshot, monsters: &[Monster]) -> u32 {
         let name_size = 17.0 * self.scale;
         let percent_size = 14.0 * self.scale;
         let mut logical = BASE_WIDTH;
@@ -181,13 +192,29 @@ impl Geometry {
             logical = logical.max(name + percent + 40.0);
         }
 
+        if let Some(hunt) = snapshot.hunt {
+            let size = 12.0 * self.scale;
+            let label = text.width("Cacería", size);
+            let value = text.width(&hunt_label(&hunt), size);
+            logical = logical.max((label + value + 60.0) / self.scale);
+        }
+
         (logical * self.scale).round() as u32
     }
 
-    fn height(&self, config: &Config, text: &Text, monsters: &[Monster]) -> u32 {
+    fn height(
+        &self,
+        config: &Config,
+        text: &Text,
+        snapshot: &Snapshot,
+        monsters: &[Monster],
+    ) -> u32 {
+        let session = session_rows(snapshot) as f32 * self.row;
+
         if monsters.is_empty() {
             let size = 14.0 * self.scale;
-            return (self.padding * 2.0 + text.height(size)).round() as u32;
+            let extra = if session > 0.0 { self.small } else { 0.0 };
+            return (self.padding * 2.0 + session + extra + text.height(size)).round() as u32;
         }
 
         let sections = monsters
@@ -195,8 +222,13 @@ impl Geometry {
             .map(|monster| Self::section(config, monster, self))
             .sum::<f32>();
         let separators = (monsters.len() - 1) as f32 * (self.gap * 2.0 + self.divider);
+        let session_separator = if session > 0.0 {
+            self.gap * 2.0 + self.divider
+        } else {
+            0.0
+        };
 
-        (self.padding * 2.0 + sections + separators).round() as u32
+        (self.padding * 2.0 + session + session_separator + sections + separators).round() as u32
     }
 
     fn inner_width(&self, canvas: &Canvas) -> f32 {
@@ -348,6 +380,116 @@ fn draw_health_bar(
     y + bar.height as f32 + geometry.small
 }
 
+/// Cuántas filas consume la cabecera de jugador y cacería.
+fn session_rows(snapshot: &Snapshot) -> usize {
+    usize::from(snapshot.hunt.is_some()) + if snapshot.player.is_some() { 2 } else { 0 }
+}
+
+/// Separador de una sección, del ancho interior del panel.
+fn draw_divider(canvas: &mut Canvas, config: &Config, geometry: &Geometry, y: f32) {
+    canvas.fill_rect(
+        Rect::new(
+            geometry.padding as i32,
+            y.round() as i32,
+            (canvas.width() as f32 - geometry.padding * 2.0).max(1.0) as u32,
+            geometry.divider.max(1.0) as u32,
+        ),
+        lighten(config.style.panel, 0.12),
+    );
+}
+
+fn hunt_label(hunt: &Hunt) -> String {
+    format!(
+        "{}  ·  {}/{}",
+        hunt.time_label(),
+        hunt.deaths,
+        hunt.max_deaths
+    )
+}
+
+/// Reloj restante a la derecha y vidas del equipo, destacadas si se agotan.
+fn draw_hunt(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    hunt: &Hunt,
+    y: f32,
+) -> f32 {
+    let style = &config.style;
+    let size = 12.0 * geometry.scale;
+    let value = hunt_label(hunt);
+
+    text.draw(
+        canvas,
+        "Cacería",
+        geometry.padding,
+        y + text.ascent(size),
+        size,
+        style.muted,
+    );
+
+    text.draw(
+        canvas,
+        &value,
+        canvas.width() as f32 - geometry.padding - text.width(&value, size),
+        y + text.ascent(size),
+        size,
+        if hunt.deaths >= hunt.max_deaths {
+            style.low_health
+        } else {
+            style.text
+        },
+    );
+
+    y + geometry.row
+}
+
+/// Vida y aguante del jugador local, con los mismos colores que los monstruos.
+fn draw_player(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    player: &Player,
+    y: f32,
+) -> f32 {
+    let style = &config.style;
+    let health = player.health.percent();
+
+    draw_row(
+        canvas,
+        config,
+        text,
+        geometry,
+        y,
+        Row {
+            label: "Vida",
+            fraction: (health / 100.0).clamp(0.0, 1.0),
+            color: if health <= style.low_health_percent {
+                style.low_health
+            } else {
+                style.health
+            },
+        },
+    );
+
+    draw_row(
+        canvas,
+        config,
+        text,
+        geometry,
+        y + geometry.row,
+        Row {
+            label: "Aguante",
+            fraction: (player.stamina.percent() / 100.0).clamp(0.0, 1.0),
+            color: style.part,
+        },
+    );
+
+    y + geometry.row * 2.0
+}
+
 /// Contenido de una fila secundaria.
 struct Row<'a> {
     label: &'a str,
@@ -492,7 +634,7 @@ mod tests {
     #[test]
     fn a_panel_without_monsters_says_so_and_stays_small() {
         let (config, text) = config();
-        let canvas = render(&config, &text, &[], None);
+        let canvas = render(&config, &text, &Snapshot::of(Vec::new()), None);
 
         assert_eq!(canvas.width(), BASE_WIDTH as u32);
         assert!(canvas.height() < 80, "alto {}", canvas.height());
@@ -502,8 +644,13 @@ mod tests {
     fn two_monsters_make_a_taller_panel_than_one() {
         let (config, text) = config();
 
-        let one = render(&config, &text, &[monster(50.0)], None);
-        let two = render(&config, &text, &[monster(50.0), monster(20.0)], None);
+        let one = render(&config, &text, &Snapshot::of(vec![monster(50.0)]), None);
+        let two = render(
+            &config,
+            &text,
+            &Snapshot::of(vec![monster(50.0), monster(20.0)]),
+            None,
+        );
 
         assert!(two.height() > one.height());
     }
@@ -522,7 +669,7 @@ mod tests {
                 severable: None,
             });
         }
-        let canvas = render(&config, &text, &[detailed], None);
+        let canvas = render(&config, &text, &Snapshot::of(vec![detailed]), None);
 
         let last_row_bottom = 14.0 + 21.0 + 5.0 + 7.0 + 5.0 + 6.0 * 15.0;
         assert!(
@@ -533,12 +680,32 @@ mod tests {
     }
 
     #[test]
+    fn the_player_and_hunt_add_rows_to_the_panel() {
+        let (config, text) = config();
+        let plain = render(&config, &text, &Snapshot::of(vec![monster(60.0)]), None);
+
+        let mut snapshot = Snapshot::of(vec![monster(60.0)]);
+        snapshot.player = Some(Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+        });
+        snapshot.hunt = Some(Hunt {
+            time_left: 754.0,
+            deaths: 0,
+            max_deaths: 3,
+        });
+        let session = render(&config, &text, &snapshot, None);
+
+        assert!(session.height() > plain.height());
+    }
+
+    #[test]
     fn scale_multiplies_the_panel() {
         let (mut config, text) = config();
-        let normal = render(&config, &text, &[monster(50.0)], None);
+        let normal = render(&config, &text, &Snapshot::of(vec![monster(50.0)]), None);
 
         config.overlay.scale = 2.0;
-        let large = render(&config, &text, &[monster(50.0)], None);
+        let large = render(&config, &text, &Snapshot::of(vec![monster(50.0)]), None);
 
         assert!(large.height() > normal.height());
         assert!(large.width() >= normal.width() * 19 / 10);
@@ -547,7 +714,7 @@ mod tests {
     #[test]
     fn the_panel_corners_are_cut_and_the_center_is_painted() {
         let (config, text) = config();
-        let canvas = render(&config, &text, &[monster(50.0)], None);
+        let canvas = render(&config, &text, &Snapshot::of(vec![monster(50.0)]), None);
 
         assert_eq!(canvas.pixel(0, 0), Some(0xff00_0000));
         assert_ne!(
@@ -559,7 +726,7 @@ mod tests {
     #[test]
     fn a_low_health_bar_uses_the_low_health_color() {
         let (config, text) = config();
-        let canvas = render(&config, &text, &[monster(10.0)], None);
+        let canvas = render(&config, &text, &Snapshot::of(vec![monster(10.0)]), None);
         let wanted = config.style.low_health.to_argb() | 0xff00_0000;
 
         assert!(
@@ -571,7 +738,7 @@ mod tests {
     #[test]
     fn parts_and_ailments_add_rows() {
         let (config, text) = config();
-        let plain = render(&config, &text, &[monster(60.0)], None);
+        let plain = render(&config, &text, &Snapshot::of(vec![monster(60.0)]), None);
 
         let mut detailed = monster(60.0);
         detailed.parts.push(Part {
@@ -588,7 +755,7 @@ mod tests {
             timer: 0.0,
             max_timer: 60.0,
         });
-        let with_rows = render(&config, &text, &[detailed], None);
+        let with_rows = render(&config, &text, &Snapshot::of(vec![detailed]), None);
 
         assert!(with_rows.height() > plain.height());
     }
@@ -599,7 +766,7 @@ mod tests {
 
         let mut named = monster(50.0);
         named.name = Some("Rathalos violeta de las Tierras Altas".to_string());
-        let wide = render(&config, &text, &[named], None);
+        let wide = render(&config, &text, &Snapshot::of(vec![named]), None);
 
         assert!(wide.width() > BASE_WIDTH as u32);
     }
@@ -609,7 +776,7 @@ mod tests {
         let (config, text) = config();
         let mut target = monster(50.0);
         target.capture_percent = Some(20.0);
-        let canvas = render(&config, &text, &[target], None);
+        let canvas = render(&config, &text, &Snapshot::of(vec![target]), None);
         let wanted = config.style.capture.to_argb() | 0xff00_0000;
 
         assert!(canvas.pixels().contains(&wanted));

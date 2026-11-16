@@ -5,7 +5,7 @@
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
-use crate::model::{Ailment, Health, Monster, Part};
+use crate::model::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
 
 /// Monstruos grandes que pueden coexistir en una zona.
 const MAX_MONSTERS: usize = 5;
@@ -52,6 +52,19 @@ const AILMENT_MAX_BUILDUP_PTR: u64 = 0x78;
 const AILMENT_VALUE: u64 = 0x20;
 /// Tope defensivo: un array de partes mayor es una lectura corrupta.
 const MAX_PARTS: i32 = 64;
+/// `MHRPlayerHudStructure` (Pack = 1): vida y aguante del HUD.
+const HUD_HEALTH: u64 = 0x00;
+const HUD_MAX_HEALTH: u64 = 0x08;
+const HUD_STAMINA: u64 = 0x28;
+const HUD_MAX_STAMINA: u64 = 0x2C;
+/// `MHRQuestStructure`: estado, vidas y reloj de la cacería.
+const QUEST_STATE: u64 = 0x110;
+const QUEST_MAX_DEATHS: u64 = 0x15C;
+const QUEST_DEATHS: u64 = 0x160;
+const QUEST_TIME_ELAPSED: u64 = 0x170;
+const QUEST_TIME_LIMIT: u64 = 0x178;
+/// `QuestState.InQuest` en Rise (Idle, Ready, InQuest, ...).
+const QUEST_STATE_IN_QUEST: i32 = 2;
 
 /// Lector de Rise sobre un proceso ya adjuntado.
 pub struct Rise<'map> {
@@ -63,6 +76,68 @@ impl<'map> Rise<'map> {
     /// El `map` debe tener ya aplicada la base del módulo.
     pub fn new(memory: Memory, map: &'map AddressMap) -> Self {
         Self { memory, map }
+    }
+
+    /// Todo lo que el panel necesita de una lectura. El jugador y la cacería son opcionales:
+    /// en el menú principal no existen y el overlay tiene que seguir enseñando los monstruos.
+    pub fn snapshot(&self) -> Result<Snapshot, MemoryError> {
+        Ok(Snapshot {
+            player: self.player().ok().flatten(),
+            hunt: self.hunt().ok().flatten(),
+            monsters: self.monsters()?,
+        })
+    }
+
+    /// Vida y aguante del jugador local, leídos del HUD.
+    pub fn player(&self) -> Result<Option<Player>, MemoryError> {
+        let hud = self.memory.deref_chain(
+            self.map.absolute("UI_ADDRESS")?,
+            self.map.offsets("PLAYER_HUD_OFFSETS")?,
+        )?;
+
+        if hud == 0 {
+            return Ok(None);
+        }
+
+        let player = Player {
+            health: Health::new(
+                self.memory.read_f32(hud + HUD_HEALTH)?,
+                self.memory.read_f32(hud + HUD_MAX_HEALTH)?,
+            ),
+            stamina: Health::new(
+                self.memory.read_f32(hud + HUD_STAMINA)?,
+                self.memory.read_f32(hud + HUD_MAX_STAMINA)?,
+            ),
+        };
+
+        Ok(player.is_plausible().then_some(player))
+    }
+
+    /// Cacería en curso: el reloj corre hacia atrás y las vidas se cuentan por el equipo.
+    pub fn hunt(&self) -> Result<Option<Hunt>, MemoryError> {
+        let quest = self.memory.deref_chain(
+            self.map.absolute("QUEST_ADDRESS")?,
+            self.map.offsets("QUEST_OFFSETS")?,
+        )?;
+
+        if quest == 0 || self.memory.read_i32(quest + QUEST_STATE)? != QUEST_STATE_IN_QUEST {
+            return Ok(None);
+        }
+
+        let max_deaths = self.memory.read_i32(quest + QUEST_MAX_DEATHS)?;
+        let deaths = self.memory.read_i32(quest + QUEST_DEATHS)?;
+        if max_deaths <= 0 || deaths < 0 {
+            return Ok(None);
+        }
+
+        let hunt = Hunt {
+            time_left: self.memory.read_f32(quest + QUEST_TIME_LIMIT)?
+                - self.memory.read_f32(quest + QUEST_TIME_ELAPSED)?,
+            deaths: deaths as u32,
+            max_deaths: max_deaths as u32,
+        };
+
+        Ok(hunt.is_plausible().then_some(hunt))
     }
 
     /// Monstruos grandes presentes ahora mismo. Una zona sin monstruos devuelve una lista

@@ -8,6 +8,10 @@ Es la alternativa a [HunterPie](https://github.com/HunterPie/HunterPie) en Linux
 Wine para sí mismo, no inyecta DLLs y no escribe ni un byte en el proceso del juego.
 
 ```
+cacería  12:34 restante   vidas 0/3
+
+tú  HP  71.2%  (712 / 1000)   aguante  84.0%  (126 / 150)
+
 id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
   Cabeza       flinch 100.0%  romper  62.4%  cortar 100.0%
   Cola         flinch  88.1%  romper  41.9%  cortar  41.9%
@@ -21,6 +25,8 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Capa de memoria (`process_vm_readv`, cadenas, `.map`) | ✅ probado | ✅ probado |
 | Adjuntar al proceso y resolver la base del módulo | ✅ probado | ✅ probado |
 | Vida actual / máxima y porcentaje | ✅ escrito | ✅ escrito |
+| Jugador: vida y aguante | ✅ escrito | ✅ escrito |
+| Cacería: reloj y vidas del equipo | ✅ escrito | ✅ escrito |
 | Umbral de captura | ✅ escrito | ✅ escrito |
 | Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
 | Nombres de parte | ✅ escrito | ✅ escrito |
@@ -84,8 +90,8 @@ cargo build --release
     --list-maps         muestra los address maps disponibles
 ```
 
-Sin `--overlay` la ejecución imprime una línea por monstruo, una por parte y una por estado
-activo; el README abre con un ejemplo de esa salida.
+Sin `--overlay` la ejecución imprime la cacería, el jugador, y una línea por monstruo, por
+parte y por estado activo; el README abre con un ejemplo de esa salida.
 
 ```bash
 sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
@@ -99,10 +105,11 @@ sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
 ```
 
 El panel es una ventana X11 sin decorar (`override-redirect`), siempre por encima de la
-ventana del juego, sin robar el foco y con los clics atravesándola. Por monstruo muestra el
-nombre o el id, la vida en porcentaje, una barra con la marca del umbral de captura y, debajo,
-las barras finas de partes (azul, rompible; ámbar, cortable) y de estados activos, cada uno con
-su color. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
+ventana del juego, sin robar el foco y con los clics atravesándola. Arriba lleva el reloj que
+queda de la cacería con las vidas del equipo, y debajo la vida y el aguante del jugador. Por
+monstruo muestra el nombre, la vida en porcentaje, una barra con la marca del umbral de captura
+y, debajo, las barras finas de partes (azul, rompible; ámbar, cortable) y de estados activos,
+cada uno con su color. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
 si el servidor no la tiene, el panel sale rectangular y sigue funcionando.
 
 El tamaño se deriva del contenido y de `overlay.scale`; la posición, de `overlay.position` y
@@ -242,6 +249,11 @@ los huecos; World las identifica por el índice que reporta el juego.
   monstruos tienen índices que HunterPie tampoco nombra.
 - **Los estados de World se muestran sin contador**: la estructura trae cuántas veces se ha
   aplicado el estado, pero el panel todavía no lo enseña.
+- **Jugador y cacería se leen con desplazamientos fijos**, no con claves de los mapas, porque
+  sus estructuras no cambian de sitio entre builds: si una actualización los mueve, esas dos
+  secciones desaparecen (el resto del panel sigue) hasta corregir las constantes.
+- **El reloj de World se guarda en tics de 60 Hz** y se divide para mostrarlo; es la misma
+  cuenta que hace HunterPie desde la build 421631.
 - **World solo expone la lista de monstruos desde la build 421652**; los mapas anteriores no
   definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
 - **Wayland nativo**: el panel es una ventana X11, que funciona sobre juegos de Proton (que ya

@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
-use crate::model::{Ailment, Health, Monster, Part};
+use crate::model::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
 // documenta HunterPie para esta rama del lector.
@@ -61,6 +61,20 @@ const AILMENT_MAX_BUILDUP: u64 = 0x40;
 const AILMENT_DURATION: u64 = 0x70;
 /// Estados que el juego puede registrar a la vez; el array termina en un puntero nulo.
 const MAX_AILMENTS: usize = 32;
+/// `MHWHudStructure`: vida y aguante del jugador.
+const HUD_MAX_HEALTH: u64 = 0x60;
+const HUD_HEALTH: u64 = 0x64;
+const HUD_STAMINA: u64 = 0x12C;
+const HUD_MAX_STAMINA: u64 = 0x130;
+/// `MHWQuestStructure`: estado de la cacería.
+const QUEST_STATE: u64 = 0x54;
+/// `MHWQuestDataStructure`: vidas del equipo, en la estructura extra.
+const QUEST_MAX_DEATHS: u64 = 0x00;
+const QUEST_DEATHS: u64 = 0x04;
+/// `QuestState.InQuest` en World (None, Ready, InQuest, ...).
+const QUEST_STATE_IN_QUEST: i32 = 2;
+/// El reloj de World se guarda en tics de 60 Hz.
+const TIMER_TICKS_PER_SECOND: f32 = 60.0;
 
 /// Lector de World sobre un proceso ya adjuntado.
 pub struct World<'map> {
@@ -72,6 +86,80 @@ impl<'map> World<'map> {
     /// El `map` debe tener ya aplicada la base del módulo.
     pub fn new(memory: Memory, map: &'map AddressMap) -> Self {
         Self { memory, map }
+    }
+
+    /// Todo lo que el panel necesita de una lectura; jugador y cacería son opcionales.
+    pub fn snapshot(&self) -> Result<Snapshot, MemoryError> {
+        Ok(Snapshot {
+            player: self.player().ok().flatten(),
+            hunt: self.hunt().ok().flatten(),
+            monsters: self.monsters()?,
+        })
+    }
+
+    /// Vida y aguante del jugador local, leídos del HUD.
+    pub fn player(&self) -> Result<Option<Player>, MemoryError> {
+        let hud = self.memory.deref_chain(
+            self.map.absolute("EQUIPMENT_ADDRESS")?,
+            self.map.offsets("PLAYER_BASIC_INFORMATION_OFFSETS")?,
+        )?;
+
+        if hud == 0 {
+            return Ok(None);
+        }
+
+        let player = Player {
+            health: Health::new(
+                self.memory.read_f32(hud + HUD_HEALTH)?,
+                self.memory.read_f32(hud + HUD_MAX_HEALTH)?,
+            ),
+            stamina: Health::new(
+                self.memory.read_f32(hud + HUD_STAMINA)?,
+                self.memory.read_f32(hud + HUD_MAX_STAMINA)?,
+            ),
+        };
+
+        Ok(player.is_plausible().then_some(player))
+    }
+
+    /// Cacería en curso: reloj en tics de 60 Hz y vidas del equipo.
+    pub fn hunt(&self) -> Result<Option<Hunt>, MemoryError> {
+        let base = self.map.absolute("QUEST_DATA_ADDRESS")?;
+        let quest = self
+            .memory
+            .deref_chain(base, self.map.offsets("QUEST_DATA_OFFSETS")?)?;
+
+        if quest == 0 || self.memory.read_i32(quest + QUEST_STATE)? != QUEST_STATE_IN_QUEST {
+            return Ok(None);
+        }
+
+        let extra = self
+            .memory
+            .deref_chain(base, self.map.offsets("QUEST_EXTRA_DATA_OFFSETS")?)?;
+        if extra == 0 {
+            return Ok(None);
+        }
+
+        let max_deaths = self.memory.read_i32(extra + QUEST_MAX_DEATHS)?;
+        let deaths = self.memory.read_i32(extra + QUEST_DEATHS)?;
+        if max_deaths <= 0 || deaths < 0 {
+            return Ok(None);
+        }
+
+        let timer = self
+            .memory
+            .deref_chain(base, self.map.offsets("QUEST_TIMER_OFFSETS")?)?;
+        if timer == 0 {
+            return Ok(None);
+        }
+
+        let hunt = Hunt {
+            time_left: self.memory.read_u64(timer)? as f32 / TIMER_TICKS_PER_SECOND,
+            deaths: deaths as u32,
+            max_deaths: max_deaths as u32,
+        };
+
+        Ok(hunt.is_plausible().then_some(hunt))
     }
 
     pub fn monsters(&self) -> Result<Vec<Monster>, MemoryError> {

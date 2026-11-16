@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
-use mh_overlay_games::{GameKind, Monster};
+use mh_overlay_games::{GameKind, Hunt, Player, Snapshot};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process};
 use mh_overlay_ui::OverlayError;
 use mh_overlay_ui::editor::Editor;
@@ -150,14 +150,14 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
     }
 
     if !arguments.watch {
-        let monsters = read_monsters(kind, memory, &map)?;
-        emit(&render(kind, &monsters));
+        let snapshot = read_snapshot(kind, memory, &map)?;
+        emit(&render(kind, &snapshot));
         return Ok(());
     }
 
     loop {
-        let monsters = read_monsters(kind, memory, &map)?;
-        emit(&format!("\x1b[2J\x1b[H{}", render(kind, &monsters)));
+        let snapshot = read_snapshot(kind, memory, &map)?;
+        emit(&format!("\x1b[2J\x1b[H{}", render(kind, &snapshot)));
         sleep(Duration::from_millis(config.game.interval_ms));
     }
 }
@@ -295,10 +295,10 @@ fn run_overlay(
             }
         }
 
-        let monsters = match mh_overlay_games::monsters(kind, memory, &map) {
-            Ok(monsters) => {
+        let snapshot = match mh_overlay_games::snapshot(kind, memory, &map) {
+            Ok(snapshot) => {
                 last_error = None;
-                monsters
+                snapshot
             }
             Err(error) => {
                 let message = error.to_string();
@@ -308,19 +308,19 @@ fn run_overlay(
                     last_error = Some(message);
                 }
 
-                Vec::new()
+                Snapshot::default()
             }
         };
 
         let status = last_error.as_deref().map(|_| "sin conexión con el juego");
 
-        if monsters.is_empty() && status.is_none() && config.overlay.hide_on_empty {
+        if snapshot.monsters.is_empty() && status.is_none() && config.overlay.hide_on_empty {
             window.hide()?;
             sleep(Duration::from_millis(config.game.interval_ms));
             continue;
         }
 
-        let canvas = mh_overlay_ui::view::render(&config, &text, &monsters, status);
+        let canvas = mh_overlay_ui::view::render(&config, &text, &snapshot, status);
         let origin = config.overlay.position.origin(
             window.screen_size(),
             (canvas.width(), canvas.height()),
@@ -399,12 +399,12 @@ fn report_validation(path: &Path, validation: MapValidation) {
     }
 }
 
-fn read_monsters(
+fn read_snapshot(
     kind: GameKind,
     memory: Memory,
     map: &AddressMap,
-) -> Result<Vec<Monster>, MemoryError> {
-    mh_overlay_games::monsters(kind, memory, map).inspect_err(|error| {
+) -> Result<Snapshot, MemoryError> {
+    mh_overlay_games::snapshot(kind, memory, map).inspect_err(|error| {
         if let MemoryError::MissingKey { key } = error {
             eprintln!(
                 "aviso: el mapa {} (versión {}) no define '{key}';\n       \
@@ -416,8 +416,37 @@ fn read_monsters(
     })
 }
 
-fn render(kind: GameKind, monsters: &[Monster]) -> String {
+fn hunt_line(hunt: &Hunt) -> String {
+    format!(
+        "cacería  {:>6} restante   vidas {}/{}\n\n",
+        hunt.time_label(),
+        hunt.deaths,
+        hunt.max_deaths
+    )
+}
+
+fn player_line(player: &Player) -> String {
+    format!(
+        "tú  HP {:>5.1}%  ({:.0} / {:.0})   aguante {:>5.1}%  ({:.0} / {:.0})\n\n",
+        player.health.percent(),
+        player.health.current,
+        player.health.max,
+        player.stamina.percent(),
+        player.stamina.current,
+        player.stamina.max,
+    )
+}
+
+fn render(kind: GameKind, snapshot: &Snapshot) -> String {
+    let monsters = &snapshot.monsters;
     let mut output = format!("mh-overlay · {kind} · {} monstruo(s)\n\n", monsters.len());
+
+    if let Some(hunt) = snapshot.hunt {
+        output.push_str(&hunt_line(&hunt));
+    }
+    if let Some(player) = snapshot.player {
+        output.push_str(&player_line(&player));
+    }
 
     if monsters.is_empty() {
         output.push_str("sin monstruos grandes en la zona\n");

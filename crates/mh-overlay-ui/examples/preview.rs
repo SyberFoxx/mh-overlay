@@ -9,7 +9,7 @@
 use std::error::Error;
 
 use mh_overlay_config::Config;
-use mh_overlay_games::{Ailment, Health, Monster, Part};
+use mh_overlay_games::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
 use mh_overlay_ui::{view, window::OverlayWindow};
@@ -55,7 +55,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn sample() -> Vec<Monster> {
+fn sample() -> Snapshot {
+    Snapshot {
+        player: Some(Player {
+            health: Health::new(712.0, 1000.0),
+            stamina: Health::new(126.0, 150.0),
+        }),
+        hunt: Some(Hunt {
+            time_left: 12.0 * 60.0 + 34.0,
+            deaths: 1,
+            max_deaths: 3,
+        }),
+        monsters: monsters(),
+    }
+}
+
+fn monsters() -> Vec<Monster> {
     // Los ids son los de World: 1 es Rathalos y 0 Anjanath. Nombres, partes y umbral de
     // captura salen de la tabla, así que la vista previa enseña lo mismo que el juego.
     let mut rathalos = Monster::new(1, Health::new(11_912.0, 17_440.0));

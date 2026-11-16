@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
-pub use model::{Ailment, Health, Monster, Part};
+pub use model::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
 
 /// Juegos con lector implementado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,17 +65,13 @@ impl FromStr for GameKind {
 #[error("juego desconocido '{0}' (usa: rise, world)")]
 pub struct GameKindError(String);
 
-/// Lee los monstruos presentes con el lector del juego indicado.
+/// Lee monstruos, jugador y cacería con el lector del juego indicado.
 ///
 /// El `map` debe tener ya aplicada la base del módulo con [`AddressMap::set_base`].
-pub fn monsters(
-    kind: GameKind,
-    memory: Memory,
-    map: &AddressMap,
-) -> Result<Vec<Monster>, MemoryError> {
+pub fn snapshot(kind: GameKind, memory: Memory, map: &AddressMap) -> Result<Snapshot, MemoryError> {
     match kind {
-        GameKind::Rise => rise::Rise::new(memory, map).monsters(),
-        GameKind::World => world::World::new(memory, map).monsters(),
+        GameKind::Rise => rise::Rise::new(memory, map).snapshot(),
+        GameKind::World => world::World::new(memory, map).snapshot(),
     }
 }
 
