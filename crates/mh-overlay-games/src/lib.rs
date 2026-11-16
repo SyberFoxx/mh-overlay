@@ -1,0 +1,1 @@
+//! Lectores por juego.

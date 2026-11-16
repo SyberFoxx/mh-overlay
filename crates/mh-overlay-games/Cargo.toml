@@ -1,0 +1,12 @@
+[package]
+name = "mh-overlay-games"
+description = "Lectores de estado de monstruos para Monster Hunter Rise y World"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mh-overlay-memory.workspace = true
+thiserror.workspace = true

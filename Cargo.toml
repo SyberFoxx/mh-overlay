@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mh-overlay-memory",
+    "crates/mh-overlay-games",
+    "crates/mh-overlay-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/SyberFoxx/mh-overlay"
+authors = ["Ramses Sotomayor"]
+
+[workspace.dependencies]
+mh-overlay-memory = { path = "crates/mh-overlay-memory" }
+mh-overlay-games = { path = "crates/mh-overlay-games" }
+libc = "0.2"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+lto = true
+strip = true

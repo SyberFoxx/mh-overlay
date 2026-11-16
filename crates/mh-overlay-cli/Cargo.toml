@@ -1,0 +1,17 @@
+[package]
+name = "mh-overlay-cli"
+description = "Binario mh-overlay: lee y muestra el estado de los monstruos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "mh-overlay"
+path = "src/main.rs"
+
+[dependencies]
+mh-overlay-games.workspace = true
+mh-overlay-memory.workspace = true
+clap.workspace = true

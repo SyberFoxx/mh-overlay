@@ -1,0 +1,16 @@
+mh-overlay
+Copyright 2026 Ramses Sotomayor
+
+This product includes address map data (the files under data/maps/) derived
+from the HunterPie project, Copyright the HunterPie contributors, licensed
+under the Apache License, Version 2.0:
+
+    https://github.com/HunterPie/HunterPie
+
+The .map files are plain-text tables of static addresses and pointer offsets
+that HunterPie obtained through reverse engineering of Monster Hunter: World,
+Monster Hunter Rise and Monster Hunter Wilds. They are redistributed here
+unmodified.
+
+No source code from HunterPie is included; the Rust implementation in this
+repository was written independently against the observed memory layout.
