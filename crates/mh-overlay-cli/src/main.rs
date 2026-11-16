@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use clap::Parser;
 use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
 use mh_overlay_games::{GameKind, Hunt, Player, Snapshot};
-use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process};
+use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process, maps_directory};
 use mh_overlay_ui::OverlayError;
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
@@ -22,6 +22,8 @@ enum AppError {
     Config(#[from] ConfigError),
     #[error(transparent)]
     Overlay(#[from] OverlayError),
+    #[error(transparent)]
+    Hub(#[from] mh_overlay_app::AppError),
 }
 
 #[derive(Parser)]
@@ -54,6 +56,10 @@ struct Arguments {
     /// Dibujar el panel sobre el juego en una ventana X11
     #[arg(long)]
     overlay: bool,
+
+    /// Abrir el hub de escritorio con diagnóstico y ajustes
+    #[arg(long)]
+    hub: bool,
 
     /// Abrir el editor de ajustes; no necesita el juego abierto
     #[arg(long)]
@@ -121,6 +127,13 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
     }
 
     let loaded = Config::load_or_default(&config_path)?;
+
+    // El hub edita el archivo tal cual está; los ajustes de la CLI son de esta ejecución y no
+    // deben acabar guardados en él.
+    if arguments.hub {
+        return mh_overlay_app::run(config_path, loaded.config).map_err(AppError::from);
+    }
+
     let config = configured(&config_path, loaded, arguments)?;
 
     if arguments.settings {
@@ -355,30 +368,9 @@ fn select_map(
     memory: Memory,
     base: u64,
 ) -> Result<AddressMap, MemoryError> {
-    let candidates = AddressMap::candidates_for_game(kind.map_prefix(), directory)?;
-    let mut fallback = None;
-
-    for path in &candidates {
-        let map = load_map(path, base)?;
-        let validation = map.validate(&memory);
-
-        if validation == MapValidation::Verified {
-            report_validation(path, validation);
-            return Ok(map);
-        }
-
-        if fallback.is_none() {
-            fallback = Some((path.clone(), map, validation));
-        }
-    }
-
-    let (path, map, validation) = fallback.ok_or_else(|| MemoryError::NoMapsForGame {
-        game: kind.map_prefix().to_string(),
-        directory: directory.display().to_string(),
-    })?;
-
-    report_validation(&path, validation);
-    Ok(map)
+    let selected = AddressMap::select_for_game(kind.map_prefix(), directory, &memory, base)?;
+    report_validation(&selected.path, selected.validation);
+    Ok(selected.map)
 }
 
 fn report_validation(path: &Path, validation: MapValidation) {
@@ -539,33 +531,6 @@ fn emit(text: &str) {
     use std::io::Write;
 
     let _ = std::io::stdout().lock().write_all(text.as_bytes());
-}
-
-/// Directorio de los `.map`: `$MH_OVERLAY_MAPS`, `./data/maps`, o el del repositorio
-/// relativo al ejecutable (para cuando se lanza desde `target/`).
-fn maps_directory() -> Result<PathBuf, MemoryError> {
-    if let Ok(directory) = std::env::var("MH_OVERLAY_MAPS")
-        && Path::new(&directory).is_dir()
-    {
-        return Ok(PathBuf::from(directory));
-    }
-
-    let mut candidates = vec![PathBuf::from("data/maps")];
-
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(directory) = executable.parent()
-    {
-        candidates.push(directory.join("../../data/maps"));
-        candidates.push(directory.join("data/maps"));
-    }
-
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.is_dir())
-        .ok_or_else(|| MemoryError::NoMapsForGame {
-            game: "cualquiera".to_string(),
-            directory: "data/maps".to_string(),
-        })
 }
 
 fn parse_hex(value: &str) -> Result<u64, std::num::ParseIntError> {

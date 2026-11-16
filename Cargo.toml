@@ -5,6 +5,7 @@ members = [
     "crates/mh-overlay-games",
     "crates/mh-overlay-config",
     "crates/mh-overlay-ui",
+    "crates/mh-overlay-app",
     "crates/mh-overlay-cli",
 ]
 
@@ -20,6 +21,7 @@ mh-overlay-memory = { path = "crates/mh-overlay-memory" }
 mh-overlay-games = { path = "crates/mh-overlay-games" }
 mh-overlay-config = { path = "crates/mh-overlay-config" }
 mh-overlay-ui = { path = "crates/mh-overlay-ui" }
+mh-overlay-app = { path = "crates/mh-overlay-app" }
 libc = "0.2"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }

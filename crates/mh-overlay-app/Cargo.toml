@@ -1,0 +1,23 @@
+[package]
+name = "mh-overlay-app"
+description = "Hub de escritorio: diagnóstico de la conexión y ajustes con vista previa"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mh-overlay-config = { workspace = true }
+mh-overlay-games = { workspace = true }
+mh-overlay-memory = { workspace = true }
+mh-overlay-ui = { workspace = true }
+# eframe: ventana, widgets y texturas sin escribir un toolkit propio. El panel sobre el juego
+# sigue dibujándose con el lienzo de `mh-overlay-ui`, que no necesita GL ni compositor.
+eframe = { version = "0.37", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+thiserror = { workspace = true }

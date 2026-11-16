@@ -28,6 +28,41 @@ pub struct AddressMap {
     instructions: HashMap<String, Vec<u8>>,
 }
 
+/// Directorio de los `.map`: `$MH_OVERLAY_MAPS`, `./data/maps`, o el del repositorio
+/// relativo al ejecutable (para cuando se lanza desde `target/`).
+pub fn maps_directory() -> Result<PathBuf, MemoryError> {
+    if let Ok(directory) = std::env::var("MH_OVERLAY_MAPS")
+        && Path::new(&directory).is_dir()
+    {
+        return Ok(PathBuf::from(directory));
+    }
+
+    let mut candidates = vec![PathBuf::from("data/maps")];
+
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(directory) = executable.parent()
+    {
+        candidates.push(directory.join("../../data/maps"));
+        candidates.push(directory.join("data/maps"));
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_dir())
+        .ok_or_else(|| MemoryError::NoMapsForGame {
+            game: "cualquiera".to_string(),
+            directory: "data/maps".to_string(),
+        })
+}
+
+/// Un mapa elegido para el proceso, con el archivo del que salió y la validación aplicada.
+#[derive(Debug, Clone)]
+pub struct SelectedMap {
+    pub path: PathBuf,
+    pub map: AddressMap,
+    pub validation: MapValidation,
+}
+
 /// Resultado de contrastar las huellas `Instruction` de un mapa con la memoria del juego.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapValidation {
@@ -121,6 +156,48 @@ impl AddressMap {
         }
 
         Ok(map)
+    }
+
+    /// Elige el mapa más nuevo de `game` que corresponda al proceso abierto.
+    ///
+    /// Prefiere un mapa verificado por CRC; si ninguno lo está, se queda con el más nuevo y
+    /// deja constancia en [`SelectedMap::validation`], porque una build y un mapa no son
+    /// intercambiables y el llamante tiene que poder avisar.
+    pub fn select_for_game(
+        game: &str,
+        directory: impl AsRef<Path>,
+        memory: &Memory,
+        base: u64,
+    ) -> Result<SelectedMap, MemoryError> {
+        let candidates = Self::candidates_for_game(game, directory)?;
+        let mut fallback: Option<SelectedMap> = None;
+
+        for path in candidates {
+            let mut map = Self::load(&path)?;
+            map.set_base(base);
+            let validation = map.validate(memory);
+
+            if validation == MapValidation::Verified {
+                return Ok(SelectedMap {
+                    path,
+                    map,
+                    validation,
+                });
+            }
+
+            if fallback.is_none() {
+                fallback = Some(SelectedMap {
+                    path,
+                    map,
+                    validation,
+                });
+            }
+        }
+
+        fallback.ok_or_else(|| MemoryError::NoMapsForGame {
+            game: game.to_string(),
+            directory: "data/maps".to_string(),
+        })
     }
 
     /// Picks the newest `.map` of `game` in `directory`, comparing version components numerically.

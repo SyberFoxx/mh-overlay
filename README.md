@@ -82,6 +82,7 @@ cargo build --release
     --base <HEX>        base del módulo, si /proc no la expone
     --overlay           dibujar el panel encima del juego en una ventana X11
     --settings          abrir el editor de ajustes (no necesita el juego)
+    --hub               abrir el hub: diagnóstico de la conexión y ajustes con vista previa
     --position <POS>    top-left, top-right, bottom-left, bottom-right o center
     --config <ARCHIVO>  configuración a usar (por defecto ~/.config/mh-overlay/config.toml)
     --init-config       escribir la configuración documentada y salir
@@ -176,6 +177,25 @@ Los colores no están en el editor: son cinco selectores hexadecimales que se to
 olvidan, y meterlos en la misma ventana sin un selector de color de verdad habría sido peor que
 editarlos en el TOML.
 
+### Hub de escritorio
+
+```bash
+./target/release/mh-overlay --hub
+```
+
+Una ventana normal pensada para cuando algo no funciona, porque el panel sobre el juego no
+tiene sitio para explicarse. La pestaña **Diagnóstico** enseña el proceso encontrado, la base
+del módulo, qué `.map` se está usando y si sus CRC coinciden con la build, cuántos monstruos,
+jugador y cacería se leyeron y el último error, refrescándose sola al ritmo configurado. La
+pestaña **Ajustes** edita juego, refresco, anclaje, márgenes, escala, monstruos a la vez, los
+interruptores y todos los colores con un selector de color real, con el panel de ejemplo al
+lado: lo que ves es lo que se dibuja. Los cambios se guardan solos en el TOML en cuanto sueltas
+el control, así que un overlay abierto los aplica en el siguiente refresco.
+
+El hub necesita OpenGL y una sesión X11 o Wayland; el panel sobre el juego **no**: ese sigue
+siendo el lienzo propio con X11 puro, para no depender de GL ni de un compositor encima del
+juego.
+
 ## Arquitectura
 
 ```
@@ -184,6 +204,7 @@ crates/
 ├── mh-overlay-games    rise.rs, world.rs, modelo compartido
 ├── mh-overlay-config   TOML documentado, validación, recarga y ruta XDG
 ├── mh-overlay-ui       lienzo, tipografía y ventana X11 con SHAPE
+├── mh-overlay-app      hub de escritorio: diagnóstico y ajustes con vista previa
 └── mh-overlay-cli      binario mh-overlay
 data/maps/              66 address maps por versión de juego (ver NOTICE)
 ```
