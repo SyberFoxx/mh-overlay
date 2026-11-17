@@ -78,5 +78,7 @@ Three rules govern every read, and getting one wrong silently returns garbage:
 - Under Proton the game is a normal Linux process; `/proc/<pid>/exe` points at the Wine
   loader, so process discovery matches on `/proc/<pid>/comm` and on the basename of every
   `cmdline` argument.
-- Games under Proton are XWayland windows. An overlay must therefore be an X11 window too;
-  native Wayland needs `wlr-layer-shell` and is out of scope for now.
+- Games under Proton are XWayland windows. Under a Wayland compositor that window is composed
+  above any other X11 window when fullscreen, so the panel has two backends: an X11
+  `override-redirect` window by default and a `wlr-layer-shell` surface on the `overlay` layer
+  when `WAYLAND_DISPLAY` is set. Compositors without layer-shell fall back to X11.

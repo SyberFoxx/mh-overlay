@@ -9,9 +9,10 @@ use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
 use mh_overlay_games::{GameKind, Hunt, Player, Snapshot};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process, maps_directory};
 use mh_overlay_ui::OverlayError;
+use mh_overlay_ui::Panel;
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
-use mh_overlay_ui::window::{OverlayWindow, SettingsWindow, UiEvent};
+use mh_overlay_ui::window::{SettingsWindow, UiEvent};
 
 /// Cualquiera de las capas puede fallar al arrancar; la CLI las presenta igual.
 #[derive(Debug, thiserror::Error)]
@@ -285,7 +286,7 @@ fn run_overlay(
     map: AddressMap,
 ) -> Result<(), AppError> {
     let text = Text::bundled()?;
-    let mut window = OverlayWindow::open("mh-overlay")?;
+    let mut window = Panel::open("mh-overlay")?;
     let mut config = config;
     let mut stamp = modified_at(config_path);
     let mut last_error: Option<String> = None;

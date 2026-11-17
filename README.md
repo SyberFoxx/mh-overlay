@@ -32,7 +32,7 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Nombres de parte | ✅ escrito | ✅ escrito |
 | Estados alterados | ✅ escrito | ✅ escrito |
 | Nombres de monstruo | ✅ escrito | ✅ escrito |
-| Overlay gráfico (ventana X11) | ✅ escrito | ✅ escrito |
+| Overlay gráfico (X11 y Wayland) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
 
@@ -105,8 +105,10 @@ sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
 ./target/release/mh-overlay --overlay --game rise
 ```
 
-El panel es una ventana X11 sin decorar (`override-redirect`), siempre por encima de la
-ventana del juego, sin robar el foco y con los clics atravesándola. Arriba lleva el reloj que
+El panel es una ventana X11 sin decorar (`override-redirect`) y, en sesiones Wayland, una
+superficie de la capa `overlay` de `wlr-layer-shell`: en ambos casos va por encima de la ventana
+del juego —incluido un juego a pantalla completa—, sin robar el foco y con los clics
+atravesándola. Arriba lleva el reloj que
 queda de la cacería con las vidas del equipo, y debajo la vida y el aguante del jugador. Por
 monstruo muestra el nombre, la vida en porcentaje, una barra con la marca del umbral de captura
 y, debajo, las barras finas de partes (azul, rompible; ámbar, cortable) y de estados activos,
@@ -199,8 +201,7 @@ salida cuando la build del juego es más nueva que el último mapa y el CRC no c
 se guardan en el TOML: son de la ejecución, no de la configuración.
 
 El hub necesita OpenGL y una sesión X11 o Wayland; el panel sobre el juego **no**: ese sigue
-siendo el lienzo propio con X11 puro, para no depender de GL ni de un compositor encima del
-juego. En Arch, `mesa` ya trae `swrast`, así que funciona incluso sin aceleración; si la ventana
+siendo el lienzo propio, subido por X11 o por `wl_shm` según la sesión, para no depender de GL. En Arch, `mesa` ya trae `swrast`, así que funciona incluso sin aceleración; si la ventana
 falla al abrir, el error dice qué falta y el panel sigue disponible con `--overlay`.
 
 ## Arquitectura
@@ -210,7 +211,7 @@ crates/
 ├── mh-overlay-memory   proceso, /proc, process_vm_readv, cadenas de punteros, parser .map
 ├── mh-overlay-games    rise.rs, world.rs, modelo compartido
 ├── mh-overlay-config   TOML documentado, validación, recarga y ruta XDG
-├── mh-overlay-ui       lienzo, tipografía y ventana X11 con SHAPE
+├── mh-overlay-ui       lienzo, tipografía y superficie X11/Wayland
 ├── mh-overlay-app      hub de escritorio: diagnóstico y ajustes con vista previa
 └── mh-overlay-cli      binario mh-overlay
 data/maps/              66 address maps por versión de juego (ver NOTICE)
@@ -284,8 +285,12 @@ los huecos; World las identifica por el índice que reporta el juego.
   cuenta que hace HunterPie desde la build 421631.
 - **World solo expone la lista de monstruos desde la build 421652**; los mapas anteriores no
   definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
-- **Wayland nativo**: el panel es una ventana X11, que funciona sobre juegos de Proton (que ya
-  son XWayland). En Wayland puro haría falta `wlr-layer-shell` y no está soportado.
+- **Wayland necesita `wlr-layer-shell`**: en una sesión Wayland el panel se pone en la capa
+  `overlay`, que es lo único que un compositor dibuja sobre un juego a pantalla completa. Los
+  compositores wlroots (Hyprland, Sway, river…) lo ofrecen; si el compositor no lo tiene, el
+  panel cae a la ventana X11 y en fullscreen puede quedar debajo del juego.
+- **El panel se ancla a un solo monitor**: el primer `wl_output` del compositor. Con dos
+  pantallas, el HUD sale en esa; en X11 sigue la geometría del servidor.
 - **El panel es opaco**: la translucidez del TOML se compone sobre negro en vez de dejar ver el
   juego a través, porque debajo de un juego a pantalla completa no hay compositor garantizado.
 - **Los colores se editan solo en el TOML**: el editor cubre posición, tamaño y visibilidad.

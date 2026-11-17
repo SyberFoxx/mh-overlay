@@ -14,6 +14,13 @@ mh-overlay-games = { workspace = true }
 # significa escribir un motor de fuentes.
 fontdue = "0.9"
 # x11rb: protocolo X11 puro en Rust, sin enlazar libX11 ni exigir cabeceras para compilar.
-# Los juegos de Proton son ventanas XWayland, así que la ventana del panel tiene que ser X11.
+# Los juegos de Proton pueden ser ventanas XWayland, así que el panel tiene que saber hablar X11.
 x11rb = { version = "0.13", features = ["shape"] }
+# wayland-client + layer shell WLR: en una sesión Wayland el compositor dibuja el juego
+# fullscreen por encima de cualquier ventana X11, incluso de las override-redirect. La capa
+# `overlay` de wlr-layer-shell es la única que un compositor pone sobre un fullscreen, y es el
+# mismo mecanismo de las notificaciones del escritorio.
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+libc = { workspace = true }
 thiserror = { workspace = true }

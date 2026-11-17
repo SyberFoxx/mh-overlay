@@ -1320,9 +1320,12 @@ name = "mh-overlay-ui"
 version = "0.1.0"
 dependencies = [
  "fontdue",
+ "libc",
  "mh-overlay-config",
  "mh-overlay-games",
  "thiserror 2.0.21",
+ "wayland-client",
+ "wayland-protocols-wlr",
  "x11rb",
 ]
 
