@@ -22,7 +22,10 @@ const COMPONENT_MONSTER: u64 = 0x138;
 /// Identificador del monstruo (`Monster.Id`).
 const MONSTER_ID: u64 = 0x12280;
 /// Ruta del modelo (`em\em001\data`), que distingue monstruos grandes de pequeños.
-const MONSTER_MODEL: u64 = 0x2A0;
+///
+/// En la build 421810 el bloque de rutas del modelo vive aquí, no en `0x2A0`: leer ese
+/// desplazamiento devuelve basura y el filtro `em\em` descartaba hasta los Anjanath.
+const MONSTER_MODEL: u64 = 0x7749;
 const MONSTER_MODEL_LENGTH: usize = 64;
 /// Puntero al bloque de partes.
 const MONSTER_PARTS: u64 = 0x1D058;
@@ -304,16 +307,18 @@ impl<'map> World<'map> {
         let mut parts = Vec::new();
 
         // Las partes normales son un array contiguo: la primera entrada sin vida marca el
-        // final, no un hueco que haya que saltar.
+        // final, no un hueco que haya que saltar. El índice que la tabla usa para nombrarlas
+        // es la posición en el array: el campo `Index` de la estructura solo se rellena en
+        // las cortables y en las normales vale siempre cero.
         for slot in 0..MAX_NORMAL_PARTS {
             let address = block + NORMAL_PARTS + (slot as u64) * NORMAL_PART_STRIDE;
-            let Some((index, health)) = self.part(address) else {
+            let Some(health) = self.part_health(address) else {
                 break;
             };
 
             parts.push(Part {
-                index,
-                name: crate::tables::world_part_name(id, index),
+                index: slot,
+                name: crate::tables::world_part_name(id, slot),
                 flinch: None,
                 breakable: Some(health),
                 severable: None,
@@ -334,28 +339,24 @@ impl<'map> World<'map> {
                 address += 8;
             }
 
-            if let Some((index, health)) = self.part(address) {
-                parts.push(Part {
-                    index,
-                    name: crate::tables::world_part_name(id, index),
-                    flinch: None,
-                    breakable: None,
-                    severable: Some(health),
-                });
+            // El índice del juego identifica qué parte de la tabla es: la misma que ya
+            // reportó la lista normal, así que la vida de corte se suma a esa entrada.
+            if let Some(index) = self.part_index(address)
+                && let Some(health) = self.part_health(address)
+                && let Some(existing) = parts.iter_mut().find(|part| part.index == index)
+            {
+                existing.severable = Some(health);
             }
 
             address += SEVERABLE_PART_STRIDE;
         }
 
-        // El índice del juego se repite entre las dos listas; se prefiere la entrada cortable,
-        // que es la que trae el daño de corte.
-        parts.sort_by_key(|part| (part.index, part.severable.is_none()));
-        parts.dedup_by_key(|part| part.index);
+        parts.sort_by_key(|part| part.index);
 
         Ok(parts)
     }
 
-    fn part(&self, address: u64) -> Option<(usize, Health)> {
+    fn part_health(&self, address: u64) -> Option<Health> {
         let max = self.memory.read_f32(address + PART_MAX_HEALTH).ok()?;
         if !max.is_finite() || max <= 0.0 || max > MAX_PART_HEALTH {
             return None;
@@ -363,15 +364,11 @@ impl<'map> World<'map> {
 
         let current = self.memory.read_f32(address + PART_HEALTH).ok()?;
         let health = Health::new(current, max);
-        if !health.is_plausible() {
-            return None;
-        }
+        health.is_plausible().then_some(health)
+    }
 
+    fn part_index(&self, address: u64) -> Option<usize> {
         let index = self.memory.read_u32(address + PART_INDEX).ok()?;
-        if index > MAX_PART_INDEX {
-            return None;
-        }
-
-        Some((index as usize, health))
+        (index <= MAX_PART_INDEX).then_some(index as usize)
     }
 }
