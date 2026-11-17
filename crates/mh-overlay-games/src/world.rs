@@ -8,7 +8,10 @@ use std::collections::HashSet;
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
-use crate::model::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
+use crate::model::{
+    Ailment, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot, Weapon,
+    WeaponKind,
+};
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
 // documenta HunterPie para esta rama del lector.
@@ -43,6 +46,13 @@ const SEVERABLE_PART_STRIDE: u64 = 0x78;
 const SEVERABLE_WINDOW: u64 = 0x120 * 32;
 /// Slots de partes normales que se recorren antes de darse por terminado el array.
 const MAX_NORMAL_PARTS: usize = 16;
+/// `MHWSharpnessStructure`: unidades de filo actuales, color y color máximo del arma.
+const SHARPNESS_CURRENT: u64 = 0x20F8;
+const SHARPNESS_LEVEL: u64 = 0x20FC;
+const SHARPNESS_MAX_LEVEL: u64 = 0x1D10;
+/// Dentro de la tabla de datos del arma, el array de longitudes de filo empieza aquí.
+const SHARPNESS_LENGTHS_OFFSET: u64 = 0x0C;
+
 /// `MHWMonsterPartStructure`: vida máxima, vida actual e índice.
 const PART_MAX_HEALTH: u64 = 0x0C;
 const PART_HEALTH: u64 = 0x10;
@@ -66,6 +76,8 @@ const AILMENT_DURATION: u64 = 0x70;
 const MAX_AILMENTS: usize = 32;
 /// `MHWHudStructure`: vida y aguante del jugador.
 const HUD_MAX_HEALTH: u64 = 0x60;
+/// Vida recuperable (la parte roja de la barra).
+const HUD_RECOVERABLE_HEALTH: u64 = 0x2DD4;
 const HUD_HEALTH: u64 = 0x64;
 const HUD_STAMINA: u64 = 0x12C;
 const HUD_MAX_STAMINA: u64 = 0x130;
@@ -111,6 +123,8 @@ impl<'map> World<'map> {
             return Ok(None);
         }
 
+        let recoverable = self.memory.read_f32(hud + HUD_RECOVERABLE_HEALTH).ok();
+
         let player = Player {
             health: Health::new(
                 self.memory.read_f32(hud + HUD_HEALTH)?,
@@ -120,9 +134,106 @@ impl<'map> World<'map> {
                 self.memory.read_f32(hud + HUD_STAMINA)?,
                 self.memory.read_f32(hud + HUD_MAX_STAMINA)?,
             ),
+            recoverable: recoverable.filter(|value| value.is_finite() && *value >= 0.0),
+            weapon: self.weapon(),
         };
 
         Ok(player.is_plausible().then_some(player))
+    }
+
+    /// Arma equipada y su filo. Un arma sin datos (todavía cargando) no rompe la lectura del
+    /// jugador: el panel simplemente no dibuja la sección.
+    fn weapon(&self) -> Option<Weapon> {
+        let root = self.map.absolute("WEAPON_ADDRESS").ok()?;
+        let address = self
+            .memory
+            .deref_chain(root, self.map.offsets("WEAPON_OFFSETS").ok()?)
+            .ok()?;
+
+        if address == 0 {
+            return None;
+        }
+
+        let kind = WeaponKind::from_id(self.memory.read_u8(address).ok()?)?;
+        let sharpness = kind.has_sharpness().then(|| self.sharpness(root)).flatten();
+
+        Some(Weapon { kind, sharpness })
+    }
+
+    /// El filo se arma con dos piezas: el estado actual (`unidades` y color) y la tabla de
+    /// longitudes por arma, indexada por el id del arma concreta.
+    fn sharpness(&self, root: u64) -> Option<Sharpness> {
+        let address = self
+            .memory
+            .deref_chain(root, self.map.offsets("WEAPON_SHARPNESS_OFFSETS").ok()?)
+            .ok()?;
+        if address == 0 {
+            return None;
+        }
+
+        let level =
+            SharpnessLevel::from_index(self.memory.read_i32(address + SHARPNESS_LEVEL).ok()?)?;
+        let max_level =
+            SharpnessLevel::from_index(self.memory.read_i32(address + SHARPNESS_MAX_LEVEL).ok()?)?;
+        let current = self.memory.read_i32(address + SHARPNESS_CURRENT).ok()?;
+
+        // Unidades negativas vienen de una lectura desalineada: mejor no dibujar filo que
+        // dibujarlo mal.
+        if current < 0 {
+            return None;
+        }
+
+        // Hay armas que reportan un color máximo por debajo del actual mientras se cambia de
+        // arma; el color actual manda y la barra se queda en ese nivel.
+        let max_level = if SharpnessLevel::ALL
+            .iter()
+            .position(|item| *item == max_level)
+            < SharpnessLevel::ALL.iter().position(|item| *item == level)
+        {
+            level
+        } else {
+            max_level
+        };
+
+        let weapon_id = self
+            .memory
+            .read_u32(
+                self.memory
+                    .deref_chain(root, self.map.offsets("WEAPON_ID_OFFSETS").ok()?)
+                    .ok()?,
+            )
+            .ok()?;
+        let data = self
+            .memory
+            .deref_chain(
+                self.map.absolute("WEAPON_DATA_ADDRESS").ok()?,
+                self.map.offsets("WEAPON_DATA_OFFSETS").ok()?,
+            )
+            .ok()?;
+        if data == 0 {
+            return None;
+        }
+
+        let lengths_address =
+            self.memory.read_u64(data + u64::from(weapon_id) * 8).ok()? + SHARPNESS_LENGTHS_OFFSET;
+        let mut lengths = [0u16; 7];
+
+        for (index, length) in lengths.iter_mut().enumerate() {
+            let value = self
+                .memory
+                .read_u16(lengths_address + (index as u64) * 2)
+                .ok()?;
+            *length = value;
+        }
+
+        let sharpness = Sharpness {
+            lengths,
+            level,
+            max_level,
+            current: current as f32,
+        };
+
+        (sharpness.total() > 0.0).then_some(sharpness)
     }
 
     /// Cacería en curso: reloj en tics de 60 Hz y vidas del equipo.

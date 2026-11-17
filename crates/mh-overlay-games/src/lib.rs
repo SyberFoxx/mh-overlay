@@ -13,7 +13,10 @@ use std::str::FromStr;
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
-pub use model::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
+pub use model::{
+    Ailment, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot, Weapon,
+    WeaponKind,
+};
 
 /// Juegos con lector implementado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

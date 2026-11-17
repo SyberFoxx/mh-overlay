@@ -10,7 +10,10 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use mh_overlay_config::{Color, Config, OverlaySection, Position, StyleSection};
-use mh_overlay_games::{Ailment, GameKind, Health, Hunt, Monster, Part, Player, Snapshot};
+use mh_overlay_games::{
+    Ailment, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot,
+    Weapon, WeaponKind,
+};
 use mh_overlay_memory::{
     AddressMap, MapValidation, Memory, MemoryError, Process, SelectedMap, maps_directory,
 };
@@ -830,6 +833,16 @@ fn sample() -> Snapshot {
         player: Some(Player {
             health: Health::new(712.0, 1000.0),
             stamina: Health::new(126.0, 150.0),
+            recoverable: Some(90.0),
+            weapon: Some(Weapon {
+                kind: WeaponKind::Longsword,
+                sharpness: Some(Sharpness {
+                    lengths: [40, 30, 30, 30, 30, 20, 0],
+                    level: SharpnessLevel::White,
+                    max_level: SharpnessLevel::White,
+                    current: 50.0,
+                }),
+            }),
         }),
         hunt: Some(Hunt {
             time_left: 12.0 * 60.0 + 34.0,

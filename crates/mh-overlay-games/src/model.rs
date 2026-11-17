@@ -71,11 +71,172 @@ impl Ailment {
     }
 }
 
+/// Arma equipada, en el orden en que el juego numera los tipos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeaponKind {
+    Greatsword,
+    SwordAndShield,
+    DualBlades,
+    Longsword,
+    Hammer,
+    HuntingHorn,
+    Lance,
+    Gunlance,
+    SwitchAxe,
+    ChargeBlade,
+    InsectGlaive,
+    LightBowgun,
+    HeavyBowgun,
+    Bow,
+}
+
+impl WeaponKind {
+    /// Tipo de arma tal como lo guarda el juego (`byte` al principio del bloque de arma).
+    pub fn from_id(id: u8) -> Option<Self> {
+        Some(match id {
+            0 => Self::Greatsword,
+            1 => Self::SwordAndShield,
+            2 => Self::DualBlades,
+            3 => Self::Longsword,
+            4 => Self::Hammer,
+            5 => Self::HuntingHorn,
+            6 => Self::Lance,
+            7 => Self::Gunlance,
+            8 => Self::SwitchAxe,
+            9 => Self::ChargeBlade,
+            10 => Self::InsectGlaive,
+            11 => Self::LightBowgun,
+            12 => Self::HeavyBowgun,
+            13 => Self::Bow,
+            _ => return None,
+        })
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Greatsword => "Espadón",
+            Self::SwordAndShield => "Espada y escudo",
+            Self::DualBlades => "Espadas dobles",
+            Self::Longsword => "Espada larga",
+            Self::Hammer => "Martillo",
+            Self::HuntingHorn => "Cornamusa",
+            Self::Lance => "Lanza",
+            Self::Gunlance => "Lanza pistola",
+            Self::SwitchAxe => "Hacha espada",
+            Self::ChargeBlade => "Espada cargada",
+            Self::InsectGlaive => "Glaive insecto",
+            Self::LightBowgun => "Ballesta ligera",
+            Self::HeavyBowgun => "Ballesta pesada",
+            Self::Bow => "Arco",
+        }
+    }
+
+    /// Solo las armas con filo lo gastan; las de proyectiles no.
+    pub fn has_sharpness(self) -> bool {
+        !matches!(self, Self::LightBowgun | Self::HeavyBowgun | Self::Bow)
+    }
+}
+
+/// Colores del filo, de peor a mejor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharpnessLevel {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    White,
+    Purple,
+}
+
+impl SharpnessLevel {
+    pub const ALL: [Self; 7] = [
+        Self::Red,
+        Self::Orange,
+        Self::Yellow,
+        Self::Green,
+        Self::Blue,
+        Self::White,
+        Self::Purple,
+    ];
+
+    pub fn from_index(index: i32) -> Option<Self> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| Self::ALL.get(index).copied())
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Red => "rojo",
+            Self::Orange => "naranja",
+            Self::Yellow => "amarillo",
+            Self::Green => "verde",
+            Self::Blue => "azul",
+            Self::White => "blanco",
+            Self::Purple => "púrpura",
+        }
+    }
+}
+
+/// Filo del arma: cuánto mide cada color y en qué punto del total está el arma.
+///
+/// `lengths` son las longitudes que el juego da a cada color en esta arma concreta, en el
+/// mismo orden que [`SharpnessLevel::ALL`]; el índice `level` es el color más alto que el arma
+/// alcanza.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sharpness {
+    pub lengths: [u16; 7],
+    pub level: SharpnessLevel,
+    pub max_level: SharpnessLevel,
+    pub current: f32,
+}
+
+impl Sharpness {
+    pub fn total(&self) -> f32 {
+        self.lengths.iter().map(|length| f32::from(*length)).sum()
+    }
+
+    /// Longitud acumulada hasta el principio del color indicado.
+    pub fn start_of(&self, level: SharpnessLevel) -> f32 {
+        let position = SharpnessLevel::ALL
+            .iter()
+            .position(|candidate| *candidate == level)
+            .unwrap_or(0);
+
+        self.lengths
+            .iter()
+            .take(position)
+            .map(|length| f32::from(*length))
+            .sum()
+    }
+
+    /// Fracción de 0 a 1 en la que está el filo actual.
+    pub fn fraction(&self) -> f32 {
+        let total = self.total();
+        if total <= 0.0 {
+            return 0.0;
+        }
+
+        ((self.start_of(self.level) + self.current) / total).clamp(0.0, 1.0)
+    }
+}
+
+/// Arma equipada y su estado.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Weapon {
+    pub kind: WeaponKind,
+    pub sharpness: Option<Sharpness>,
+}
+
 /// Vida y aguante del jugador local.
 #[derive(Debug, Clone, Copy)]
 pub struct Player {
     pub health: Health,
     pub stamina: Health,
+    /// Vida recuperable (la parte roja de la barra); el HUD no siempre la expone.
+    pub recoverable: Option<f32>,
+    pub weapon: Option<Weapon>,
 }
 
 impl Player {
@@ -215,10 +376,14 @@ mod tests {
         let empty = Player {
             health: Health::new(0.0, 0.0),
             stamina: Health::new(0.0, 0.0),
+            recoverable: None,
+            weapon: None,
         };
         let player = Player {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: None,
         };
 
         assert!(!empty.is_plausible());
@@ -234,6 +399,45 @@ mod tests {
         };
 
         assert!(!broken.is_plausible());
+    }
+
+    #[test]
+    fn sharpness_fraction_walks_the_colors() {
+        let sharpness = Sharpness {
+            lengths: [50, 50, 0, 0, 0, 0, 0],
+            level: SharpnessLevel::Orange,
+            max_level: SharpnessLevel::Orange,
+            current: 25.0,
+        };
+
+        assert!((sharpness.fraction() - 0.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_sharpness_without_lengths_has_no_position() {
+        let sharpness = Sharpness {
+            lengths: [0; 7],
+            level: SharpnessLevel::Red,
+            max_level: SharpnessLevel::Red,
+            current: 10.0,
+        };
+
+        assert_eq!(sharpness.fraction(), 0.0);
+    }
+
+    #[test]
+    fn every_weapon_type_the_game_sends_has_a_name() {
+        for id in 0..14 {
+            assert!(WeaponKind::from_id(id).is_some(), "tipo {id} sin nombre");
+        }
+        assert!(WeaponKind::from_id(14).is_none());
+    }
+
+    #[test]
+    fn ranged_weapons_do_not_spend_sharpness() {
+        assert!(!WeaponKind::Bow.has_sharpness());
+        assert!(!WeaponKind::HeavyBowgun.has_sharpness());
+        assert!(WeaponKind::Longsword.has_sharpness());
     }
 
     #[test]

@@ -9,7 +9,10 @@
 use std::error::Error;
 
 use mh_overlay_config::Config;
-use mh_overlay_games::{Ailment, Health, Hunt, Monster, Part, Player, Snapshot};
+use mh_overlay_games::{
+    Ailment, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot, Weapon,
+    WeaponKind,
+};
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
 use mh_overlay_ui::{view, window::OverlayWindow};
@@ -60,6 +63,16 @@ fn sample() -> Snapshot {
         player: Some(Player {
             health: Health::new(712.0, 1000.0),
             stamina: Health::new(126.0, 150.0),
+            recoverable: Some(90.0),
+            weapon: Some(Weapon {
+                kind: WeaponKind::Longsword,
+                sharpness: Some(Sharpness {
+                    lengths: [40, 30, 30, 30, 30, 20, 0],
+                    level: SharpnessLevel::White,
+                    max_level: SharpnessLevel::White,
+                    current: 10.0,
+                }),
+            }),
         }),
         hunt: Some(Hunt {
             time_left: 12.0 * 60.0 + 34.0,

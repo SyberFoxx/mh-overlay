@@ -5,7 +5,7 @@
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
 use mh_overlay_config::{Color, Config, StyleSection};
-use mh_overlay_games::{Hunt, Monster, Part, Player, Snapshot};
+use mh_overlay_games::{Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon};
 
 use crate::canvas::{Canvas, Rect};
 use crate::text::Text;
@@ -110,6 +110,7 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                     } else {
                         config.style.part
                     },
+                    recoverable: 0.0,
                 },
             );
 
@@ -132,6 +133,7 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                     label: ailment.name,
                     fraction: (ailment.buildup_percent() / 100.0).clamp(0.0, 1.0),
                     color: ailment_color(&config.style, ailment.name),
+                    recoverable: 0.0,
                 },
             );
 
@@ -382,7 +384,16 @@ fn draw_health_bar(
 
 /// Cuántas filas consume la cabecera de jugador y cacería.
 fn session_rows(snapshot: &Snapshot) -> usize {
-    usize::from(snapshot.hunt.is_some()) + if snapshot.player.is_some() { 2 } else { 0 }
+    usize::from(snapshot.hunt.is_some()) + snapshot.player.as_ref().map_or(0, player_rows)
+}
+
+/// Vida y aguante, más el arma cuando ya está cargada.
+fn player_rows(player: &Player) -> usize {
+    2 + match &player.weapon {
+        Some(weapon) if weapon.sharpness.is_some() => 2,
+        Some(_) => 1,
+        None => 0,
+    }
 }
 
 /// Separador de una sección, del ancho interior del panel.
@@ -456,6 +467,17 @@ fn draw_player(
 ) -> f32 {
     let style = &config.style;
     let health = player.health.percent();
+    let mut y = y;
+
+    // El arma va arriba, como en HunterPie: primero el tipo y después el filo.
+    if let Some(weapon) = &player.weapon {
+        y = draw_weapon(canvas, config, text, geometry, weapon, y);
+    }
+
+    let recoverable = player
+        .recoverable
+        .filter(|value| *value > 0.0)
+        .map_or(0.0, |value| (value / player.health.max).clamp(0.0, 1.0));
 
     draw_row(
         canvas,
@@ -471,6 +493,7 @@ fn draw_player(
             } else {
                 style.health
             },
+            recoverable,
         },
     );
 
@@ -484,10 +507,107 @@ fn draw_player(
             label: "Aguante",
             fraction: (player.stamina.percent() / 100.0).clamp(0.0, 1.0),
             color: style.part,
+            recoverable: 0.0,
         },
     );
 
     y + geometry.row * 2.0
+}
+
+/// Tipo de arma y, si gasta filo, su barra de colores con la posición actual marcada.
+fn draw_weapon(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    weapon: &Weapon,
+    y: f32,
+) -> f32 {
+    let style = &config.style;
+    let size = 12.0 * geometry.scale;
+    let right = canvas.width() as f32 - geometry.padding;
+
+    text.draw(
+        canvas,
+        weapon.kind.label(),
+        geometry.padding,
+        y + text.ascent(size),
+        size,
+        style.text,
+    );
+
+    let Some(sharpness) = &weapon.sharpness else {
+        return y + geometry.row;
+    };
+
+    let value = format!(
+        "filo {:.0} · {}",
+        sharpness.current,
+        sharpness.level.label()
+    );
+    text.draw(
+        canvas,
+        &value,
+        right - text.width(&value, size),
+        y + text.ascent(size),
+        size,
+        style.muted,
+    );
+
+    let y = y + geometry.row;
+    let bar = Rect::new(
+        geometry.padding as i32,
+        (y + geometry.row * 0.5 - geometry.bar * 0.5).round() as i32,
+        geometry.inner_width(canvas).max(1.0) as u32,
+        geometry.bar.max(2.0) as u32,
+    );
+
+    canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+
+    let total = sharpness.total();
+    if total > 0.0 {
+        let mut x = bar.x as f32;
+
+        for (index, level) in SharpnessLevel::ALL.iter().enumerate() {
+            let length = f32::from(sharpness.lengths[index]);
+            let width = (bar.width as f32 * length / total).round();
+
+            if width >= 1.0 {
+                canvas.fill_rect(
+                    Rect::new(x.round() as i32, bar.y, width as u32, bar.height),
+                    sharpness_color(*level),
+                );
+            }
+
+            x += width;
+        }
+
+        let marker_x = bar.x as f32 + bar.width as f32 * sharpness.fraction();
+        canvas.fill_rect(
+            Rect::new(
+                marker_x.round() as i32 - 1,
+                bar.y - geometry.small.round() as i32,
+                (geometry.scale * 2.0).max(2.0) as u32,
+                bar.height + geometry.small.round() as u32 * 2,
+            ),
+            style.text,
+        );
+    }
+
+    y + geometry.row
+}
+
+/// Un color por nivel de filo, del rojo al púrpura.
+fn sharpness_color(level: SharpnessLevel) -> Color {
+    match level {
+        SharpnessLevel::Red => Color::rgb(0xd6, 0x4a, 0x4a),
+        SharpnessLevel::Orange => Color::rgb(0xe0, 0x8a, 0x3c),
+        SharpnessLevel::Yellow => Color::rgb(0xe0, 0xd0, 0x4a),
+        SharpnessLevel::Green => Color::rgb(0x7f, 0xd4, 0x7f),
+        SharpnessLevel::Blue => Color::rgb(0x4f, 0x9f, 0xe6),
+        SharpnessLevel::White => Color::rgb(0xe8, 0xf0, 0xf8),
+        SharpnessLevel::Purple => Color::rgb(0xa9, 0x7a, 0xe6),
+    }
 }
 
 /// Contenido de una fila secundaria.
@@ -495,6 +615,8 @@ struct Row<'a> {
     label: &'a str,
     fraction: f32,
     color: Color,
+    /// Parte de la barra que se puede recuperar (vida roja), como fracción del máximo.
+    recoverable: f32,
 }
 
 /// Fila secundaria: etiqueta, barra fina y porcentaje.
@@ -531,6 +653,19 @@ fn draw_row(
     );
 
     canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+
+    // La vida recuperable se dibuja detrás del relleno: es la parte que aún se puede curar.
+    if row.recoverable > 0.0 {
+        let width =
+            (bar.width as f32 * (fraction + row.recoverable).clamp(0.0, 1.0)).round() as u32;
+        if width > 0 {
+            canvas.fill_rounded(
+                Rect::new(bar.x, bar.y, width, bar.height),
+                bar.height as f32 / 2.0,
+                style.low_health,
+            );
+        }
+    }
 
     let filled = (bar.width as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
     if filled > 0 {
@@ -621,7 +756,7 @@ fn lighten(color: Color, amount: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mh_overlay_games::{Ailment, Health};
+    use mh_overlay_games::{Ailment, Health, Sharpness, WeaponKind};
 
     fn monster(percent: f32) -> Monster {
         Monster::new(7, Health::new(percent, 100.0))
@@ -688,6 +823,8 @@ mod tests {
         snapshot.player = Some(Player {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: None,
         });
         snapshot.hunt = Some(Hunt {
             time_left: 754.0,
@@ -697,6 +834,61 @@ mod tests {
         let session = render(&config, &text, &snapshot, None);
 
         assert!(session.height() > plain.height());
+    }
+
+    #[test]
+    fn the_weapon_and_its_sharpness_add_rows_to_the_player() {
+        let (config, text) = config();
+        let mut player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: None,
+        };
+        let plain = render(&config, &text, &preview(&player), None);
+
+        player.weapon = Some(Weapon {
+            kind: WeaponKind::Longsword,
+            sharpness: Some(Sharpness {
+                lengths: [40, 30, 30, 30, 30, 20, 0],
+                level: SharpnessLevel::White,
+                max_level: SharpnessLevel::White,
+                current: 10.0,
+            }),
+        });
+        let with_weapon = render(&config, &text, &preview(&player), None);
+
+        assert!(with_weapon.height() > plain.height());
+    }
+
+    #[test]
+    fn the_sharpness_colors_are_drawn_in_the_bar() {
+        let (config, text) = config();
+        let player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: Some(Weapon {
+                kind: WeaponKind::Longsword,
+                sharpness: Some(Sharpness {
+                    lengths: [40, 30, 30, 30, 30, 20, 0],
+                    level: SharpnessLevel::White,
+                    max_level: SharpnessLevel::White,
+                    current: 10.0,
+                }),
+            }),
+        };
+        let canvas = render(&config, &text, &preview(&player), None);
+        let purple = sharpness_color(SharpnessLevel::Purple).to_argb() | 0xff00_0000;
+        let white = sharpness_color(SharpnessLevel::White).to_argb() | 0xff00_0000;
+
+        assert!(canvas.pixels().contains(&purple) || canvas.pixels().contains(&white));
+    }
+
+    fn preview(player: &Player) -> Snapshot {
+        let mut snapshot = Snapshot::of(vec![monster(50.0)]);
+        snapshot.player = Some(*player);
+        snapshot
     }
 
     #[test]

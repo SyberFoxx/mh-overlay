@@ -108,6 +108,8 @@ impl<'map> Rise<'map> {
                 self.memory.read_f32(hud + HUD_STAMINA)?,
                 self.memory.read_f32(hud + HUD_MAX_STAMINA)?,
             ),
+            recoverable: None,
+            weapon: None,
         };
 
         Ok(player.is_plausible().then_some(player))
