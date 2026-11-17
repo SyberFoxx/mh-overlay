@@ -3,6 +3,7 @@
 //! La CLI elige un [`GameKind`] y llama a [`monsters`]; este crate no sabe nada de argumentos
 //! ni de cómo se muestra el resultado.
 
+pub mod buffs;
 pub mod model;
 pub mod rise;
 pub mod tables;
@@ -14,8 +15,8 @@ use std::str::FromStr;
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
 pub use model::{
-    Ailment, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot, Weapon,
-    WeaponKind,
+    Ailment, Buff, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
+    Snapshot, Weapon, WeaponGauge, WeaponKind,
 };
 
 /// Juegos con lector implementado.

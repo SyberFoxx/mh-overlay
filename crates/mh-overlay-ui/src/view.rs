@@ -5,7 +5,9 @@
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
 use mh_overlay_config::{Color, Config, StyleSection};
-use mh_overlay_games::{Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon};
+use mh_overlay_games::{
+    Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon, WeaponGauge,
+};
 
 use crate::canvas::{Canvas, Rect};
 use crate::text::Text;
@@ -20,6 +22,9 @@ const BASE_WIDTH: f32 = 320.0;
 const RADIUS: f32 = 10.0;
 /// Ancho de la columna de etiquetas dentro de una fila.
 const LABEL_WIDTH: f32 = 86.0;
+/// Ancho máximo de la etiqueta en las filas de detalle (buffs y medidores): sus nombres son
+/// más largos que los de una parte.
+const DETAIL_LABEL_WIDTH: f32 = 118.0;
 
 /// Dibuja el panel completo; el tamaño depende de la configuración y del contenido.
 pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<&str>) -> Canvas {
@@ -52,8 +57,8 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
         y = draw_hunt(&mut canvas, config, text, &geometry, &hunt, y);
     }
 
-    if let Some(player) = snapshot.player {
-        y = draw_player(&mut canvas, config, text, &geometry, &player, y);
+    if let Some(player) = &snapshot.player {
+        y = draw_player(&mut canvas, config, text, &geometry, player, y);
     }
 
     if monsters.is_empty() {
@@ -387,13 +392,16 @@ fn session_rows(snapshot: &Snapshot) -> usize {
     usize::from(snapshot.hunt.is_some()) + snapshot.player.as_ref().map_or(0, player_rows)
 }
 
-/// Vida y aguante, más el arma cuando ya está cargada.
+/// Buffs que se dibujan como máximo: con más, el panel tapa al monstruo.
+const MAX_BUFF_ROWS: usize = 6;
+
+/// Vida y aguante, el arma (tipo, filo y medidores) y los buffs activos.
 fn player_rows(player: &Player) -> usize {
-    2 + match &player.weapon {
-        Some(weapon) if weapon.sharpness.is_some() => 2,
-        Some(_) => 1,
-        None => 0,
-    }
+    let weapon = player.weapon.as_ref().map_or(0, |weapon| {
+        1 + usize::from(weapon.sharpness.is_some()) + gauge_rows(weapon).len()
+    });
+
+    2 + weapon + player.buffs.len().min(MAX_BUFF_ROWS)
 }
 
 /// Separador de una sección, del ancho interior del panel.
@@ -472,6 +480,10 @@ fn draw_player(
     // El arma va arriba, como en HunterPie: primero el tipo y después el filo.
     if let Some(weapon) = &player.weapon {
         y = draw_weapon(canvas, config, text, geometry, weapon, y);
+
+        for row in gauge_rows(weapon) {
+            y = draw_detail(canvas, config, text, geometry, y, row);
+        }
     }
 
     let recoverable = player
@@ -511,7 +523,297 @@ fn draw_player(
         },
     );
 
-    y + geometry.row * 2.0
+    y += geometry.row * 2.0;
+
+    // Buffs y estados: nombre, barra de lo que queda y tiempo en segundos.
+    for buff in player.buffs.iter().take(MAX_BUFF_ROWS) {
+        y = draw_detail(
+            canvas,
+            config,
+            text,
+            geometry,
+            y,
+            Detail {
+                label: buff.name,
+                fraction: Some(buff.fraction()),
+                text: if buff.infinite {
+                    "∞".to_string()
+                } else {
+                    format!("{:.0}s", buff.timer)
+                },
+                color: if buff.debuff {
+                    style.low_health
+                } else {
+                    style.capture
+                },
+            },
+        );
+    }
+
+    y
+}
+
+/// Fila de detalle: etiqueta, barra opcional y texto libre a la derecha.
+struct Detail<'a> {
+    label: &'a str,
+    fraction: Option<f32>,
+    text: String,
+    color: Color,
+}
+
+/// Dibuja una fila de detalle y devuelve la `y` de la siguiente.
+fn draw_detail(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    y: f32,
+    detail: Detail<'_>,
+) -> f32 {
+    let style = &config.style;
+    let size = 12.0 * geometry.scale;
+    let label = fit_label(
+        text,
+        detail.label,
+        size,
+        DETAIL_LABEL_WIDTH * geometry.scale,
+    );
+
+    text.draw(
+        canvas,
+        &label,
+        geometry.padding,
+        y + text.ascent(size),
+        size,
+        style.muted,
+    );
+
+    let value_width = text.width(&detail.text, size);
+    let bar_right = canvas.width() as f32 - geometry.padding - value_width - 8.0 * geometry.scale; // Columna fija para que todas las barras de detalle empiecen a la misma altura; el ancho
+    // es mayor que el de las partes porque los nombres de buffs son más largos.
+    let label_width = DETAIL_LABEL_WIDTH * geometry.scale + 6.0 * geometry.scale;
+
+    if let Some(fraction) = detail.fraction {
+        let bar_height = geometry.track.max(2.0);
+        let bar = Rect::new(
+            geometry.padding as i32 + label_width as i32,
+            (y + geometry.row * 0.5 - bar_height * 0.5).round() as i32,
+            (bar_right - geometry.padding - label_width).max(1.0) as u32,
+            bar_height as u32,
+        );
+
+        canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+
+        let filled = (bar.width as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
+        if filled > 0 {
+            canvas.fill_rounded(
+                Rect::new(bar.x, bar.y, filled, bar.height),
+                bar.height as f32 / 2.0,
+                detail.color,
+            );
+        }
+    }
+
+    text.draw(
+        canvas,
+        &detail.text,
+        canvas.width() as f32 - geometry.padding - value_width,
+        y + text.ascent(size),
+        size,
+        style.text,
+    );
+
+    y + geometry.row
+}
+
+/// Un color para medidores de carga, otro para temporizadores y otro para estados.
+fn meter_color() -> Color {
+    Color::rgb(0x4f, 0x8d, 0xd6)
+}
+
+fn timer_color() -> Color {
+    Color::rgb(0xe6, 0xb4, 0x5e)
+}
+
+fn state_color() -> Color {
+    Color::rgb(0xd6, 0x9a, 0x4f)
+}
+
+/// Convierte los medidores del arma en filas del panel. Las armas sin medidor extra no
+/// aportan ninguna fila.
+fn gauge_rows(weapon: &Weapon) -> Vec<Detail<'static>> {
+    let Some(gauge) = &weapon.gauge else {
+        return Vec::new();
+    };
+
+    match gauge {
+        WeaponGauge::Spirit {
+            buildup,
+            level,
+            timer,
+            max_timer,
+            regen,
+        } => {
+            let mut rows = vec![
+                Detail {
+                    label: "Espíritu",
+                    fraction: Some(buildup / 100.0),
+                    text: format!("nivel {level}"),
+                    color: state_color(),
+                },
+                Detail {
+                    label: "Nivel",
+                    fraction: (*max_timer > 0.0).then(|| timer / max_timer),
+                    text: format!("{timer:.0}s"),
+                    color: timer_color(),
+                },
+            ];
+
+            if *regen > 0.0 {
+                rows.push(Detail {
+                    label: "Regen. espíritu",
+                    fraction: None,
+                    text: format!("{regen:.0}s"),
+                    color: timer_color(),
+                });
+            }
+
+            rows
+        }
+        WeaponGauge::ChargeBlade {
+            phials,
+            max_phials,
+            charge,
+            shield,
+            sword,
+            axe,
+        } => {
+            let mut rows = vec![
+                Detail {
+                    label: "Carga",
+                    fraction: Some(charge / 100.0),
+                    text: format!("{charge:.0}%"),
+                    color: meter_color(),
+                },
+                Detail {
+                    label: "Frascos",
+                    fraction: Some(f32::from(*phials) / f32::from(*max_phials).max(1.0)),
+                    text: format!("{phials}/{max_phials}"),
+                    color: state_color(),
+                },
+            ];
+
+            for (label, timer) in [("Escudo", shield), ("Espada", sword), ("Hacha", axe)] {
+                if *timer > 0.0 {
+                    rows.push(Detail {
+                        label,
+                        fraction: None,
+                        text: format!("{timer:.0}s"),
+                        color: timer_color(),
+                    });
+                }
+            }
+
+            rows
+        }
+        WeaponGauge::SwitchAxe {
+            buildup,
+            charge,
+            timer,
+        } => {
+            let mut rows = vec![
+                Detail {
+                    label: "Filo",
+                    fraction: Some(buildup / 100.0),
+                    text: format!("{buildup:.0}%"),
+                    color: meter_color(),
+                },
+                Detail {
+                    label: "Carga amped",
+                    fraction: Some(charge / 100.0),
+                    text: format!("{charge:.0}%"),
+                    color: state_color(),
+                },
+            ];
+
+            if *timer > 0.0 {
+                rows.push(Detail {
+                    label: "Bono amped",
+                    fraction: None,
+                    text: format!("{timer:.0}s"),
+                    color: timer_color(),
+                });
+            }
+
+            rows
+        }
+        WeaponGauge::DualBlades {
+            demon,
+            arch_demon,
+            buildup,
+        } => vec![
+            Detail {
+                label: "Modo",
+                fraction: None,
+                text: if *arch_demon {
+                    "archidemonio"
+                } else if *demon {
+                    "demonio"
+                } else {
+                    "—"
+                }
+                .to_string(),
+                color: state_color(),
+            },
+            Detail {
+                label: "Carga demonio",
+                fraction: Some(buildup / 100.0),
+                text: format!("{buildup:.0}%"),
+                color: meter_color(),
+            },
+        ],
+        WeaponGauge::InsectGlaive {
+            extracts,
+            attack,
+            speed,
+            defense,
+            stamina,
+            max_stamina,
+        } => {
+            let mut rows = vec![Detail {
+                label: "Esencias",
+                fraction: None,
+                text: extracts.label(),
+                color: state_color(),
+            }];
+
+            for (label, timer) in [
+                ("Ataque", attack),
+                ("Velocidad", speed),
+                ("Defensa", defense),
+            ] {
+                if *timer > 0.0 {
+                    rows.push(Detail {
+                        label,
+                        fraction: None,
+                        text: format!("{timer:.0}s"),
+                        color: timer_color(),
+                    });
+                }
+            }
+
+            if *max_stamina > 0.0 {
+                rows.push(Detail {
+                    label: "Kinsecto",
+                    fraction: Some(stamina / max_stamina),
+                    text: format!("{stamina:.0}/{max_stamina:.0}"),
+                    color: meter_color(),
+                });
+            }
+
+            rows
+        }
+    }
 }
 
 /// Tipo de arma y, si gasta filo, su barra de colores con la posición actual marcada.
@@ -756,7 +1058,7 @@ fn lighten(color: Color, amount: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mh_overlay_games::{Ailment, Health, Sharpness, WeaponKind};
+    use mh_overlay_games::{Ailment, Buff, Health, Sharpness, WeaponGauge, WeaponKind};
 
     fn monster(percent: f32) -> Monster {
         Monster::new(7, Health::new(percent, 100.0))
@@ -825,6 +1127,7 @@ mod tests {
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
             weapon: None,
+            buffs: Vec::new(),
         });
         snapshot.hunt = Some(Hunt {
             time_left: 754.0,
@@ -844,6 +1147,7 @@ mod tests {
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
             weapon: None,
+            buffs: Vec::new(),
         };
         let plain = render(&config, &text, &preview(&player), None);
 
@@ -855,10 +1159,74 @@ mod tests {
                 max_level: SharpnessLevel::White,
                 current: 10.0,
             }),
+            gauge: None,
         });
         let with_weapon = render(&config, &text, &preview(&player), None);
 
         assert!(with_weapon.height() > plain.height());
+    }
+
+    #[test]
+    fn the_weapon_gauge_adds_its_rows_below_the_sharpness() {
+        let (config, text) = config();
+        let player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: Some(Weapon {
+                kind: WeaponKind::Longsword,
+                sharpness: None,
+                gauge: None,
+            }),
+            buffs: Vec::new(),
+        };
+        let plain = render(&config, &text, &preview(&player), None);
+
+        let with_gauge = Player {
+            weapon: Some(Weapon {
+                kind: WeaponKind::Longsword,
+                sharpness: None,
+                gauge: Some(WeaponGauge::Spirit {
+                    buildup: 62.0,
+                    level: 2,
+                    timer: 98.0,
+                    max_timer: 140.0,
+                    regen: 0.0,
+                }),
+            }),
+            ..player
+        };
+        let gauge = render(&config, &text, &preview(&with_gauge), None);
+
+        assert!(gauge.height() > plain.height());
+    }
+
+    #[test]
+    fn buffs_are_capped_so_they_do_not_cover_the_monsters() {
+        let (config, text) = config();
+        let mut player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: None,
+            buffs: Vec::new(),
+        };
+        let plain = render(&config, &text, &preview(&player), None);
+
+        player.buffs = (0..12)
+            .map(|index| Buff {
+                name: "Buff",
+                timer: 60.0 + index as f32,
+                max_timer: 120.0,
+                debuff: false,
+                infinite: false,
+            })
+            .collect();
+        let many = render(&config, &text, &preview(&player), None);
+
+        // Seis filas de buffs como máximo, aunque haya doce activos.
+        assert!(many.height() > plain.height());
+        assert!(many.height() < plain.height() + 7 * 24);
     }
 
     #[test]
@@ -876,7 +1244,9 @@ mod tests {
                     max_level: SharpnessLevel::White,
                     current: 10.0,
                 }),
+                gauge: None,
             }),
+            buffs: Vec::new(),
         };
         let canvas = render(&config, &text, &preview(&player), None);
         let purple = sharpness_color(SharpnessLevel::Purple).to_argb() | 0xff00_0000;
@@ -887,7 +1257,7 @@ mod tests {
 
     fn preview(player: &Player) -> Snapshot {
         let mut snapshot = Snapshot::of(vec![monster(50.0)]);
-        snapshot.player = Some(*player);
+        snapshot.player = Some(player.clone());
         snapshot
     }
 

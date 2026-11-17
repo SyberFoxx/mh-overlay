@@ -10,8 +10,8 @@ use std::error::Error;
 
 use mh_overlay_config::Config;
 use mh_overlay_games::{
-    Ailment, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot, Weapon,
-    WeaponKind,
+    Ailment, Buff, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot,
+    Weapon, WeaponGauge, WeaponKind,
 };
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
@@ -72,7 +72,37 @@ fn sample() -> Snapshot {
                     max_level: SharpnessLevel::White,
                     current: 10.0,
                 }),
+                gauge: Some(WeaponGauge::Spirit {
+                    buildup: 62.0,
+                    level: 2,
+                    timer: 98.0,
+                    max_timer: 140.0,
+                    regen: 0.0,
+                }),
             }),
+            buffs: vec![
+                Buff {
+                    name: "Semilla del poder",
+                    timer: 84.0,
+                    max_timer: 180.0,
+                    debuff: false,
+                    infinite: false,
+                },
+                Buff {
+                    name: "Protección divina",
+                    timer: 37.0,
+                    max_timer: 120.0,
+                    debuff: false,
+                    infinite: false,
+                },
+                Buff {
+                    name: "Veneno",
+                    timer: 12.0,
+                    max_timer: 20.0,
+                    debuff: true,
+                    infinite: false,
+                },
+            ],
         }),
         hunt: Some(Hunt {
             time_left: 12.0 * 60.0 + 34.0,

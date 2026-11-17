@@ -1,7 +1,7 @@
 //! Estado de un monstruo, independiente del juego del que venga.
 
 /// Vida de un componente (el monstruo entero, o una parte concreta).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Health {
     pub current: f32,
     pub max: f32,
@@ -222,21 +222,129 @@ impl Sharpness {
     }
 }
 
+/// Esencias del glaive insecto que el jugador lleva activas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Extracts {
+    pub attack: bool,
+    pub speed: bool,
+    pub defense: bool,
+    pub heal: bool,
+}
+
+impl Extracts {
+    /// Etiqueta corta con las esencias activas, en el orden en que el juego las muestra.
+    pub fn label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.attack {
+            parts.push("rojo");
+        }
+        if self.speed {
+            parts.push("blanco");
+        }
+        if self.defense {
+            parts.push("naranja");
+        }
+        if self.heal {
+            parts.push("verde");
+        }
+
+        if parts.is_empty() {
+            "sin esencias".to_string()
+        } else {
+            parts.join(" + ")
+        }
+    }
+}
+
+/// Medidores propios de cada clase de arma. Cada juego y cada arma rellenan el suyo; las
+/// armas que no tienen un medidor extra (espada y escudo, lanza, martillo...) se quedan sin él.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WeaponGauge {
+    /// Espada larga: medidor de espíritu y el temporizador del nivel alcanzado.
+    Spirit {
+        buildup: f32,
+        level: u8,
+        timer: f32,
+        max_timer: f32,
+        regen: f32,
+    },
+    /// Espada cargada: frascos, carga para llenarlos y los tres buffs de la hoja.
+    ChargeBlade {
+        phials: u8,
+        max_phials: u8,
+        charge: f32,
+        shield: f32,
+        sword: f32,
+        axe: f32,
+    },
+    /// Hacha espada: carga de la hoja, carga amped y su temporizador.
+    SwitchAxe {
+        buildup: f32,
+        charge: f32,
+        timer: f32,
+    },
+    /// Espadas dobles: modo demonio, modo archidemonio y su medidor.
+    DualBlades {
+        demon: bool,
+        arch_demon: bool,
+        buildup: f32,
+    },
+    /// Glaive insecto: esencias, tiempos de cada color y aguante del kinsecto.
+    InsectGlaive {
+        extracts: Extracts,
+        attack: f32,
+        speed: f32,
+        defense: f32,
+        stamina: f32,
+        max_stamina: f32,
+    },
+}
+
 /// Arma equipada y su estado.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Weapon {
     pub kind: WeaponKind,
     pub sharpness: Option<Sharpness>,
+    pub gauge: Option<WeaponGauge>,
+}
+
+/// Buff o estado activo sobre el jugador, con el tiempo que le queda.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Buff {
+    pub name: &'static str,
+    pub timer: f32,
+    /// Duración máxima vista desde que empezó; crece mientras el buff se renueva.
+    pub max_timer: f32,
+    /// `true` para los estados negativos (veneno, fuego, sangrado...).
+    pub debuff: bool,
+    /// `true` para buffs sin temporizador propio (drogas): se muestran como "∞".
+    pub infinite: bool,
+}
+
+impl Buff {
+    /// Fracción de 0 a 1 que le queda al buff, para la barra.
+    pub fn fraction(&self) -> f32 {
+        if self.infinite {
+            return 1.0;
+        }
+        if self.max_timer <= 0.0 {
+            return 0.0;
+        }
+
+        (self.timer / self.max_timer).clamp(0.0, 1.0)
+    }
 }
 
 /// Vida y aguante del jugador local.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 pub struct Player {
     pub health: Health,
     pub stamina: Health,
     /// Vida recuperable (la parte roja de la barra); el HUD no siempre la expone.
     pub recoverable: Option<f32>,
     pub weapon: Option<Weapon>,
+    /// Buffs y estados activos, ya filtrados y ordenados por tiempo restante.
+    pub buffs: Vec<Buff>,
 }
 
 impl Player {
@@ -378,12 +486,14 @@ mod tests {
             stamina: Health::new(0.0, 0.0),
             recoverable: None,
             weapon: None,
+            buffs: Vec::new(),
         };
         let player = Player {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
             weapon: None,
+            buffs: Vec::new(),
         };
 
         assert!(!empty.is_plausible());
@@ -423,6 +533,39 @@ mod tests {
         };
 
         assert_eq!(sharpness.fraction(), 0.0);
+    }
+
+    #[test]
+    fn a_buff_bar_shrinks_with_the_timer_and_infinite_ones_stay_full() {
+        let buff = Buff {
+            name: "Semilla del poder",
+            timer: 45.0,
+            max_timer: 180.0,
+            debuff: false,
+            infinite: false,
+        };
+        assert!((buff.fraction() - 0.25).abs() < f32::EPSILON);
+
+        let drug = Buff {
+            infinite: true,
+            ..buff
+        };
+        assert_eq!(drug.fraction(), 1.0);
+    }
+
+    #[test]
+    fn extracts_read_as_the_colours_the_game_shows() {
+        assert_eq!(Extracts::default().label(), "sin esencias");
+        assert_eq!(
+            Extracts {
+                attack: true,
+                speed: true,
+                defense: false,
+                heal: false,
+            }
+            .label(),
+            "rojo + blanco"
+        );
     }
 
     #[test]

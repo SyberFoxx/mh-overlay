@@ -110,6 +110,7 @@ impl<'map> Rise<'map> {
             ),
             recoverable: None,
             weapon: None,
+            buffs: Vec::new(),
         };
 
         Ok(player.is_plausible().then_some(player))

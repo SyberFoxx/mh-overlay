@@ -4,13 +4,15 @@
 //! recorre hasta 128 entradas, el prefijo `em` del modelo identifica a los monstruos grandes
 //! y las partes son arrays de tamaño fijo con dos strides distintos.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
+use crate::buffs::WORLD_BUFFS;
 use crate::model::{
-    Ailment, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot, Weapon,
-    WeaponKind,
+    Ailment, Buff, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
+    Snapshot, Weapon, WeaponGauge, WeaponKind,
 };
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
@@ -52,6 +54,69 @@ const SHARPNESS_LEVEL: u64 = 0x20FC;
 const SHARPNESS_MAX_LEVEL: u64 = 0x1D10;
 /// Dentro de la tabla de datos del arma, el array de longitudes de filo empieza aquí.
 const SHARPNESS_LENGTHS_OFFSET: u64 = 0x0C;
+
+// Medidores de clase, todos dentro del bloque `WEAPON_MECHANICS_OFFSETS` (HunterPie:
+// `MHWLongSwordStructure`, `MHWChargeBladeStructure`, `MHWSwitchAxeStructure`,
+// `MHWDualBladesStructure`, `MHWInsectGlaiveStructure`).
+
+/// Espada larga: carga, nivel, temporizador del nivel y regeneración (iai / helm breaker).
+const LS_BUILDUP: u64 = 0x2368;
+const LS_SPIRIT_LEVEL: u64 = 0x2370;
+const LS_LEVEL_TIMER: u64 = 0x2374;
+const LS_IAI_TIMER: u64 = 0x2378;
+const LS_HELM_TIMER: u64 = 0x2388;
+/// Duración de cada nivel de espíritu, en segundos, sin la habilidad de prolongación.
+const LS_LEVEL_DURATIONS: [f32; 4] = [0.0, 200.0, 140.0, 70.0];
+/// Espada cargada: carga, frascos y buffs de escudo, espada y hacha.
+const CB_CHARGE: u64 = 0x2370;
+const CB_PHIALS: u64 = 0x2374;
+const CB_SHIELD: u64 = 0x2378;
+const CB_SWORD: u64 = 0x237C;
+const CB_AXE: u64 = 0x2470;
+/// Frascos por defecto; la habilidad de capacidad añade uno.
+const CB_MAX_PHIALS: u8 = 5;
+/// Hacha espada: carga de la hoja, carga amped y su temporizador.
+const SA_BUILDUP: u64 = 0x2350;
+const SA_CHARGE: u64 = 0x2360;
+const SA_TIMER: u64 = 0x2364;
+/// Espadas dobles: modo demonio, archidemonio y el medidor.
+const DB_DEMON: u64 = 0x2368;
+const DB_ARCH_DEMON: u64 = 0x2369;
+const DB_BUILDUP: u64 = 0x236C;
+/// Glaive insecto: puntero al kinsecto y temporizadores de las esencias.
+const IG_KINSECT: u64 = 0x2350;
+const IG_ATTACK_TIMER: u64 = 0x2368;
+const IG_SPEED_TIMER: u64 = 0x236C;
+const IG_DEFENSE_TIMER: u64 = 0x2370;
+const IG_BUFF_QUEUE: u64 = 0x2378;
+const IG_QUEUE_LENGTH: usize = 3;
+const IG_QUEUED_INDEX: u64 = 0x2388;
+const IG_QUEUED_COUNT: u64 = 0x2390;
+/// `MHWKinsectStructure`: aguante del kinsecto.
+const KINSECT_STAMINA: u64 = 0x0A8C;
+/// `MHWInsectGlaiveExtraStructure`: aguante máximo, en la cadena extra.
+const IG_MAX_STAMINA: u64 = 0x12B4;
+/// Tope de cordura para un temporizador de buff: más de una hora es basura.
+const MAX_BUFF_TIMER: f32 = 3600.0;
+
+/// Normaliza una fracción del juego (0..1) a porcentaje y descarta NaN.
+fn percent(value: f32) -> f32 {
+    if value.is_finite() {
+        (value * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    }
+}
+
+/// Los medidores que el juego ya guarda en porcentaje (carga de la espada cargada, hojas del
+/// hacha espada) solo necesitan descartar NaN y valores fuera de rango.
+fn clamp_percent(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 100.0)
+    } else {
+        0.0
+    }
+}
 
 /// `MHWMonsterPartStructure`: vida máxima, vida actual e índice.
 const PART_MAX_HEALTH: u64 = 0x0C;
@@ -95,12 +160,19 @@ const TIMER_TICKS_PER_SECOND: f32 = 60.0;
 pub struct World<'map> {
     memory: Memory,
     map: &'map AddressMap,
+    /// Duración máxima vista de cada buff, por offset: el juego solo guarda lo que queda y
+    /// una barra necesita el total.
+    seen_buffs: Mutex<HashMap<u32, f32>>,
 }
 
 impl<'map> World<'map> {
     /// El `map` debe tener ya aplicada la base del módulo.
     pub fn new(memory: Memory, map: &'map AddressMap) -> Self {
-        Self { memory, map }
+        Self {
+            memory,
+            map,
+            seen_buffs: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Todo lo que el panel necesita de una lectura; jugador y cacería son opcionales.
@@ -136,6 +208,7 @@ impl<'map> World<'map> {
             ),
             recoverable: recoverable.filter(|value| value.is_finite() && *value >= 0.0),
             weapon: self.weapon(),
+            buffs: self.buffs(),
         };
 
         Ok(player.is_plausible().then_some(player))
@@ -156,8 +229,240 @@ impl<'map> World<'map> {
 
         let kind = WeaponKind::from_id(self.memory.read_u8(address).ok()?)?;
         let sharpness = kind.has_sharpness().then(|| self.sharpness(root)).flatten();
+        let gauge = self.gauge(kind);
 
-        Some(Weapon { kind, sharpness })
+        Some(Weapon {
+            kind,
+            sharpness,
+            gauge,
+        })
+    }
+
+    /// Base del bloque de medidores de clase, común a todas las armas.
+    fn mechanics(&self) -> Option<u64> {
+        let address = self
+            .memory
+            .deref_chain(
+                self.map.absolute("WEAPON_MECHANICS_ADDRESS").ok()?,
+                self.map.offsets("WEAPON_MECHANICS_OFFSETS").ok()?,
+            )
+            .ok()?;
+
+        (address != 0).then_some(address)
+    }
+
+    /// Medidores propios de la clase de arma. Solo se leen los que HunterPie también lee; el
+    /// resto (lanza, martillo, ballestas...) no guarda nada extra que mostrar.
+    fn gauge(&self, kind: WeaponKind) -> Option<WeaponGauge> {
+        let address = self.mechanics()?;
+
+        match kind {
+            WeaponKind::Longsword => {
+                let level = self.memory.read_i32(address + LS_SPIRIT_LEVEL).ok()?;
+                if !(0..=3).contains(&level) {
+                    return None;
+                }
+
+                let buildup = self.memory.read_f32(address + LS_BUILDUP).ok()?;
+                let timer = self.memory.read_f32(address + LS_LEVEL_TIMER).ok()?;
+                let regen = self
+                    .memory
+                    .read_f32(address + LS_IAI_TIMER)
+                    .unwrap_or(0.0)
+                    .max(self.memory.read_f32(address + LS_HELM_TIMER).unwrap_or(0.0));
+
+                Some(WeaponGauge::Spirit {
+                    buildup: percent(buildup),
+                    level: level as u8,
+                    timer: timer.max(0.0),
+                    max_timer: LS_LEVEL_DURATIONS[level as usize],
+                    regen: regen.max(0.0),
+                })
+            }
+            WeaponKind::ChargeBlade => {
+                let phials = self.memory.read_i32(address + CB_PHIALS).ok()?;
+                if !(0..=8).contains(&phials) {
+                    return None;
+                }
+
+                Some(WeaponGauge::ChargeBlade {
+                    phials: phials as u8,
+                    max_phials: CB_MAX_PHIALS.max(phials as u8),
+                    charge: clamp_percent(self.memory.read_f32(address + CB_CHARGE).ok()?),
+                    shield: self.memory.read_f32(address + CB_SHIELD).ok()?.max(0.0),
+                    sword: self.memory.read_f32(address + CB_SWORD).ok()?.max(0.0),
+                    axe: self.memory.read_f32(address + CB_AXE).ok()?.max(0.0),
+                })
+            }
+            WeaponKind::SwitchAxe => Some(WeaponGauge::SwitchAxe {
+                buildup: clamp_percent(self.memory.read_f32(address + SA_BUILDUP).ok()?),
+                charge: clamp_percent(self.memory.read_f32(address + SA_CHARGE).ok()?),
+                timer: self.memory.read_f32(address + SA_TIMER).ok()?.max(0.0),
+            }),
+            WeaponKind::DualBlades => Some(WeaponGauge::DualBlades {
+                demon: self.memory.read_u8(address + DB_DEMON).ok()? != 0,
+                arch_demon: self.memory.read_u8(address + DB_ARCH_DEMON).ok()? != 0,
+                buildup: percent(self.memory.read_f32(address + DB_BUILDUP).ok()?),
+            }),
+            WeaponKind::InsectGlaive => self.insect_glaive(address),
+            _ => None,
+        }
+    }
+
+    /// Esencias, tiempos y aguante del kinsecto; el aguante máximo está en la cadena extra.
+    fn insect_glaive(&self, address: u64) -> Option<WeaponGauge> {
+        let mut extracts = Extracts::default();
+        let queued = self.memory.read_i32(address + IG_QUEUED_COUNT).ok()?;
+        let start = self.memory.read_i32(address + IG_QUEUED_INDEX).ok()?;
+
+        if (1..=IG_QUEUE_LENGTH as i32).contains(&queued)
+            && (0..IG_QUEUE_LENGTH as i32).contains(&start)
+        {
+            for step in 0..queued {
+                let slot = (start + step) % IG_QUEUE_LENGTH as i32;
+                let kind = self
+                    .memory
+                    .read_i32(address + IG_BUFF_QUEUE + (slot as u64) * 4)
+                    .ok()?;
+
+                match kind {
+                    0 => extracts.attack = true,
+                    1 => extracts.speed = true,
+                    2 => extracts.defense = true,
+                    3 => extracts.heal = true,
+                    _ => {}
+                }
+            }
+        }
+
+        let max_stamina = self
+            .memory
+            .deref_chain(
+                self.map.absolute("WEAPON_MECHANICS_ADDRESS").ok()?,
+                self.map
+                    .offsets("WEAPON_EXTRA_MECHANICS_DATA_OFFSETS")
+                    .ok()?,
+            )
+            .ok()
+            .filter(|address| *address != 0)
+            .and_then(|address| self.memory.read_f32(address + IG_MAX_STAMINA).ok())
+            .unwrap_or(0.0);
+
+        let kinsect = self.memory.read_u64(address + IG_KINSECT).ok()?;
+        let stamina = if kinsect == 0 {
+            0.0
+        } else {
+            self.memory
+                .read_f32(kinsect + KINSECT_STAMINA)
+                .unwrap_or(0.0)
+        };
+
+        Some(WeaponGauge::InsectGlaive {
+            extracts,
+            attack: self
+                .memory
+                .read_f32(address + IG_ATTACK_TIMER)
+                .ok()?
+                .max(0.0),
+            speed: self
+                .memory
+                .read_f32(address + IG_SPEED_TIMER)
+                .ok()?
+                .max(0.0),
+            defense: self
+                .memory
+                .read_f32(address + IG_DEFENSE_TIMER)
+                .ok()?
+                .max(0.0),
+            stamina: stamina.max(0.0),
+            max_stamina: max_stamina.max(0.0),
+        })
+    }
+
+    /// Buffs y estados activos, del más duradero al más corto y con los negativos al final.
+    fn buffs(&self) -> Vec<Buff> {
+        let base = self
+            .memory
+            .deref_chain(
+                self.map.absolute("ABNORMALITY_ADDRESS").ok().unwrap_or(0),
+                self.map.offsets("ABNORMALITY_OFFSETS").ok().unwrap_or(&[]),
+            )
+            .unwrap_or(0);
+
+        let canteen = self
+            .memory
+            .deref_chain(
+                self.map.absolute("CANTEEN_ADDRESS").ok().unwrap_or(0),
+                self.map
+                    .offsets("ABNORMALITY_CANTEEN_OFFSETS")
+                    .ok()
+                    .unwrap_or(&[]),
+            )
+            .unwrap_or(0);
+
+        if base == 0 {
+            return Vec::new();
+        }
+
+        let mut seen = self
+            .seen_buffs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut buffs = Vec::new();
+
+        for entry in WORLD_BUFFS {
+            let address = if entry.canteen { canteen } else { base };
+            if address == 0 {
+                continue;
+            }
+
+            if let Some((depends_on, value)) = entry.depends {
+                let actual = self
+                    .memory
+                    .read_i32(address + u64::from(depends_on))
+                    .unwrap_or(0);
+                if actual != value {
+                    continue;
+                }
+            }
+
+            let timer = if entry.infinite {
+                1.0
+            } else {
+                self.memory
+                    .read_f32(address + u64::from(entry.offset))
+                    .unwrap_or(0.0)
+            };
+
+            if !timer.is_finite() || timer <= 0.0 || timer > MAX_BUFF_TIMER {
+                seen.remove(&entry.offset);
+                continue;
+            }
+
+            let max_timer = seen
+                .entry(entry.offset)
+                .and_modify(|known| *known = known.max(timer))
+                .or_insert(timer);
+
+            buffs.push(Buff {
+                name: entry.name,
+                timer,
+                max_timer: *max_timer,
+                debuff: entry.debuff,
+                infinite: entry.infinite,
+            });
+        }
+
+        // Los negativos al final, y dentro de cada grupo lo que antes se va.
+        buffs.sort_by(|left, right| {
+            left.debuff.cmp(&right.debuff).then(
+                left.timer
+                    .partial_cmp(&right.timer)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+        });
+
+        buffs
     }
 
     /// El filo se arma con dos piezas: el estado actual (`unidades` y color) y la tabla de

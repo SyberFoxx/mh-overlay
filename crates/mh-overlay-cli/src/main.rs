@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
-use mh_overlay_games::{GameKind, Hunt, Player, Snapshot};
+use mh_overlay_games::{GameKind, Hunt, Player, Snapshot, WeaponGauge};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process, maps_directory};
 use mh_overlay_ui::OverlayError;
 use mh_overlay_ui::Panel;
@@ -428,15 +428,76 @@ fn hunt_line(hunt: &Hunt) -> String {
 }
 
 fn player_line(player: &Player) -> String {
-    format!(
-        "tú  HP {:>5.1}%  ({:.0} / {:.0})   aguante {:>5.1}%  ({:.0} / {:.0})\n\n",
+    let mut output = format!(
+        "tú  HP {:>5.1}%  ({:.0} / {:.0})   aguante {:>5.1}%  ({:.0} / {:.0})\n",
         player.health.percent(),
         player.health.current,
         player.health.max,
         player.stamina.percent(),
         player.stamina.current,
         player.stamina.max,
-    )
+    );
+
+    if let Some(weapon) = &player.weapon {
+        output.push_str(&format!("    arma   {}\n", weapon.kind.label()));
+
+        if let Some(sharpness) = &weapon.sharpness {
+            output.push_str(&format!(
+                "    filo   {:.0} · {}\n",
+                sharpness.current,
+                sharpness.level.label()
+            ));
+        }
+
+        if let Some(gauge) = &weapon.gauge {
+            output.push_str(&format!("    medidor {}\n", gauge_label(gauge)));
+        }
+    }
+
+    for buff in &player.buffs {
+        output.push_str(&format!(
+            "    buff   {:<30} {:>5.0}s\n",
+            buff.name, buff.timer
+        ));
+    }
+
+    output.push('\n');
+    output
+}
+
+/// Resumen de una línea del medidor de clase, para la salida de consola.
+fn gauge_label(gauge: &WeaponGauge) -> String {
+    match gauge {
+        WeaponGauge::Spirit { buildup, level, .. } => {
+            format!("espíritu {buildup:.0}% nivel {level}")
+        }
+        WeaponGauge::ChargeBlade {
+            phials,
+            max_phials,
+            charge,
+            ..
+        } => format!("{phials}/{max_phials} frascos, carga {charge:.0}%"),
+        WeaponGauge::SwitchAxe {
+            buildup, charge, ..
+        } => format!("filo {buildup:.0}%, amped {charge:.0}%"),
+        WeaponGauge::DualBlades {
+            demon,
+            arch_demon,
+            buildup,
+        } => format!(
+            "modo {buildup:.0}%{}",
+            if *arch_demon {
+                " (archidemonio)"
+            } else if *demon {
+                " (demonio)"
+            } else {
+                ""
+            }
+        ),
+        WeaponGauge::InsectGlaive {
+            extracts, stamina, ..
+        } => format!("esencias {}, kinsecto {stamina:.0}", extracts.label()),
+    }
 }
 
 fn render(kind: GameKind, snapshot: &Snapshot) -> String {
@@ -446,8 +507,8 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
     if let Some(hunt) = snapshot.hunt {
         output.push_str(&hunt_line(&hunt));
     }
-    if let Some(player) = snapshot.player {
-        output.push_str(&player_line(&player));
+    if let Some(player) = &snapshot.player {
+        output.push_str(&player_line(player));
     }
 
     if monsters.is_empty() {

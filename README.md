@@ -27,6 +27,8 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Vida actual / máxima y porcentaje | ✅ escrito | ✅ escrito |
 | Jugador: vida y aguante | ✅ escrito | ✅ escrito |
 | Jugador: arma y filo | ⏳ pendiente | ✅ escrito |
+| Medidores de clase (espíritu, frascos, hacha, demonio, kinsecto) | ⏳ pendiente | ✅ escrito |
+| Buffs y estados del jugador | ⏳ pendiente | ✅ escrito |
 | Cacería: reloj y vidas del equipo | ✅ escrito | ✅ escrito |
 | Umbral de captura | ✅ escrito | ✅ escrito |
 | Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
@@ -110,9 +112,11 @@ El panel es una ventana X11 sin decorar (`override-redirect`) y, en sesiones Way
 superficie de la capa `overlay` de `wlr-layer-shell`: en ambos casos va por encima de la ventana
 del juego —incluido un juego a pantalla completa—, sin robar el foco y con los clics
 atravesándola. Arriba lleva el reloj que
-queda de la cacería con las vidas del equipo; debajo, el arma equipada con su filo (longitudes
-por color y la posición actual marcada) y la vida —con la parte recuperable en rojo— y el
-aguante del jugador. Por
+queda de la cacería con las vidas del equipo. Debajo va el jugador: el arma equipada con su
+filo (longitudes por color y la posición actual marcada), los medidores de la clase (espíritu
+de la espada larga, frascos y cargas de la espada cargada, hojas del hacha espada, modo demonio
+y kinsecto), la vida —con la parte recuperable en rojo—, el aguante y los buffs y estados
+activos con su tiempo restante. Por
 monstruo muestra el nombre, la vida en porcentaje, una barra con la marca del umbral de captura
 y, debajo, las barras finas de partes (azul, rompible; ámbar, cortable) y de estados activos,
 cada uno con su color. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
