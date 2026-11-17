@@ -128,6 +128,32 @@ fn process_matches(pid: i32, names: &[&str]) -> bool {
         })
 }
 
+/// Splits a `/proc/<pid>/maps` line into its address range and its path. The path is the only
+/// field that may contain spaces — a game installed under `Monster Hunter World` turns any
+/// `split_whitespace` on the line into a path that stops at `Monster`.
+fn split_map_line(line: &str) -> Option<(&str, &str)> {
+    let mut rest = line;
+    let mut range = "";
+
+    for field in 0..6 {
+        rest = rest.trim_start();
+
+        if field == 5 {
+            return Some((range, rest));
+        }
+
+        let end = rest.find(char::is_whitespace)?;
+
+        if field == 0 {
+            range = &rest[..end];
+        }
+
+        rest = &rest[end..];
+    }
+
+    None
+}
+
 /// Lowest load address of the mapping backed by `module`, which is the base the `.map`
 /// static offsets are relative to.
 fn module_base(pid: i32, module: &str) -> Result<u64, MemoryError> {
@@ -137,13 +163,9 @@ fn module_base(pid: i32, module: &str) -> Result<u64, MemoryError> {
     let mut lowest: Option<u64> = None;
 
     for line in maps.lines() {
-        let mut fields = line.split_whitespace();
-        let Some(range) = fields.next() else { continue };
-        let _permissions = fields.next();
-        let _file_offset = fields.next();
-        let _device = fields.next();
-        let _inode = fields.next();
-        let Some(path) = fields.next() else { continue };
+        let Some((range, path)) = split_map_line(line) else {
+            continue;
+        };
 
         let file_name = Path::new(path)
             .file_name()
@@ -174,6 +196,20 @@ fn module_base(pid: i32, module: &str) -> Result<u64, MemoryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_map_path_with_spaces_is_read_whole() {
+        let line = "140000000-140001000 r--p 00000000 08:11 4487 \
+                    /mnt/god500/Games/Monster Hunter World/MonsterHunterWorld.exe";
+
+        let (range, path) = split_map_line(line).unwrap();
+
+        assert_eq!(range, "140000000-140001000");
+        assert_eq!(
+            Path::new(path).file_name().and_then(|name| name.to_str()),
+            Some("MonsterHunterWorld.exe")
+        );
+    }
 
     #[test]
     fn the_test_process_can_be_found_by_its_own_name() {
