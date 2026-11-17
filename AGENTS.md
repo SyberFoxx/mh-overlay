@@ -81,4 +81,6 @@ Three rules govern every read, and getting one wrong silently returns garbage:
 - Games under Proton are XWayland windows. Under a Wayland compositor that window is composed
   above any other X11 window when fullscreen, so the panel has two backends: an X11
   `override-redirect` window by default and a `wlr-layer-shell` surface on the `overlay` layer
-  when `WAYLAND_DISPLAY` is set. Compositors without layer-shell fall back to X11.
+  when `WAYLAND_DISPLAY` is set. The layer surface is created without an output so the
+  compositor places it on the active monitor, and compositors without layer-shell fall back
+  to X11. GNOME does not implement layer-shell, so there is no overlay layer to use there.

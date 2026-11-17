@@ -287,10 +287,14 @@ los huecos; World las identifica por el índice que reporta el juego.
   definen `MONSTER_LIST_ADDRESS` y el binario lo dice en vez de inventar direcciones.
 - **Wayland necesita `wlr-layer-shell`**: en una sesión Wayland el panel se pone en la capa
   `overlay`, que es lo único que un compositor dibuja sobre un juego a pantalla completa. Los
-  compositores wlroots (Hyprland, Sway, river…) lo ofrecen; si el compositor no lo tiene, el
-  panel cae a la ventana X11 y en fullscreen puede quedar debajo del juego.
-- **El panel se ancla a un solo monitor**: el primer `wl_output` del compositor. Con dos
-  pantallas, el HUD sale en esa; en X11 sigue la geometría del servidor.
+  compositores wlroots (Hyprland, Sway, river…) lo ofrecen; GNOME no implementa el protocolo y
+  ahí no hay capa que usar. Si falta, el panel avisa por stderr y cae a la ventana X11, con la
+  que en fullscreen puede quedar debajo del juego. No hay plan B estándar: el resto de
+  soluciones pasan por dibujar dentro del juego (inyección), que este proyecto no hace.
+- **El panel lo coloca el compositor**: la capa se crea sin output fijo, así que aparece en el
+  monitor activo (en Hyprland, el que tiene el foco al arrancar, que es el del juego) y se queda
+  ahí aunque cambies de escritorio virtual. Con dos pantallas de distinto tamaño, anclar el
+  panel a la derecha o abajo usa el tamaño del primer monitor.
 - **El panel es opaco**: la translucidez del TOML se compone sobre negro en vez de dejar ver el
   juego a través, porque debajo de un juego a pantalla completa no hay compositor garantizado.
 - **Los colores se editan solo en el TOML**: el editor cubre posición, tamaño y visibilidad.

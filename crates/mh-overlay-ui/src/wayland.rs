@@ -46,6 +46,9 @@ pub struct WaylandOverlay {
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
     shm: WlShm,
+    /// Se conserva solo para seguir recibiendo el tamaño del monitor: si el proxy se suelta,
+    /// el cliente lo destruye y deja de llegar el modo de la pantalla.
+    _output: Option<WlOutput>,
     empty_region: WlRegion,
     pool: Option<WlShmPool>,
     buffers: Vec<wl_buffer::WlBuffer>,
@@ -93,20 +96,24 @@ impl WaylandOverlay {
         let shm: WlShm = globals
             .bind(&handle, 1..=1, ())
             .map_err(|_| OverlayError::Wayland("el compositor no ofrece wl_shm".into()))?;
-        let layer_shell: ZwlrLayerShellV1 = globals.bind(&handle, 1..=4, ()).map_err(|_| {
-            OverlayError::Wayland("el compositor no ofrece wlr-layer-shell (¿es wlroots?)".into())
-        })?;
+        let layer_shell: ZwlrLayerShellV1 = globals
+            .bind(&handle, 1..=4, ())
+            .map_err(|_| OverlayError::Wayland("el compositor no ofrece wlr-layer-shell".into()))?;
 
-        // El tamaño del monitor solo hace falta para anclar el panel abajo o a la derecha; sin
-        // output el panel sigue funcionando pegado a la esquina superior izquierda.
+        // El output solo se enlaza para conocer el tamaño de la pantalla, que es lo que sitúa
+        // el panel cuando `position` lo ancla abajo o a la derecha. La superficie no se ata a
+        // ningún output concreto: ver el comentario de `get_layer_surface`.
         let output = globals.bind::<WlOutput, _, _>(&handle, 1..=4, ()).ok();
 
         let surface = compositor.create_surface(&handle, ());
         let empty_region = compositor.create_region(&handle, ());
 
+        // Sin output: el compositor coloca la capa en el monitor activo (Hyprland, el que tiene
+        // el foco), que al lanzar el overlay es el del juego. Atarla a un output fijo la mandaría
+        // siempre al mismo monitor, que con dos pantallas puede no ser el del juego.
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
-            output.as_ref(),
+            None,
             Layer::Overlay,
             title.to_string(),
             &handle,
@@ -135,6 +142,7 @@ impl WaylandOverlay {
             surface,
             layer_surface,
             shm,
+            _output: output,
             empty_region,
             pool: None,
             buffers: Vec::new(),
@@ -145,6 +153,10 @@ impl WaylandOverlay {
     }
 
     /// Tamaño del monitor en píxeles lógicos.
+    ///
+    /// Es el del primer `wl_output` del compositor, que es el que se enlaza para esto. Con dos
+    /// pantallas de distinto tamaño, anclar el panel a la derecha o abajo lo descoloca si acaba
+    /// en la otra, pero arriba a la izquierda siempre cae donde toca.
     pub fn screen_size(&self) -> (u32, u32) {
         self.events.output_size.unwrap_or((1920, 1080))
     }
