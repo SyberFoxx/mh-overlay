@@ -122,8 +122,8 @@ una barra del color de ese nivel, así que se lee de un vistazo sin leer «nivel
 monstruo muestra el nombre, la vida en porcentaje, una barra de vida con bisel, marcas cada
 10 % y la marca del umbral de captura, y debajo las barras finas de partes (azul, rompible;
 ámbar, cortable; dorada cuando ya se rompió) y de estados activos. Las partes rompibles llevan
-un hueco por cada rompimiento que aguantan y el contador `2/3` a la derecha, para saber cuánto
-falta sin adivinar por el porcentaje de vida; las que el juego no rompe ni corta (cuello,
+un hueco por cada rompimiento que aguantan y el contador `1/2` a la derecha (hechos de
+posibles), para saber cuánto falta sin adivinar por el porcentaje de vida; las que el juego no rompe ni corta (cuello,
 brazos, patas) no se muestran, porque solo son barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
 si el servidor no la tiene, el panel sale rectangular y sigue funcionando.
 
