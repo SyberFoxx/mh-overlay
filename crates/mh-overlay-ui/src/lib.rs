@@ -57,29 +57,59 @@ pub struct Panel {
     backend: Backend,
 }
 
+/// Backend que pide el usuario con `--backend`; `Auto` decide según la sesión.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Preference {
+    #[default]
+    Auto,
+    Wayland,
+    X11,
+}
+
 enum Backend {
     Wayland(WaylandOverlay),
     X11(OverlayWindow),
 }
 
 impl Panel {
-    /// Abre la superficie del panel. Si la sesión es Wayland pero el compositor no ofrece
-    /// layer-shell, se sigue con X11 en lugar de dejar al usuario sin overlay.
+    /// Abre la superficie del panel eligiendo backend según la sesión.
     pub fn open(title: &str) -> Result<Self, OverlayError> {
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        Self::open_with(title, Preference::Auto)
+    }
+
+    /// Abre la superficie del panel en el backend pedido.
+    ///
+    /// Con [`Preference::Auto`] se intenta Wayland primero y, si el compositor no ofrece
+    /// layer-shell, se sigue con X11 en lugar de dejar al usuario sin overlay. Ese respaldo no
+    /// mantiene el panel sobre un juego a pantalla completa en GNOME: Mutter ignora la posición
+    /// de las ventanas X11 y no implementa `wlr-layer-shell`, así que se avisa y se deja la
+    /// ventana como panel flotante normal.
+    pub fn open_with(title: &str, preference: Preference) -> Result<Self, OverlayError> {
+        let wayland_available = std::env::var_os("WAYLAND_DISPLAY").is_some();
+
+        if preference != Preference::X11 && wayland_available {
             match WaylandOverlay::open(title) {
                 Ok(overlay) => {
                     return Ok(Self {
                         backend: Backend::Wayland(overlay),
                     });
                 }
-                Err(error) => eprintln!("aviso: {error}; el panel usará X11"),
+                Err(error) if preference == Preference::Wayland => return Err(error),
+                Err(error) => eprintln!("aviso: {error}; {}", x11_fallback_hint()),
             }
         }
 
         Ok(Self {
             backend: Backend::X11(OverlayWindow::open(title)?),
         })
+    }
+
+    /// Nombre del backend en uso, para que la CLI diga dónde se está dibujando.
+    pub fn backend_name(&self) -> &'static str {
+        match &self.backend {
+            Backend::Wayland(_) => "wayland (capa overlay)",
+            Backend::X11(_) => "X11",
+        }
     }
 
     /// Tamaño de la pantalla donde vive el panel.
@@ -113,5 +143,49 @@ impl Panel {
             Backend::Wayland(overlay) => overlay.hide(),
             Backend::X11(window) => window.hide(),
         }
+    }
+}
+
+/// Qué supone caer a X11 en una sesión Wayland, según el escritorio.
+///
+/// GNOME (Mutter) no implementa `wlr-layer-shell` y no deja colocar ventanas X11, así que el
+/// panel queda como una ventana flotante que el juego a pantalla completa tapa. El mensaje dice
+/// qué hacer en vez de dejar al usuario adivinando por qué no ve nada.
+fn x11_fallback_hint() -> String {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    x11_fallback_hint_for(&desktop)
+}
+
+/// Variante de [`x11_fallback_hint`] con el escritorio ya leído, para poder probarla.
+fn x11_fallback_hint_for(desktop: &str) -> String {
+    if desktop.to_ascii_lowercase().contains("gnome") {
+        return "GNOME no permite fijar ventanas sobre el juego: el panel queda como ventana \
+                flotante normal. Para verlo encima usa la sesión «GNOME on Xorg» (desde el \
+                engranaje de la pantalla de acceso), deja el juego en ventana sin bordes, o usa \
+                un compositor con layer-shell (KDE, Hyprland, Sway)."
+            .to_string();
+    }
+
+    "el panel usará X11; si el juego corre a pantalla completa puede taparlo, y en ese caso \
+     conviene ponerlo en ventana sin bordes o usar un escritorio con layer-shell"
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::x11_fallback_hint_for;
+
+    /// El aviso de GNOME tiene que nombrar la salida concreta, que no es la misma que en X11.
+    #[test]
+    fn the_gnome_hint_sends_the_user_to_an_xorg_session() {
+        let hint = x11_fallback_hint_for("ubuntu:GNOME");
+
+        assert!(hint.contains("GNOME on Xorg"));
+        assert!(hint.contains("sin bordes"));
+    }
+
+    #[test]
+    fn other_desktops_get_the_generic_hint() {
+        assert!(!x11_fallback_hint_for("KDE").contains("GNOME"));
     }
 }

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=mh-overlay
+Comment=HUD de Monster Hunter: vida, partes y estados de los monstruos
+Exec=@APP@/mh-overlay --hub
+Icon=applications-games
+Terminal=false
+Categories=Game;Utility;
+Keywords=monster hunter;overlay;hud;world;rise;

@@ -1,3 +1,5 @@
+mod update;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -8,11 +10,10 @@ use clap::Parser;
 use mh_overlay_config::{Config, ConfigError, Loaded, Origin, Position};
 use mh_overlay_games::{GameKind, Hunt, Player, Snapshot, WeaponGauge};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process, maps_directory};
-use mh_overlay_ui::OverlayError;
-use mh_overlay_ui::Panel;
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
 use mh_overlay_ui::window::{SettingsWindow, UiEvent};
+use mh_overlay_ui::{OverlayError, Panel, Preference};
 
 /// Cualquiera de las capas puede fallar al arrancar; la CLI las presenta igual.
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +26,8 @@ enum AppError {
     Overlay(#[from] OverlayError),
     #[error(transparent)]
     Hub(#[from] mh_overlay_app::AppError),
+    #[error(transparent)]
+    Update(#[from] update::UpdateError),
 }
 
 #[derive(Parser)]
@@ -54,9 +57,13 @@ struct Arguments {
     #[arg(long)]
     watch: bool,
 
-    /// Dibujar el panel sobre el juego en una ventana X11
+    /// Dibujar el panel sobre el juego
     #[arg(long)]
     overlay: bool,
+
+    /// Backend del panel: auto prefiere layer-shell de Wayland y cae a X11
+    #[arg(long, value_name = "BACKEND", value_enum, default_value_t = BackendChoice::Auto)]
+    backend: BackendChoice,
 
     /// Abrir el hub de escritorio con diagnóstico y ajustes
     #[arg(long)]
@@ -85,6 +92,28 @@ struct Arguments {
     /// Mostrar los address maps disponibles y salir
     #[arg(long)]
     list_maps: bool,
+
+    /// Instalar la última release encima de esta instalación y salir
+    #[arg(long)]
+    update: bool,
+}
+
+/// Backend pedido en la línea de órdenes.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum BackendChoice {
+    Auto,
+    Wayland,
+    X11,
+}
+
+impl From<BackendChoice> for Preference {
+    fn from(choice: BackendChoice) -> Self {
+        match choice {
+            BackendChoice::Auto => Preference::Auto,
+            BackendChoice::Wayland => Preference::Wayland,
+            BackendChoice::X11 => Preference::X11,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -110,6 +139,12 @@ fn main() -> ExitCode {
 }
 
 fn run(arguments: &Arguments) -> Result<(), AppError> {
+    // Se atiende antes que nada: actualizar no necesita el juego, ni los mapas que va a
+    // reemplazar, ni una sesión gráfica.
+    if arguments.update {
+        return update::run().map_err(AppError::from);
+    }
+
     let maps_directory = maps_directory()?;
 
     if arguments.list_maps {
@@ -286,7 +321,8 @@ fn run_overlay(
     map: AddressMap,
 ) -> Result<(), AppError> {
     let text = Text::bundled()?;
-    let mut window = Panel::open("mh-overlay")?;
+    let mut window = Panel::open_with("mh-overlay", arguments.backend.into())?;
+    eprintln!("panel: {}", window.backend_name());
     let mut config = config;
     let mut stamp = modified_at(config_path);
     let mut last_error: Option<String> = None;

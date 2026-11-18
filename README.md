@@ -83,7 +83,8 @@ cargo build --release
     --pid <PID>         pid explícito, si hay más de una instancia corriendo
     --map <ARCHIVO>     address map concreto; por defecto, el más nuevo que coincida con el juego
     --base <HEX>        base del módulo, si /proc no la expone
-    --overlay           dibujar el panel encima del juego en una ventana X11
+    --overlay           dibujar el panel encima del juego
+    --backend <BACKEND> auto (layer-shell de Wayland, cae a X11), wayland o x11
     --settings          abrir el editor de ajustes (no necesita el juego)
     --hub               abrir el hub: diagnóstico de la conexión y ajustes con vista previa
     --position <POS>    top-left, top-right, bottom-left, bottom-right o center
@@ -92,6 +93,7 @@ cargo build --release
     --watch             refresco continuo en lugar de una sola lectura
     --interval <MS>     periodo de refresco; por defecto, el de la configuración
     --list-maps         muestra los address maps disponibles
+    --update            instalar la última release encima de esta instalación
 ```
 
 Sin `--overlay` la ejecución imprime la cacería, el jugador, y una línea por monstruo, por
@@ -111,7 +113,17 @@ sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
 El panel es una ventana X11 sin decorar (`override-redirect`) y, en sesiones Wayland, una
 superficie de la capa `overlay` de `wlr-layer-shell`: en ambos casos va por encima de la ventana
 del juego —incluido un juego a pantalla completa—, sin robar el foco y con los clics
-atravesándola. Arriba lleva el reloj que
+atravesándola.
+
+Quién puede poner una ventana encima de un juego a pantalla completa lo decide el compositor.
+Con `wlr-layer-shell` funcionan KDE Plasma, Hyprland, Sway, river, niri, Wayfire y el resto de
+compositores wlroots o compatibles. GNOME (Mutter) no implementa ese protocolo y no deja
+colocar ventanas X11, así que ahí el panel se queda como ventana flotante: se ve sobre el
+escritorio, pero un juego a pantalla completa lo tapa. Las salidas son jugar en **«GNOME on
+Xorg»** (sesión de la pantalla de acceso, donde el `override-redirect` sí queda encima), dejar
+el juego en **ventana sin bordes**, o usar uno de los compositores de la lista. `--backend x11`
+fuerza el backend X11 y `--backend wayland` exige layer-shell en vez de caer a X11, para saber
+qué está pasando sin adivinar; la CLI imprime el backend que usa al arrancar. Arriba lleva el reloj que
 queda de la cacería con las vidas del equipo. Debajo va el jugador: el arma equipada con su
 filo (longitudes por color y la posición actual marcada), los medidores de la clase (espíritu
 de la espada larga, frascos y cargas de la espada cargada, hojas del hacha espada, modo demonio
@@ -135,6 +147,44 @@ Para ver el diseño sin abrir el juego:
 ```bash
 cargo run -p mh-overlay-ui --example preview
 ```
+
+### Instalar en el sistema
+
+```bash
+./scripts/package.sh
+```
+
+Deja en `dist/` un `mh-overlay-<versión>-linux-<arquitectura>.tar.gz` con el binario, los mapas,
+la plantilla de configuración, el lanzador de menú y un `install.sh` que no pide sudo: copia el
+programa y sus mapas a `~/.local/share/mh-overlay`, enlaza `~/.local/bin/mh-overlay` y añade la
+entrada de menú que abre el hub. En la otra máquina:
+
+```bash
+tar xzf mh-overlay-0.1.0-linux-x86_64.tar.gz
+cd mh-overlay-0.1.0-linux-x86_64
+./install.sh
+```
+
+El binario solo depende de glibc y de las bibliotecas gráficas que ya trae el escritorio; los
+mapas van dentro del paquete porque son pequeños y así funciona sin el árbol de código. Volver a
+ejecutar `install.sh` sobre una instalación existente la deja en la versión del paquete y
+conserva la configuración, que vive en `~/.config/mh-overlay`.
+
+### Actualizar
+
+```bash
+mh-overlay --update
+```
+
+Baja la última release de GitHub, comprueba su SHA-256 y reemplaza el binario y los mapas de la
+instalación **en sitio**: no hay que desinstalar nada y la configuración no se toca. El binario
+se escribe al lado con otro nombre y se renombra encima, así que una actualización a mitad de
+cacería nunca deja un ejecutable truncado, y un paquete cuyo checksum no coincide se rechaza sin
+tocar lo instalado. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
+de inodo: el actualizador intenta restaurarla y, si no tiene permisos, imprime la orden exacta.
+
+Para probar el actualizador o usar un espejo, `MH_OVERLAY_UPDATE_API` y
+`MH_OVERLAY_UPDATE_DOWNLOADS` cambian las URL de la API y de las descargas.
 
 ### Configuración
 
