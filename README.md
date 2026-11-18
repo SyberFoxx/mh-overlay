@@ -26,9 +26,9 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Adjuntar al proceso y resolver la base del módulo | ✅ probado | ✅ probado |
 | Vida actual / máxima y porcentaje | ✅ escrito | ✅ escrito |
 | Jugador: vida y aguante | ✅ escrito | ✅ escrito |
-| Jugador: arma y filo | ⏳ pendiente | ✅ escrito |
-| Medidores de clase (espíritu, frascos, hacha, demonio, kinsecto) | ⏳ pendiente | ✅ escrito |
-| Buffs y estados del jugador | ⏳ pendiente | ✅ escrito |
+| Jugador: arma y filo | ✅ escrito | ✅ escrito |
+| Medidores de clase (espíritu, frascos, hacha, demonio, kinsecto) | ✅ escrito | ✅ escrito |
+| Buffs y estados del jugador | ✅ escrito | ✅ escrito |
 | Cacería: reloj y vidas del equipo | ✅ escrito | ✅ escrito |
 | Umbral de captura | ✅ escrito | ✅ escrito |
 | Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
@@ -285,6 +285,12 @@ los huecos; World las identifica por el índice que reporta el juego.
   monstruos tienen índices que HunterPie tampoco nombra.
 - **Los estados de World se muestran sin contador**: la estructura trae cuántas veces se ha
   aplicado el estado, pero el panel todavía no lo enseña.
+- **Rise distingue algunos estados solo por un flag**: veneno severo frente a veneno y burbujas
+  grandes frente a pequeñas comparten offset, y el panel muestra un único nombre por offset en
+  vez de arriesgar la fila equivocada. Las habilidades de armadura que solo se anuncian por
+  flag (Agitador, Berserk, Deriva...) tampoco aparecen todavía.
+- **Las canciones de Rise no guardan su máximo**: el juego solo escribe lo que queda, así que la
+  barra aprende la duración en la primera ejecución de cada canción.
 - **Jugador y cacería se leen con desplazamientos fijos**, no con claves de los mapas, porque
   sus estructuras no cambian de sitio entre builds: si una actualización los mueve, esas dos
   secciones desaparecen (el resto del panel sigue) hasta corregir las constantes.

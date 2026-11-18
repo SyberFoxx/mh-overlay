@@ -112,6 +112,28 @@ impl WeaponKind {
         })
     }
 
+    /// Tipo de arma tal como lo reporta Rise (`WEAPON_ADDRESS` + `0x8C`): usa otro orden que
+    /// World, así que no comparte [`Self::from_id`].
+    pub fn from_rise_id(id: i32) -> Option<Self> {
+        Some(match id {
+            0 => Self::Greatsword,
+            1 => Self::SwitchAxe,
+            2 => Self::Longsword,
+            3 => Self::LightBowgun,
+            4 => Self::HeavyBowgun,
+            5 => Self::Hammer,
+            6 => Self::Gunlance,
+            7 => Self::Lance,
+            8 => Self::SwordAndShield,
+            9 => Self::DualBlades,
+            10 => Self::HuntingHorn,
+            11 => Self::ChargeBlade,
+            12 => Self::InsectGlaive,
+            13 => Self::Bow,
+            _ => return None,
+        })
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Greatsword => "Espadón",

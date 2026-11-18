@@ -7,6 +7,171 @@
 //! poder frente a pastilla, por ejemplo). Los nombres son la traducción castellana de las
 //! claves `ABNORMALITY_*` de ese mismo archivo.
 
+/// Grupo de estados de Rise: cada bloque cuelga de un puntero distinto del jugador
+/// (`CONS_ABNORMALITIES_OFFSETS` y `DEBUFF_ABNORMALITIES_OFFSETS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiseGroup {
+    Consumable,
+    Debuff,
+}
+
+/// Un buff o estado del jugador en Rise, con el offset del `float` que guarda su temporizador
+/// dentro del bloque de su grupo.
+///
+/// La lista sale de `HunterPie/Game/Rise/Data/AbnormalityData.xml` (Apache-2.0, ver `NOTICE`).
+/// Los temporizadores de Rise están en tics de 60 por segundo y el lector los pasa a segundos.
+pub struct RiseBuff {
+    pub group: RiseGroup,
+    pub offset: u32,
+    pub name: &'static str,
+    /// Otro offset del bloque y el valor que debe tener para que este buff sea el activo
+    /// (semilla frente a mantequilla, dango fortificante frente a semilla del poder...).
+    pub depends: Option<(u32, i32)>,
+    pub debuff: bool,
+    /// Buffs sin temporizador propio (drogas): se muestran como activos mientras dependan.
+    pub infinite: bool,
+    /// En los estados que guardan el tiempo transcurrido, aquí va la duración total.
+    pub max_timer: Option<f32>,
+}
+
+/// Buffs, objetos, habilidades y comidas de Rise. Los estados que HunterPie distingue solo por
+/// un flag de condición (veneno severo frente a veneno, burbujas grandes frente a pequeñas)
+/// quedan con un solo nombre por offset: el flag no se lee todavía, así que mostrar los dos
+/// duplicaría la fila sin poder elegir la correcta.
+pub const RISE_BUFFS: &[RiseBuff] = &[
+    rise_consumable(0x90, "Semilla del poder", Some((0x84, 10))),
+    rise_consumable(0x90, "Mantequilla ardiente", Some((0x84, 25))),
+    rise_consumable(0x94, "Semilla de adamantio", None),
+    rise_consumable(0x98, "Mosca de seda", None),
+    rise_consumable(0x9C, "Zumo de energía", None),
+    rise_consumable(0xA8, "Polvo demoníaco", None),
+    rise_consumable(0xAC, "Polvo de caparazón", None),
+    rise_consumable(0xB0, "Firmeza de disparo de arco", None),
+    rise_consumable(0xB4, "Calamar rojo", None),
+    rise_consumable(0xBC, "Calamar amarillo", None),
+    rise_consumable(0xC4, "Mosca cortante", None),
+    rise_consumable(0xC8, "Afinidad de disparo de arco", None),
+    rise_consumable(0xD4, "Mofeta hedionda", None),
+    rise_consumable(0xDC, "Inmunidad", None),
+    rise_consumable(0xE4, "Pez gourmet", None),
+    rise_consumable(0xE8, "Curación natural", None),
+    rise_consumable(0xEC, "A por la victoria", None),
+    rise_consumable(0xF0, "Munición demoníaca", None),
+    rise_consumable(0xF4, "Munición de armadura", None),
+    rise_consumable(0xF8, "Guardia ofensiva", None),
+    rise_consumable(0x100, "Tambor de poder", None),
+    rise_consumable(0x104, "Rugido alentador", None),
+    rise_consumable(0x114, "Afinidad deslizante", None),
+    rise_consumable(0x11C, "Ataque al correr por muros", None),
+    rise_consumable(0x120, "Contraataque", None),
+    rise_consumable(0x12C, "Alma de Kushala Daora", None),
+    rise_consumable(0x134, "Alma de Chameleos", None),
+    rise_consumable(0x138, "Dango potenciador", None),
+    rise_consumable(0x144, "Dango glotón", None),
+    rise_consumable(0x158, "Dango cazador", None),
+    rise_consumable(0x160, "Dango conector", None),
+    rise_consumable(0x168, "Coalescencia", None),
+    rise_consumable(0x16C, "Crítico en cadena", None),
+    rise_consumable(0x174, "Subidón de adrenalina", None),
+    rise_timed(0x17C, "Llamada de spiribird", 60.0),
+    rise_consumable(0x180, "Curación de sangrado", None),
+    rise_consumable(0x18C, "Aguante infinito (furia)", None),
+    rise_consumable(0x190, "Afilado rápido", None),
+    rise_consumable(0x194, "Inmunidad al frenesí", None),
+    rise_consumable(0x1AC, "Activador de estado", None),
+    rise_debuff(0x7EC, "Sangre"),
+    rise_debuff(0x820, "Somnolencia"),
+    rise_debuff(0x8A4, "Veneno"),
+    rise_debuff(0x8A8, "Aturdimiento"),
+    rise_debuff(0x8AC, "Sueño"),
+    rise_debuff(0x8B0, "Parálisis"),
+    rise_debuff(0x8BC, "Defensa -"),
+    rise_debuff(0x8C0, "Resistencias -"),
+    rise_debuff(0x8C4, "Hedor"),
+    rise_debuff(0x8C8, "Fuego infernal"),
+    rise_debuff(0x8CC, "Explosión"),
+    rise_debuff(0x8D0, "Telaraña"),
+    rise_debuff(0x8D4, "Fuego"),
+    rise_debuff(0x8D8, "Agua"),
+    rise_debuff(0x8DC, "Hielo"),
+    rise_debuff(0x8E0, "Rayo"),
+    rise_debuff(0x8E4, "Dragón"),
+    rise_debuff(0x8F0, "Burbujas"),
+    rise_debuff(0x914, "Sangrado"),
+    rise_debuff(0x92C, "Frenesí"),
+    rise_debuff(0x1D8, "Pulido protector"),
+    rise_debuff(0x1DC, "Poder latente"),
+];
+
+/// Canciones de la cornamusa, en el orden exacto del array del juego: cada ranura es un
+/// puntero a su estado, y las que el juego no usa quedan vacías.
+pub const RISE_SONGS: [Option<&str>; 28] = [
+    Some("Automejora"),
+    Some("Ataque +"),
+    Some("Defensa +"),
+    Some("Afinidad +"),
+    Some("Ataque elemental +"),
+    Some("Ataque y defensa +"),
+    Some("Ataque y afinidad +"),
+    Some("Empuje anulado"),
+    Some("Tapones"),
+    Some("Tapones +"),
+    Some("Temblores anulados"),
+    Some("Presión del viento anulada"),
+    Some("Aturdimiento anulado"),
+    Some("Estados anulados"),
+    Some("Protección divina"),
+    None,
+    None,
+    None,
+    Some("Regeneración"),
+    Some("Uso de aguante -"),
+    Some("Recuperación de aguante +"),
+    Some("Menos desgaste de filo"),
+    Some("Daño ambiental anulado"),
+    None,
+    Some("Barrera sónica"),
+    Some("Melodía infernal"),
+    Some("Regeneración de filo"),
+    Some("Extensión de filo"),
+];
+
+const fn rise_consumable(offset: u32, name: &'static str, depends: Option<(u32, i32)>) -> RiseBuff {
+    RiseBuff {
+        group: RiseGroup::Consumable,
+        offset,
+        name,
+        depends,
+        debuff: false,
+        infinite: false,
+        max_timer: None,
+    }
+}
+
+const fn rise_debuff(offset: u32, name: &'static str) -> RiseBuff {
+    RiseBuff {
+        group: RiseGroup::Debuff,
+        offset,
+        name,
+        depends: None,
+        debuff: true,
+        infinite: false,
+        max_timer: None,
+    }
+}
+
+const fn rise_timed(offset: u32, name: &'static str, max_timer: f32) -> RiseBuff {
+    RiseBuff {
+        group: RiseGroup::Consumable,
+        offset,
+        name,
+        depends: None,
+        debuff: false,
+        infinite: false,
+        max_timer: Some(max_timer),
+    }
+}
+
 /// Un buff (o estado negativo) del jugador en World.
 pub struct WorldBuff {
     /// Offset del `float` con el temporizador, relativo a la base de estados.
@@ -208,6 +373,40 @@ mod tests {
                 entry.offset
             );
         }
+    }
+
+    #[test]
+    fn every_rise_buff_has_a_name() {
+        for entry in RISE_BUFFS {
+            assert!(
+                !entry.name.is_empty(),
+                "offset {:#x} sin nombre",
+                entry.offset
+            );
+        }
+    }
+
+    #[test]
+    fn rise_buffs_only_share_an_offset_to_disambiguate() {
+        for (index, entry) in RISE_BUFFS.iter().enumerate() {
+            let shared = RISE_BUFFS
+                .iter()
+                .skip(index + 1)
+                .filter(|other| other.group == entry.group && other.offset == entry.offset)
+                .all(|other| other.depends.is_some() && other.depends != entry.depends);
+
+            assert!(
+                shared,
+                "{:#x} comparte offset sin un `depends` que los distinga",
+                entry.offset
+            );
+        }
+    }
+
+    #[test]
+    fn every_rise_song_slot_has_a_name_or_is_empty() {
+        assert_eq!(RISE_SONGS.len(), 28);
+        assert!(RISE_SONGS.iter().flatten().all(|name| !name.is_empty()));
     }
 
     #[test]
