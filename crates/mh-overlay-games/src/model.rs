@@ -44,6 +44,9 @@ pub struct Part {
     pub flinch: Option<Health>,
     pub breakable: Option<Health>,
     pub severable: Option<Health>,
+    /// Rompimientos hechos y totales, cuando la parte se rompe por golpes acumulados. El
+    /// porcentaje de `breakable` ya los incluye; esto deja el marcador "2/3" en la barra.
+    pub breaks: Option<(u32, u32)>,
 }
 
 /// Acumulación de un estado alterado.

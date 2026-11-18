@@ -717,6 +717,7 @@ impl<'map> Rise<'map> {
                 flinch: self.current_component(flinch[index], encoded, max_flinch),
                 breakable: self.current_component(breakable[index], encoded, max_breakable),
                 severable: self.current_component(severable[index], encoded, max_severable),
+                breaks: None,
             });
         }
 

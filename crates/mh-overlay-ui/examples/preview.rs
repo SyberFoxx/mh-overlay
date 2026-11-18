@@ -129,6 +129,7 @@ fn monsters() -> Vec<Monster> {
             flinch: None,
             breakable: None,
             severable: Some(Health::new(180.0, 240.0)),
+            breaks: None,
         },
     ];
     rathalos.ailments = vec![ailment(9, 640.0, 1000.0), ailment(1, 120.0, 800.0)];
@@ -158,6 +159,7 @@ fn part(monster: i32, index: usize, percent: f32) -> Part {
         flinch: None,
         breakable: Some(Health::new(percent, 100.0)),
         severable: None,
+        breaks: Some((1, 2)),
     }
 }
 

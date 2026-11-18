@@ -883,6 +883,7 @@ fn part(index: usize, name: &'static str, damaged: f32, breakable: bool, severab
         flinch: Some(Health::new(100.0 - damaged, 100.0)),
         breakable: breakable.then(|| Health::new(100.0 - damaged, 100.0)),
         severable: severable.then(|| Health::new(100.0 - damaged, 100.0)),
+        breaks: None,
     }
 }
 

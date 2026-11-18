@@ -16,7 +16,10 @@ import sys
 import xml.etree.ElementTree as ET
 
 # Claves que HunterPie deja sin nombre a propósito: no son una parte física.
-NON_PARTS = {"PART_UNKNOWN", "PART_TO_BE_MAPPED"}
+#
+# `PART_KNOCKDOWN` es el contador de derribos del monstruo, no un sitio del cuerpo: World lo
+# marca como cortable y por eso aparecía como una parte "Noqueo" que nunca se rompe.
+NON_PARTS = {"PART_UNKNOWN", "PART_TO_BE_MAPPED", "PART_KNOCKDOWN"}
 
 # Estados de una misma parte, para completar las claves que la localización no trae.
 VARIANTS = {
@@ -66,7 +69,12 @@ def parse_monsters(path):
     monsters = []
     for monster in root.findall(".//Monster"):
         parts = [
-            (int(part.get("Id")), part.get("String"))
+            (
+                int(part.get("Id")),
+                part.get("String"),
+                part.get("IsSeverable") == "True",
+                [int(threshold.get("Threshold")) for threshold in part.findall("./Break")],
+            )
             for part in monster.findall("./Parts/Part")
         ]
         monsters.append((int(monster.get("Id")), monster.get("Capture"), parts))
@@ -107,10 +115,14 @@ def main():
         "//! partes por su posición en el array (igual que `MHRMonster.Parts[i]`); World las",
         "//! identifica por el índice que reporta el juego (`MHWMonsterPart`).",
         "",
-        "/// Parte de World: índice del juego y nombre en castellano.",
+        "/// Parte de World: índice del juego, nombre en castellano y cómo se rompe.",
         "pub struct WorldPart {",
         "    pub index: usize,",
         "    pub name: &'static str,",
+        "    /// `IsSeverable`: el juego guarda su vida en la zona de partes cortables.",
+        "    pub severable: bool,",
+        "    /// Rompimientos que aguanta la parte, en unidades de su propia vida (`Break`).",
+        "    pub breaks: &'static [u8],",
         "}",
         "",
         "/// Porcentaje de vida por debajo del cual se puede capturar.",
@@ -126,16 +138,18 @@ def main():
 
     for monster_id, _, parts_list in sorted(world, key=lambda entry: entry[0]):
         named = [
-            (part_id, name)
-            for part_id, key in sorted(parts_list)
+            (part_id, name, severable, breaks)
+            for part_id, key, severable, breaks in sorted(parts_list)
             if (name := name_of(key, f"World {monster_id}")) is not None
         ]
         if not named:
             continue
         lines.append(f"    ({monster_id}, &[")
-        for part_id, name in named:
+        for part_id, name, severable, breaks in named:
+            thresholds = ", ".join(str(break_) for break_ in breaks)
             lines.append(
-                f"        WorldPart {{ index: {part_id}, name: {rust_str(name)} }},"
+                f"        WorldPart {{ index: {part_id}, name: {rust_str(name)}, "
+                f"severable: {str(severable).lower()}, breaks: &[{thresholds}] }},"
             )
         lines.append("    ]),")
 
@@ -143,7 +157,7 @@ def main():
 
     for monster_id, _, parts_list in sorted(rise, key=lambda entry: entry[0]):
         lines.append(f"    ({monster_id}, &[")
-        for _, key in parts_list:
+        for _, key, _, _ in parts_list:
             name = name_of(key, f"Rise {monster_id}")
             lines.append(f"        {('None' if name is None else 'Some(' + rust_str(name) + ')')},")
         lines.append("    ]),")
@@ -198,14 +212,20 @@ def main():
         "        .map(|index| f32::from(WORLD_CAPTURE[index].1))",
         "}",
         "",
-        "/// Nombre de la parte de World con ese índice, si la tabla lo conoce.",
-        "pub fn world_part_name(monster: i32, index: usize) -> Option<&'static str> {",
-        "    let parts = WORLD_PARTS",
+        "/// Partes de World con ese id, en el orden en que el juego las registra.",
+        "pub fn world_parts(monster: i32) -> &'static [WorldPart] {",
+        "    WORLD_PARTS",
         "        .binary_search_by_key(&monster, |entry| entry.0)",
         "        .ok()",
-        "        .map(|position| WORLD_PARTS[position].1)?;",
+        "        .map_or(&[], |position| WORLD_PARTS[position].1)",
+        "}",
         "",
-        "    parts.iter().find(|part| part.index == index).map(|part| part.name)",
+        "/// Nombre de la parte de World con ese índice, si la tabla lo conoce.",
+        "pub fn world_part_name(monster: i32, index: usize) -> Option<&'static str> {",
+        "    world_parts(monster)",
+        "        .iter()",
+        "        .find(|part| part.index == index)",
+        "        .map(|part| part.name)",
         "}",
         "",
         "/// Nombre de la parte de Rise por su posición en el array de partes.",
@@ -253,6 +273,19 @@ def main():
         "    fn known_parts_resolve_to_names() {",
         "        assert_eq!(world_part_name(1, 1), Some(\"Cabeza\"));",
         "        assert!(rise_part_name(110, 0).is_some());",
+        "    }",
+        "",
+        "    #[test]",
+        "    fn fatalis_only_breaks_the_parts_the_game_breaks() {",
+        "        let broken: Vec<_> = world_parts(101)",
+        "            .iter()",
+        "            .filter(|part| !part.breaks.is_empty())",
+        "            .map(|part| part.name)",
+        "            .collect();",
+        "",
+        "        assert_eq!(broken, [\"Cabeza\", \"Pecho\", \"Ala izquierda\", \"Ala derecha\"]);",
+        "        assert_eq!(world_parts(101)[1].breaks, [3, 6]);",
+        "        assert!(world_parts(101).iter().all(|part| !part.severable));",
         "    }",
         "",
         "    #[test]",

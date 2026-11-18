@@ -116,10 +116,15 @@ queda de la cacería con las vidas del equipo. Debajo va el jugador: el arma equ
 filo (longitudes por color y la posición actual marcada), los medidores de la clase (espíritu
 de la espada larga, frascos y cargas de la espada cargada, hojas del hacha espada, modo demonio
 y kinsecto), la vida —con la parte recuperable en rojo—, el aguante y los buffs y estados
-activos con su tiempo restante. Por
-monstruo muestra el nombre, la vida en porcentaje, una barra con la marca del umbral de captura
-y, debajo, las barras finas de partes (azul, rompible; ámbar, cortable) y de estados activos,
-cada uno con su color. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
+activos con su tiempo restante. La barra de filo separa cada color con un hueco y lleva un puntero
+con su posición; el espíritu de la espada larga se pinta con tres rombos —el nivel cargado— y
+una barra del color de ese nivel, así que se lee de un vistazo sin leer «nivel 2». Por
+monstruo muestra el nombre, la vida en porcentaje, una barra de vida con bisel, marcas cada
+10 % y la marca del umbral de captura, y debajo las barras finas de partes (azul, rompible;
+ámbar, cortable; dorada cuando ya se rompió) y de estados activos. Las partes rompibles llevan
+un hueco por cada rompimiento que aguantan y el contador `2/3` a la derecha, para saber cuánto
+falta sin adivinar por el porcentaje de vida; las que el juego no rompe ni corta (cuello,
+brazos, patas) no se muestran, porque solo son barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
 si el servidor no la tiene, el panel sale rectangular y sigue funcionando.
 
 El tamaño se deriva del contenido y de `overlay.scale`; la posición, de `overlay.position` y
@@ -262,7 +267,9 @@ nombre. `--map` permite probar uno sin tocar los demás.
 ## Las tablas de datos
 
 `crates/mh-overlay-games/src/tables.rs` es un archivo generado: trae el umbral de captura de
-World, el nombre de cada parte y de cada monstruo, y los estados alterados de World. Los datos
+World, el nombre de cada parte y de cada monstruo, y los estados alterados de World. Cada parte
+trae además si se puede cortar y cuántos golpes aguantan sus rompimientos, que es lo que dibujan
+los huecos de la barra. Los datos
 salen de los `MonsterData.xml` de HunterPie (Apache-2.0) y de su localización `es-es` (MIT). El
 generador es `scripts/generate_tables.py` y se niega a escribir la tabla si alguna parte
 queda sin nombre, para que un hueco se vea como `parte NN` y no como una etiqueta a medias:
@@ -285,6 +292,9 @@ los huecos; World las identifica por el índice que reporta el juego.
   monstruos tienen índices que HunterPie tampoco nombra.
 - **Los estados de World se muestran sin contador**: la estructura trae cuántas veces se ha
   aplicado el estado, pero el panel todavía no lo enseña.
+- **Las partes de World que no se rompen ni se cortan no se muestran**: el juego las deja con la
+  vida al máximo y sin contador, y una barra siempre llena solo estorba. Si un monstruo no tiene
+  ninguna parte rompible en la tabla, el panel omite la lista de partes.
 - **Rise distingue algunos estados solo por un flag**: veneno severo frente a veneno y burbujas
   grandes frente a pequeñas comparten offset, y el panel muestra un único nombre por offset en
   vez de arriesgar la fila equivocada. Las habilidades de armadura que solo se anuncian por

@@ -22,6 +22,12 @@ const BASE_WIDTH: f32 = 320.0;
 const RADIUS: f32 = 10.0;
 /// Ancho de la columna de etiquetas dentro de una fila.
 const LABEL_WIDTH: f32 = 86.0;
+/// Ancho reservado a la derecha de cada barra para su valor ("62 %", "2/3", "18 s").
+const VALUE_WIDTH: f32 = 46.0;
+/// Alto de la barra de filo, en unidades lógicas.
+const SHARPNESS_BAR: f32 = 9.0;
+/// Lado de los rombos que marcan el nivel de espíritu.
+const PIP_RADIUS: f32 = 3.4;
 /// Ancho máximo de la etiqueta en las filas de detalle (buffs y medidores): sus nombres son
 /// más largos que los de una parte.
 const DETAIL_LABEL_WIDTH: f32 = 118.0;
@@ -101,6 +107,10 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
 
         for part in visible_parts(monster) {
             let fallback = format!("parte {:02}", part.index);
+            let broken = part
+                .breaks
+                .is_some_and(|(done, total)| total > 0 && done >= total);
+
             draw_row(
                 &mut canvas,
                 config,
@@ -110,12 +120,16 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                 Row {
                     label: part.name.unwrap_or(&fallback),
                     fraction: part_fraction(part),
-                    color: if part.severable.is_some() {
+                    color: if broken {
+                        config.style.capture
+                    } else if part.severable.is_some() {
                         config.style.severable
                     } else {
                         config.style.part
                     },
                     recoverable: 0.0,
+                    segments: part.breaks.map(|(_, total)| total),
+                    value: part.breaks.map(|(done, total)| format!("{done}/{total}")),
                 },
             );
 
@@ -139,6 +153,8 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                     fraction: (ailment.buildup_percent() / 100.0).clamp(0.0, 1.0),
                     color: ailment_color(&config.style, ailment.name),
                     recoverable: 0.0,
+                    segments: None,
+                    value: None,
                 },
             );
 
@@ -168,9 +184,9 @@ impl Geometry {
         Self {
             scale,
             padding: 14.0 * scale,
-            header: 21.0 * scale,
-            bar: 7.0 * scale,
-            track: 3.0 * scale,
+            header: 22.0 * scale,
+            bar: 12.0 * scale,
+            track: 4.0 * scale,
             row: 15.0 * scale,
             gap: 10.0 * scale,
             small: 5.0 * scale,
@@ -337,7 +353,7 @@ fn draw_title(
     y + geometry.header + geometry.small
 }
 
-/// Pista oscura, relleno degradado y marca vertical del umbral de captura.
+/// Bisel, pista oscura, relleno degradado, escala cada 10 % y marca del umbral de captura.
 fn draw_health_bar(
     canvas: &mut Canvas,
     config: &Config,
@@ -346,14 +362,22 @@ fn draw_health_bar(
     y: f32,
 ) -> f32 {
     let style = &config.style;
+    let scale = geometry.scale;
     let bar = Rect::new(
         geometry.padding as i32,
         y.round() as i32,
         geometry.inner_width(canvas).max(1.0) as u32,
-        geometry.bar.max(2.0) as u32,
+        geometry.bar.max(4.0) as u32,
     );
+    let radius = 3.0 * scale;
 
-    canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+    // El borde claro separa la barra del panel y la pista queda hundida un píxel.
+    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.26));
+    canvas.fill_rounded(
+        bar.inset(1, 1),
+        (radius - 1.0).max(0.0),
+        lighten(style.panel, 0.06),
+    );
 
     let fraction = (monster.health.percent() / 100.0).clamp(0.0, 1.0);
     let filled = (bar.width as f32 * fraction).round() as u32;
@@ -363,9 +387,29 @@ fn draw_health_bar(
         style.health
     };
 
-    if filled > 1 {
-        let fill = Rect::new(bar.x, bar.y, filled, bar.height);
-        canvas.fill_rounded_gradient(fill, fill.height as f32 / 2.0, lighten(base, 0.18), base);
+    if filled > 3 {
+        let fill = Rect::new(
+            bar.x + 1,
+            bar.y + 1,
+            filled - 2,
+            bar.height.saturating_sub(2),
+        );
+        canvas.fill_rounded_gradient(fill, (radius - 1.0).max(0.0), lighten(base, 0.34), base);
+    }
+
+    // Marcas cada 10 %: la barra se lee como una escala y no como una mancha de color.
+    let tick = lighten(style.panel, 0.5).with_alpha(60);
+    for step in 1..10 {
+        let x = bar.x as f32 + bar.width as f32 * (step as f32 / 10.0);
+        canvas.fill_rect(
+            Rect::new(
+                x.round() as i32,
+                bar.y + 1,
+                scale.round().max(1.0) as u32,
+                bar.height.saturating_sub(2),
+            ),
+            tick,
+        );
     }
 
     if let Some(threshold) = monster.capture_percent
@@ -376,9 +420,9 @@ fn draw_health_bar(
         canvas.fill_rect(
             Rect::new(
                 x.round() as i32,
-                bar.y,
-                (geometry.scale * 2.0).max(1.0) as u32,
-                bar.height,
+                bar.y - (scale).round() as i32,
+                (scale * 2.0).max(2.0) as u32,
+                bar.height + (scale * 2.0).round() as u32,
             ),
             style.capture,
         );
@@ -398,7 +442,7 @@ const MAX_BUFF_ROWS: usize = 6;
 /// Vida y aguante, el arma (tipo, filo y medidores) y los buffs activos.
 fn player_rows(player: &Player) -> usize {
     let weapon = player.weapon.as_ref().map_or(0, |weapon| {
-        1 + usize::from(weapon.sharpness.is_some()) + gauge_rows(weapon).len()
+        1 + usize::from(weapon.sharpness.is_some()) + spirit_rows(weapon) + gauge_rows(weapon).len()
     });
 
     2 + weapon + player.buffs.len().min(MAX_BUFF_ROWS)
@@ -481,6 +525,26 @@ fn draw_player(
     if let Some(weapon) = &player.weapon {
         y = draw_weapon(canvas, config, text, geometry, weapon, y);
 
+        if let Some(WeaponGauge::Spirit { regen, .. }) = &weapon.gauge {
+            y = draw_spirit(canvas, config, text, geometry, weapon, y);
+
+            if *regen > 0.0 {
+                y = draw_detail(
+                    canvas,
+                    config,
+                    text,
+                    geometry,
+                    y,
+                    Detail {
+                        label: "Regen. espíritu",
+                        fraction: None,
+                        text: format!("{regen:.0}s"),
+                        color: timer_color(),
+                    },
+                );
+            }
+        }
+
         for row in gauge_rows(weapon) {
             y = draw_detail(canvas, config, text, geometry, y, row);
         }
@@ -500,6 +564,8 @@ fn draw_player(
         Row {
             label: "Vida",
             fraction: (health / 100.0).clamp(0.0, 1.0),
+            segments: None,
+            value: None,
             color: if health <= style.low_health_percent {
                 style.low_health
             } else {
@@ -518,6 +584,8 @@ fn draw_player(
         Row {
             label: "Aguante",
             fraction: (player.stamina.percent() / 100.0).clamp(0.0, 1.0),
+            segments: None,
+            value: None,
             color: style.part,
             recoverable: 0.0,
         },
@@ -589,26 +657,30 @@ fn draw_detail(
     );
 
     let value_width = text.width(&detail.text, size);
-    let bar_right = canvas.width() as f32 - geometry.padding - value_width - 8.0 * geometry.scale; // Columna fija para que todas las barras de detalle empiecen a la misma altura; el ancho
-    // es mayor que el de las partes porque los nombres de buffs son más largos.
+    // Columna derecha fija: todas las barras de detalle terminan a la misma altura y los
+    // nombres de buffs más largos no las encogen frame a frame.
     let label_width = DETAIL_LABEL_WIDTH * geometry.scale + 6.0 * geometry.scale;
+    let bar_right = canvas.width() as f32 - geometry.padding - VALUE_WIDTH * geometry.scale;
 
     if let Some(fraction) = detail.fraction {
-        let bar_height = geometry.track.max(2.0);
+        let fraction = fraction.clamp(0.0, 1.0);
+        let bar_height = geometry.track.max(3.0);
         let bar = Rect::new(
             geometry.padding as i32 + label_width as i32,
             (y + geometry.row * 0.5 - bar_height * 0.5).round() as i32,
             (bar_right - geometry.padding - label_width).max(1.0) as u32,
             bar_height as u32,
         );
+        let radius = bar.height as f32 / 2.0;
 
-        canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+        canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
 
-        let filled = (bar.width as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
-        if filled > 0 {
-            canvas.fill_rounded(
+        let filled = (bar.width as f32 * fraction).round() as u32;
+        if filled > 1 {
+            canvas.fill_rounded_gradient(
                 Rect::new(bar.x, bar.y, filled, bar.height),
-                bar.height as f32 / 2.0,
+                radius,
+                lighten(detail.color, 0.3),
                 detail.color,
             );
         }
@@ -647,39 +719,8 @@ fn gauge_rows(weapon: &Weapon) -> Vec<Detail<'static>> {
     };
 
     match gauge {
-        WeaponGauge::Spirit {
-            buildup,
-            level,
-            timer,
-            max_timer,
-            regen,
-        } => {
-            let mut rows = vec![
-                Detail {
-                    label: "Espíritu",
-                    fraction: Some(buildup / 100.0),
-                    text: format!("nivel {level}"),
-                    color: state_color(),
-                },
-                Detail {
-                    label: "Nivel",
-                    fraction: (*max_timer > 0.0).then(|| timer / max_timer),
-                    text: format!("{timer:.0}s"),
-                    color: timer_color(),
-                },
-            ];
-
-            if *regen > 0.0 {
-                rows.push(Detail {
-                    label: "Regen. espíritu",
-                    fraction: None,
-                    text: format!("{regen:.0}s"),
-                    color: timer_color(),
-                });
-            }
-
-            rows
-        }
+        // El espíritu tiene su propio dibujo (rombos de nivel y color por nivel).
+        WeaponGauge::Spirit { .. } => Vec::new(),
         WeaponGauge::ChargeBlade {
             phials,
             max_phials,
@@ -816,6 +857,34 @@ fn gauge_rows(weapon: &Weapon) -> Vec<Detail<'static>> {
     }
 }
 
+/// Icono de espada vertical: hoja con punta, guarda y empuñadura. Da contexto al filo sin
+/// gastar una palabra y se reconoce a 11 px de alto.
+fn draw_blade_icon(canvas: &mut Canvas, x: f32, center_y: f32, scale: f32, color: Color) {
+    let center_x = x + 5.0 * scale;
+    let thickness = 1.5 * scale;
+
+    canvas.fill_line(
+        (center_x, center_y - 5.5 * scale),
+        (center_x, center_y + 1.0 * scale),
+        thickness * 1.5,
+        color,
+    );
+    canvas.fill_diamond((center_x, center_y - 6.0 * scale), 1.4 * scale, color);
+    canvas.fill_line(
+        (center_x - 3.5 * scale, center_y + 1.5 * scale),
+        (center_x + 3.5 * scale, center_y + 1.5 * scale),
+        thickness,
+        color,
+    );
+    canvas.fill_line(
+        (center_x, center_y + 1.5 * scale),
+        (center_x, center_y + 6.0 * scale),
+        thickness * 1.2,
+        color,
+    );
+    canvas.fill_diamond((center_x, center_y + 6.5 * scale), 1.3 * scale, color);
+}
+
 /// Tipo de arma y, si gasta filo, su barra de colores con la posición actual marcada.
 fn draw_weapon(
     canvas: &mut Canvas,
@@ -826,13 +895,23 @@ fn draw_weapon(
     y: f32,
 ) -> f32 {
     let style = &config.style;
-    let size = 12.0 * geometry.scale;
+    let scale = geometry.scale;
+    let size = 12.0 * scale;
     let right = canvas.width() as f32 - geometry.padding;
+    let icon = 14.0 * scale;
+
+    draw_blade_icon(
+        canvas,
+        geometry.padding,
+        y + geometry.row * 0.5,
+        scale,
+        style.muted,
+    );
 
     text.draw(
         canvas,
         weapon.kind.label(),
-        geometry.padding,
+        geometry.padding + icon,
         y + text.ascent(size),
         size,
         style.text,
@@ -842,29 +921,41 @@ fn draw_weapon(
         return y + geometry.row;
     };
 
-    let value = format!(
-        "filo {:.0} · {}",
-        sharpness.current,
-        sharpness.level.label()
+    // El nivel va con el color del filo: el nombre del color se lee solo una vez.
+    let level = format!(" · {}", sharpness.level.label());
+    let level_width = text.width(&level, size);
+    let value = format!("filo {:.0}", sharpness.current);
+    let value_width = text.width(&value, size);
+    let value_y = y + text.ascent(size);
+
+    text.draw(
+        canvas,
+        &level,
+        right - level_width,
+        value_y,
+        size,
+        sharpness_color(sharpness.level),
     );
     text.draw(
         canvas,
         &value,
-        right - text.width(&value, size),
-        y + text.ascent(size),
+        right - level_width - value_width,
+        value_y,
         size,
         style.muted,
     );
 
     let y = y + geometry.row;
+    let height = SHARPNESS_BAR * scale;
     let bar = Rect::new(
         geometry.padding as i32,
-        (y + geometry.row * 0.5 - geometry.bar * 0.5).round() as i32,
+        (y + geometry.row * 0.5 - height * 0.5).round() as i32,
         geometry.inner_width(canvas).max(1.0) as u32,
-        geometry.bar.max(2.0) as u32,
+        height.max(3.0) as u32,
     );
+    let radius = 2.0 * scale;
 
-    canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.22));
 
     let total = sharpness.total();
     if total > 0.0 {
@@ -872,13 +963,18 @@ fn draw_weapon(
 
         for (index, level) in SharpnessLevel::ALL.iter().enumerate() {
             let length = f32::from(sharpness.lengths[index]);
-            let width = (bar.width as f32 * length / total).round();
+            let width = bar.width as f32 * length / total;
 
-            if width >= 1.0 {
-                canvas.fill_rect(
-                    Rect::new(x.round() as i32, bar.y, width as u32, bar.height),
-                    sharpness_color(*level),
+            if width >= 1.5 {
+                let color = sharpness_color(*level);
+                let segment = Rect::new(
+                    (x + scale).round() as i32,
+                    bar.y + scale.round() as i32,
+                    (width - scale * 2.0).max(1.0) as u32,
+                    bar.height.saturating_sub((2.0 * scale).round() as u32),
                 );
+
+                canvas.fill_rounded_gradient(segment, radius, lighten(color, 0.32), color);
             }
 
             x += width;
@@ -888,11 +984,129 @@ fn draw_weapon(
         canvas.fill_rect(
             Rect::new(
                 marker_x.round() as i32 - 1,
-                bar.y - geometry.small.round() as i32,
-                (geometry.scale * 2.0).max(2.0) as u32,
-                bar.height + geometry.small.round() as u32 * 2,
+                bar.y - scale.round() as i32,
+                (scale * 2.0).max(2.0) as u32,
+                bar.height + (scale * 2.0).round() as u32,
             ),
             style.text,
+        );
+        canvas.fill_diamond(
+            (marker_x, bar.y as f32 - 3.0 * scale),
+            2.0 * scale,
+            style.text,
+        );
+    }
+
+    y + geometry.row
+}
+
+/// Color del medidor de espíritu según el nivel cargado.
+fn spirit_color(level: u8) -> Color {
+    match level {
+        0 => Color::rgb(0x5c, 0x68, 0x7a),
+        1 => Color::rgb(0xe8, 0xf0, 0xf8),
+        2 => Color::rgb(0x63, 0xb4, 0xf0),
+        _ => Color::rgb(0xf0, 0xc4, 0x5a),
+    }
+}
+
+/// Filas que ocupa el medidor de espíritu (el propio medidor y, si toca, su regeneración).
+fn spirit_rows(weapon: &Weapon) -> usize {
+    match &weapon.gauge {
+        Some(WeaponGauge::Spirit { regen, .. }) => 1 + usize::from(*regen > 0.0),
+        _ => 0,
+    }
+}
+
+/// Espíritu del mandoble: barra con el color del nivel y tres rombos que marcan cuál está
+/// cargado, para no tener que leer "nivel 2" en mitad del combate.
+fn draw_spirit(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    weapon: &Weapon,
+    y: f32,
+) -> f32 {
+    let Some(WeaponGauge::Spirit {
+        buildup,
+        level,
+        timer,
+        max_timer,
+        ..
+    }) = &weapon.gauge
+    else {
+        return y;
+    };
+    let style = &config.style;
+    let scale = geometry.scale;
+    let size = 12.0 * scale;
+    let inner = geometry.inner_width(canvas);
+    let color = spirit_color(*level);
+
+    text.draw(
+        canvas,
+        "Espíritu",
+        geometry.padding,
+        y + text.ascent(size),
+        size,
+        style.muted,
+    );
+
+    let value = if *max_timer > 0.0 {
+        format!("{timer:.0}s")
+    } else {
+        "—".to_string()
+    };
+    let value_width = text.width(&value, size);
+    text.draw(
+        canvas,
+        &value,
+        canvas.width() as f32 - geometry.padding - value_width,
+        y + text.ascent(size),
+        size,
+        style.text,
+    );
+
+    // Tres rombos: el nivel cargado se rellena con el color del propio medidor.
+    let pip_gap = 4.0 * scale;
+    let pip_space = 3.0 * (PIP_RADIUS * 2.0 + pip_gap) * scale;
+    let pips_x = canvas.width() as f32 - geometry.padding - value_width - 6.0 * scale - pip_space;
+    let center_y = y + geometry.row * 0.5;
+
+    for pip in 0..3u8 {
+        let center = (
+            pips_x
+                + (PIP_RADIUS + pip_gap * 0.5) * scale
+                + f32::from(pip) * (PIP_RADIUS * 2.0 + pip_gap) * scale,
+            center_y,
+        );
+        if pip < *level {
+            canvas.fill_diamond(center, PIP_RADIUS * scale, color);
+        } else {
+            canvas.fill_diamond(center, PIP_RADIUS * scale, lighten(style.panel, 0.22));
+        }
+    }
+
+    let bar_height = geometry.track.max(3.0);
+    let bar = Rect::new(
+        geometry.padding as i32 + (LABEL_WIDTH * scale) as i32,
+        (center_y - bar_height * 0.5).round() as i32,
+        (inner - LABEL_WIDTH * scale - VALUE_WIDTH * scale - pip_space - 12.0 * scale).max(1.0)
+            as u32,
+        bar_height as u32,
+    );
+    let radius = bar.height as f32 / 2.0;
+
+    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
+
+    let filled = (bar.width as f32 * (buildup / 100.0).clamp(0.0, 1.0)).round() as u32;
+    if filled > 1 {
+        canvas.fill_rounded_gradient(
+            Rect::new(bar.x, bar.y, filled, bar.height),
+            radius,
+            lighten(color, 0.3),
+            color,
         );
     }
 
@@ -919,9 +1133,13 @@ struct Row<'a> {
     color: Color,
     /// Parte de la barra que se puede recuperar (vida roja), como fracción del máximo.
     recoverable: f32,
+    /// Tramos en que se divide la barra (los rompimientos de una parte).
+    segments: Option<u32>,
+    /// Texto de la columna derecha; si falta, el porcentaje.
+    value: Option<String>,
 }
 
-/// Fila secundaria: etiqueta, barra fina y porcentaje.
+/// Fila secundaria: etiqueta, barra fina (opcionalmente a tramos) y su valor.
 fn draw_row(
     canvas: &mut Canvas,
     config: &Config,
@@ -931,7 +1149,7 @@ fn draw_row(
     row: Row<'_>,
 ) {
     let style = &config.style;
-    let fraction = row.fraction;
+    let fraction = row.fraction.clamp(0.0, 1.0);
     let color = row.color;
     let size = 12.0 * geometry.scale;
     let inner = geometry.inner_width(canvas);
@@ -946,43 +1164,63 @@ fn draw_row(
         style.muted,
     );
 
-    let bar_height = geometry.track.max(2.0);
+    let bar_height = geometry.track.max(3.0);
     let bar = Rect::new(
         geometry.padding as i32 + (LABEL_WIDTH * geometry.scale) as i32,
         (y + geometry.row * 0.5 - bar_height * 0.5).round() as i32,
-        (inner - LABEL_WIDTH * geometry.scale - 46.0 * geometry.scale).max(1.0) as u32,
+        (inner - LABEL_WIDTH * geometry.scale - VALUE_WIDTH * geometry.scale).max(1.0) as u32,
         bar_height as u32,
     );
+    let radius = bar.height as f32 / 2.0;
 
-    canvas.fill_rounded(bar, bar.height as f32 / 2.0, lighten(style.panel, 0.14));
+    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
 
     // La vida recuperable se dibuja detrás del relleno: es la parte que aún se puede curar.
     if row.recoverable > 0.0 {
         let width =
             (bar.width as f32 * (fraction + row.recoverable).clamp(0.0, 1.0)).round() as u32;
-        if width > 0 {
+        if width > 1 {
             canvas.fill_rounded(
                 Rect::new(bar.x, bar.y, width, bar.height),
-                bar.height as f32 / 2.0,
+                radius,
                 style.low_health,
             );
         }
     }
 
-    let filled = (bar.width as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
-    if filled > 0 {
-        canvas.fill_rounded(
+    let filled = (bar.width as f32 * fraction).round() as u32;
+    if filled > 1 {
+        canvas.fill_rounded_gradient(
             Rect::new(bar.x, bar.y, filled, bar.height),
-            bar.height as f32 / 2.0,
+            radius,
+            lighten(color, 0.3),
             color,
         );
     }
 
-    let percent = format!("{:.0}%", fraction * 100.0);
+    // Un hueco por cada rompimiento: se ve cuántos aguanta la parte y cuál es el siguiente.
+    if let Some(segments) = row.segments.filter(|segments| *segments > 1) {
+        for step in 1..segments {
+            let x = bar.x as f32 + bar.width as f32 * (step as f32 / segments as f32);
+            canvas.fill_rect(
+                Rect::new(
+                    x.round() as i32,
+                    bar.y,
+                    geometry.scale.round().max(1.0) as u32,
+                    bar.height,
+                ),
+                lighten(style.panel, 0.04),
+            );
+        }
+    }
+
+    let value = row
+        .value
+        .unwrap_or_else(|| format!("{:.0}%", fraction * 100.0));
     text.draw(
         canvas,
-        &percent,
-        canvas.width() as f32 - geometry.padding - text.width(&percent, size),
+        &value,
+        canvas.width() as f32 - geometry.padding - text.width(&value, size),
         y + text.ascent(size),
         size,
         style.muted,
@@ -1104,11 +1342,12 @@ mod tests {
                 flinch: None,
                 breakable: Some(Health::new(40.0, 100.0)),
                 severable: None,
+                breaks: Some((1, 2)),
             });
         }
         let canvas = render(&config, &text, &Snapshot::of(vec![detailed]), None);
 
-        let last_row_bottom = 14.0 + 21.0 + 5.0 + 7.0 + 5.0 + 6.0 * 15.0;
+        let last_row_bottom = 14.0 + 22.0 + 5.0 + 12.0 + 5.0 + 6.0 * 15.0;
         assert!(
             canvas.height() as f32 >= last_row_bottom,
             "el panel mide {} y la última fila acaba en {last_row_bottom}",
@@ -1309,6 +1548,7 @@ mod tests {
             flinch: None,
             breakable: Some(Health::new(40.0, 100.0)),
             severable: None,
+            breaks: Some((1, 2)),
         });
         detailed.ailments.push(Ailment {
             name: "fuego",

@@ -129,6 +129,38 @@ impl Canvas {
         }
     }
 
+    /// Trazo entre dos puntos con extremos redondeados, para iconos y marcas finas.
+    pub fn fill_line(&mut self, from: (f32, f32), to: (f32, f32), thickness: f32, color: Color) {
+        let radius = (thickness / 2.0).max(0.5);
+        let left = from.0.min(to.0) - radius - 1.0;
+        let right = from.0.max(to.0) + radius + 1.0;
+        let top = from.1.min(to.1) - radius - 1.0;
+        let bottom = from.1.max(to.1) + radius + 1.0;
+
+        for y in top.floor() as i32..=bottom.ceil() as i32 {
+            for x in left.floor() as i32..=right.ceil() as i32 {
+                let center = (x as f32 + 0.5, y as f32 + 0.5);
+                let distance = distance_to_segment(center, from, to);
+                self.blend(x, y, color, (radius + 0.5 - distance).clamp(0.0, 1.0));
+            }
+        }
+    }
+
+    /// Rombo relleno centrado en `center`; marca los niveles del medidor de espíritu.
+    pub fn fill_diamond(&mut self, center: (f32, f32), radius: f32, color: Color) {
+        let radius = radius.max(0.5);
+        let reach = radius.ceil() as i32 + 1;
+        let (cx, cy) = (center.0.floor() as i32, center.1.floor() as i32);
+
+        for y in cy - reach..=cy + reach {
+            for x in cx - reach..=cx + reach {
+                let dx = (x as f32 + 0.5 - center.0).abs();
+                let dy = (y as f32 + 0.5 - center.1).abs();
+                self.blend(x, y, color, (radius + 0.5 - (dx + dy)).clamp(0.0, 1.0));
+            }
+        }
+    }
+
     /// Mezcla `color` sobre el píxel con una cobertura de 0 a 1 (bordes de texto y esquinas).
     pub fn blend(&mut self, x: i32, y: i32, color: Color, coverage: f32) {
         if coverage <= 0.0 || x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
@@ -165,6 +197,23 @@ impl Canvas {
 
         bytes
     }
+}
+
+/// Distancia de un punto al segmento `from`-`to`, en píxeles.
+fn distance_to_segment(point: (f32, f32), from: (f32, f32), to: (f32, f32)) -> f32 {
+    let (px, py) = point;
+    let (x0, y0) = from;
+    let (x1, y1) = to;
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let length = dx * dx + dy * dy;
+    let t = if length <= f32::EPSILON {
+        0.0
+    } else {
+        (((px - x0) * dx + (py - y0) * dy) / length).clamp(0.0, 1.0)
+    };
+
+    let nearest = (x0 + t * dx, y0 + t * dy);
+    ((px - nearest.0).powi(2) + (py - nearest.1).powi(2)).sqrt()
 }
 
 fn lerp(from: u8, to: u8, t: f32) -> u8 {
@@ -241,6 +290,26 @@ mod tests {
         // La esquina queda fuera del radio; el centro, dentro.
         assert_eq!(canvas.pixel(0, 0), Some(0xff00_0000));
         assert_eq!(canvas.pixel(20, 20), Some(0xff00_ff00));
+    }
+
+    #[test]
+    fn a_line_paints_between_its_ends_and_stops_there() {
+        let mut canvas = Canvas::new(20, 20);
+        canvas.fill_line((2.0, 10.0), (18.0, 10.0), 2.0, Color::rgb(0, 255, 0));
+
+        assert_eq!(canvas.pixel(10, 10), Some(0xff00_ff00));
+        assert_eq!(canvas.pixel(2, 10), Some(0xff00_ff00));
+        assert_eq!(canvas.pixel(10, 2), Some(0xff00_0000));
+    }
+
+    #[test]
+    fn a_diamond_is_wider_in_the_middle_than_at_its_corners() {
+        let mut canvas = Canvas::new(20, 20);
+        canvas.fill_diamond((10.0, 10.0), 5.0, Color::rgb(255, 0, 0));
+
+        assert_eq!(canvas.pixel(10, 10), Some(0xffff_0000));
+        assert_eq!(canvas.pixel(10, 13), Some(0xffff_0000));
+        assert_eq!(canvas.pixel(6, 6), Some(0xff00_0000));
     }
 
     #[test]

@@ -46,8 +46,6 @@ const SEVERABLE_PARTS: u64 = 0x1FC8;
 const SEVERABLE_PART_STRIDE: u64 = 0x78;
 /// Ventana donde HunterPie busca las partes cortables: 0x120 * 32 bytes.
 const SEVERABLE_WINDOW: u64 = 0x120 * 32;
-/// Slots de partes normales que se recorren antes de darse por terminado el array.
-const MAX_NORMAL_PARTS: usize = 16;
 /// `MHWSharpnessStructure`: unidades de filo actuales, color y color máximo del arma.
 const SHARPNESS_CURRENT: u64 = 0x20F8;
 const SHARPNESS_LEVEL: u64 = 0x20FC;
@@ -118,9 +116,10 @@ fn clamp_percent(value: f32) -> f32 {
     }
 }
 
-/// `MHWMonsterPartStructure`: vida máxima, vida actual e índice.
+/// `MHWMonsterPartStructure`: vida máxima, vida actual, contador de golpes e índice.
 const PART_MAX_HEALTH: u64 = 0x0C;
 const PART_HEALTH: u64 = 0x10;
+const PART_COUNTER: u64 = 0x18;
 const PART_INDEX: u64 = 0x6C;
 /// Tope de cordura para descartar lecturas corruptas.
 const MAX_PART_HEALTH: f32 = 10_000_000.0;
@@ -711,65 +710,122 @@ impl<'map> World<'map> {
         }))
     }
 
-    /// Se reportan las partes que el juego tiene inicializadas. Las normales exponen su vida
-    /// como `breakable`; las cortables, solo como `severable`. La tabla del monstruo pone el
-    /// nombre que el juego solo guarda como índice.
+    /// Se reportan las partes que el juego tiene inicializadas y que además se pueden romper
+    /// o cortar. La tabla del monstruo es la que pone nombre e índice: las partes normales no
+    /// guardan su índice y el juego las registra en el mismo orden que la tabla, saltándose
+    /// las cortables, que viven en su propia zona.
     fn parts(&self, monster: u64, id: i32) -> Result<Vec<Part>, MemoryError> {
         let block = self.memory.read_u64(monster + MONSTER_PARTS)?;
-        if block == 0 {
+        let definitions = crate::tables::world_parts(id);
+
+        if block == 0 || definitions.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut parts = Vec::new();
 
-        // Las partes normales son un array contiguo: la primera entrada sin vida marca el
-        // final, no un hueco que haya que saltar. El índice que la tabla usa para nombrarlas
-        // es la posición en el array: el campo `Index` de la estructura solo se rellena en
-        // las cortables y en las normales vale siempre cero.
-        for slot in 0..MAX_NORMAL_PARTS {
-            let address = block + NORMAL_PARTS + (slot as u64) * NORMAL_PART_STRIDE;
+        for (slot, definition) in definitions
+            .iter()
+            .filter(|part| !part.severable)
+            .enumerate()
+        {
+            let address = block + NORMAL_PARTS + slot as u64 * NORMAL_PART_STRIDE;
+
             let Some(health) = self.part_health(address) else {
                 break;
             };
 
-            parts.push(Part {
-                index: slot,
-                name: crate::tables::world_part_name(id, slot),
-                flinch: None,
-                breakable: Some(health),
-                severable: None,
-            });
+            // Cuello, brazos y demás partes que solo cuentan para el aturdimiento no se
+            // rompen: mostrarlas como una barra al 100 % solo confunde.
+            if let Some((breakable, breaks)) = self.break_progress(definition, address, health) {
+                parts.push(Part {
+                    index: definition.index,
+                    name: Some(definition.name),
+                    flinch: Some(health),
+                    breakable: Some(breakable),
+                    severable: None,
+                    breaks: Some(breaks),
+                });
+            }
         }
 
         // Las cortables viven en otra zona y sus entradas aparecen desplazadas 8 bytes cuando
-        // la referencia inicial es pequeña; HunterPie aplica el mismo ajuste antes de leer.
+        // la referencia inicial es pequeña; HunterPie aplica el mismo ajuste antes de leer. El
+        // índice del juego es lo que las identifica.
         let mut address = block + SEVERABLE_PARTS;
         let window_end = address + SEVERABLE_WINDOW;
 
-        while address < window_end && parts.len() < MAX_NORMAL_PARTS * 4 {
-            if self
-                .memory
-                .read_u32(address)
-                .is_ok_and(|reference| reference <= 0xA0)
-            {
-                address += 8;
-            }
+        for definition in definitions.iter().filter(|part| part.severable) {
+            while address < window_end {
+                if self
+                    .memory
+                    .read_u32(address)
+                    .is_ok_and(|reference| reference <= 0xA0)
+                {
+                    address += 8;
+                }
 
-            // El índice del juego identifica qué parte de la tabla es: la misma que ya
-            // reportó la lista normal, así que la vida de corte se suma a esa entrada.
-            if let Some(index) = self.part_index(address)
-                && let Some(health) = self.part_health(address)
-                && let Some(existing) = parts.iter_mut().find(|part| part.index == index)
-            {
-                existing.severable = Some(health);
-            }
+                if self.part_index(address) == Some(definition.index)
+                    && let Some(health) = self.part_health(address)
+                {
+                    parts.push(Part {
+                        index: definition.index,
+                        name: Some(definition.name),
+                        flinch: None,
+                        breakable: None,
+                        severable: Some(health),
+                        breaks: None,
+                    });
 
-            address += SEVERABLE_PART_STRIDE;
+                    address += SEVERABLE_PART_STRIDE;
+                    break;
+                }
+
+                address += SEVERABLE_PART_STRIDE;
+            }
         }
 
         parts.sort_by_key(|part| part.index);
 
         Ok(parts)
+    }
+
+    /// Vida de la barra de rompimiento y golpes hechos, escalados al siguiente umbral como
+    /// hace HunterPie: la vida de una parte se regenera, así que lo que importa es cuántos
+    /// rompimientos ha aguantado y cuánto lleva del siguiente.
+    fn break_progress(
+        &self,
+        definition: &crate::tables::WorldPart,
+        address: u64,
+        health: Health,
+    ) -> Option<(Health, (u32, u32))> {
+        if definition.breaks.is_empty() {
+            return None;
+        }
+
+        let counter = self.memory.read_u32(address + PART_COUNTER).ok()?;
+        let total = u32::from(*definition.breaks.last()?);
+        if total == 0 {
+            return None;
+        }
+
+        let done = counter.min(total);
+        let next = definition
+            .breaks
+            .iter()
+            .map(|threshold| u32::from(*threshold))
+            .find(|threshold| *threshold > done);
+
+        // Sin umbral pendiente la parte está rota del todo: la barra se queda llena.
+        let Some(next) = next else {
+            let max = health.max * total as f32;
+            return Some((Health::new(max, max), (done, total)));
+        };
+
+        let max = health.max * next as f32;
+        let current = (next - done - 1) as f32 * health.max + health.current;
+
+        Some((Health::new(current, max), (done, total)))
     }
 
     fn part_health(&self, address: u64) -> Option<Health> {
