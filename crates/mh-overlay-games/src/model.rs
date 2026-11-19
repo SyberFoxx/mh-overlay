@@ -325,12 +325,164 @@ pub enum WeaponGauge {
     },
 }
 
-/// Arma equipada y su estado.
+/// Proyectil cargado o disponible en una ballesta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmmoSlot {
+    /// Índice dentro de la lista de munición del juego.
+    pub index: usize,
+    /// Nombre cuando la tabla de munición lo conoce.
+    pub name: Option<&'static str>,
+    /// Balas cargadas en el arma.
+    pub loaded: u32,
+    /// Balas que quedan en la bolsa.
+    pub total: u32,
+    /// Capacidad máxima de la bolsa para este tipo.
+    pub max: u32,
+}
+
+/// Munición de una ballesta y la que está seleccionada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangedState {
+    pub ammo: Vec<AmmoSlot>,
+    /// Índice de la munición equipada, si el arma ya está cargada.
+    pub equipped: Option<usize>,
+}
+
+impl RangedState {
+    /// Munición equipada, si el índice apunta a una entrada válida.
+    pub fn selected(&self) -> Option<&AmmoSlot> {
+        self.equipped
+            .and_then(|index| self.ammo.iter().find(|slot| slot.index == index))
+    }
+}
+
+/// Estado de la lanza pistola: proyectiles normales, cargados y el dragón de fuego.
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GunlanceState {
+    pub shells: u32,
+    pub max_shells: u32,
+    pub charged: u32,
+    pub max_charged: u32,
+    /// Segundos que quedan para poder volver a usar el dragón de fuego.
+    pub wyvern_fire: f32,
+    pub stake_loaded: bool,
+    pub stake_timer: f32,
+    pub stake_max: f32,
+}
+
+/// Color de una nota de cornamusa, en el orden que usa World.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HornNote {
+    Purple,
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    LightBlue,
+    White,
+}
+
+impl HornNote {
+    pub fn from_index(index: i32) -> Option<Self> {
+        Some(match index {
+            0 => Self::Purple,
+            1 => Self::Red,
+            2 => Self::Orange,
+            3 => Self::Yellow,
+            4 => Self::Green,
+            5 => Self::Blue,
+            6 => Self::LightBlue,
+            7 => Self::White,
+            _ => return None,
+        })
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Purple => "púrpura",
+            Self::Red => "roja",
+            Self::Orange => "naranja",
+            Self::Yellow => "amarilla",
+            Self::Green => "verde",
+            Self::Blue => "azul",
+            Self::LightBlue => "azul claro",
+            Self::White => "blanca",
+        }
+    }
+}
+
+/// Melodía que la cornamusa puede tocar o que ya está en la cola.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HornSong {
+    pub id: u32,
+    pub notes: [u8; 4],
+    pub length: u8,
+}
+
+impl HornSong {
+    pub fn notes_label(&self) -> String {
+        self.notes
+            .iter()
+            .take(usize::from(self.length).min(self.notes.len()))
+            .map(|note| note.to_string())
+            .collect::<Vec<_>>()
+            .join("·")
+    }
+}
+
+/// Cola de notas y melodías de la cornamusa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HornState {
+    pub notes: Vec<HornNote>,
+    pub songs: Vec<HornSong>,
+    pub available: Vec<HornSong>,
+    /// Índice de la melodía que se está tocando, si el juego lo expone.
+    pub playing: Option<usize>,
+}
+
+/// Carga del arco, que es lo que el juego guarda junto al arma.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BowState {
+    pub charge: f32,
+    pub level: u32,
+    pub max_level: u32,
+}
+
+/// Datos de combate propios de la clase de arma que no caben en [`WeaponGauge`].
+///
+/// Los campos que el juego no expone en la versión soportada quedan en `None`: es preferible
+/// no enseñar un dato a inventarlo.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WeaponDetail {
+    pub attack: Option<f32>,
+    pub affinity: Option<i32>,
+    pub element: Option<f32>,
+    pub ranged: Option<RangedState>,
+    pub gunlance: Option<GunlanceState>,
+    pub horn: Option<HornState>,
+    pub bow: Option<BowState>,
+}
+
+impl WeaponDetail {
+    pub fn is_empty(&self) -> bool {
+        self.attack.is_none()
+            && self.affinity.is_none()
+            && self.element.is_none()
+            && self.ranged.is_none()
+            && self.gunlance.is_none()
+            && self.horn.is_none()
+            && self.bow.is_none()
+    }
+}
+
+/// Arma equipada y su estado.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Weapon {
     pub kind: WeaponKind,
     pub sharpness: Option<Sharpness>,
     pub gauge: Option<WeaponGauge>,
+    pub detail: WeaponDetail,
 }
 
 /// Buff o estado activo sobre el jugador, con el tiempo que le queda.

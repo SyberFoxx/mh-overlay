@@ -26,8 +26,10 @@ pub const TEMPLATE: &str = r##"# mh-overlay · configuración
 # Los colores son #rgb, #rrggbb o #rrggbbaa (el alfa permite paneles translúcidos).
 
 [game]
-# rise o world
+# rise o world; se usa si no hay ningún juego abierto o si auto_detect = false.
 kind = "rise"
+# Detectar si el juego abierto es Rise o World. Elegir juego a mano lo desactiva.
+auto_detect = true
 # Cada cuántos milisegundos se lee la memoria del juego.
 interval_ms = 500
 
@@ -66,6 +68,8 @@ severable = "#d69a4f"
 pub struct GameSection {
     /// `rise` o `world`; se valida con [`GameKind::from_str`].
     pub kind: String,
+    /// Mirar qué ejecutable está corriendo antes de usar `kind`.
+    pub auto_detect: bool,
     pub interval_ms: u64,
 }
 
@@ -73,6 +77,7 @@ impl Default for GameSection {
     fn default() -> Self {
         Self {
             kind: "rise".to_string(),
+            auto_detect: true,
             interval_ms: 500,
         }
     }
@@ -387,6 +392,13 @@ mod tests {
         let error = Config::from_toml("[style]\npanel = \"azul\"\n", "prueba").unwrap_err();
 
         assert!(error.to_string().contains("panel"), "{error}");
+    }
+
+    #[test]
+    fn an_old_file_without_auto_detect_keeps_it_on() {
+        let config = Config::from_toml("[game]\nkind = \"world\"\n", "prueba").unwrap();
+
+        assert!(config.game.auto_detect);
     }
 
     #[test]

@@ -12,11 +12,12 @@ pub mod world;
 use std::fmt;
 use std::str::FromStr;
 
-use mh_overlay_memory::{AddressMap, Memory, MemoryError};
+use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process};
 
 pub use model::{
-    Ailment, Buff, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
-    Snapshot, Weapon, WeaponGauge, WeaponKind,
+    Ailment, AmmoSlot, BowState, Buff, Extracts, GunlanceState, Health, HornNote, HornSong,
+    HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel, Snapshot,
+    Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 
 /// Juegos con lector implementado.
@@ -27,6 +28,9 @@ pub enum GameKind {
 }
 
 impl GameKind {
+    /// Juegos con lector, en el orden en que se prueban al detectar.
+    pub const ALL: [Self; 2] = [Self::Rise, Self::World];
+
     /// Nombre del ejecutable tal como lo ve `/proc` bajo Proton.
     pub fn module(self) -> &'static str {
         match self {
@@ -42,6 +46,24 @@ impl GameKind {
             Self::World => "MonsterHunterWorld",
         }
     }
+
+    /// Juego al que pertenece el módulo que `/proc` reportó para el proceso.
+    pub fn from_module(module: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.module().eq_ignore_ascii_case(module))
+    }
+}
+
+/// Juego que está corriendo ahora mismo, si hay uno de los dos.
+///
+/// Si ambos están abiertos devuelve el primero que aparece en `/proc`; el hub prefiere el
+/// configurado antes de llegar aquí y la CLI desactiva la detección con `--game`.
+pub fn detect_running_game() -> Option<GameKind> {
+    let modules = GameKind::ALL.map(GameKind::module);
+    let process = Process::find(&modules).ok()?;
+
+    GameKind::from_module(process.module())
 }
 
 impl fmt::Display for GameKind {
@@ -95,6 +117,19 @@ mod tests {
         let error = "wilds".parse::<GameKind>().unwrap_err();
 
         assert!(error.to_string().contains("rise, world"));
+    }
+
+    #[test]
+    fn a_module_name_maps_back_to_its_game() {
+        for kind in GameKind::ALL {
+            assert_eq!(GameKind::from_module(kind.module()), Some(kind));
+            assert_eq!(
+                GameKind::from_module(&kind.module().to_lowercase()),
+                Some(kind)
+            );
+        }
+
+        assert_eq!(GameKind::from_module("otro.exe"), None);
     }
 
     #[test]

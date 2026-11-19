@@ -18,12 +18,11 @@ impl Process {
     /// Under Proton `/proc/<pid>/exe` points at the Wine loader, so the match is done against
     /// `comm` and against the basename of every `cmdline` argument.
     pub fn find(names: &[&str]) -> Result<Self, MemoryError> {
-        let module = names
-            .first()
-            .copied()
-            .ok_or_else(|| MemoryError::ProcessNotFound {
+        if names.is_empty() {
+            return Err(MemoryError::ProcessNotFound {
                 names: String::new(),
-            })?;
+            });
+        }
 
         let mut pids = fs::read_dir("/proc")?
             .filter_map(Result::ok)
@@ -31,19 +30,21 @@ impl Process {
             .collect::<Vec<_>>();
         pids.sort_unstable();
 
-        let mut matched: Option<i32> = None;
+        let mut matched: Option<(i32, &str)> = None;
 
         for pid in pids {
-            if !process_matches(pid, names) {
+            let Some(found) = matching_module(pid, names) else {
                 continue;
-            }
+            };
 
-            matched = Some(pid);
+            matched = Some((pid, found));
 
+            // La base se resuelve contra el nombre que coincidió, no contra el primero de la
+            // lista: con `[Rise, World]` el proceso encontrado puede ser World.
             // Steam/Proton pone el nombre del ejecutable en la línea de comandos de procesos
             // auxiliares que nunca mapean el módulo: un candidato sin base no es definitivo,
             // hay que seguir buscando el que sí lo tiene mapeado.
-            let Ok(base) = module_base(pid, module) else {
+            let Ok(base) = module_base(pid, found) else {
                 continue;
             };
 
@@ -53,15 +54,15 @@ impl Process {
 
             return Ok(Self {
                 pid,
-                module: module.to_string(),
+                module: found.to_string(),
                 base,
             });
         }
 
         match matched {
-            Some(pid) => Err(MemoryError::ModuleBaseNotFound {
+            Some((pid, found)) => Err(MemoryError::ModuleBaseNotFound {
                 pid,
-                module: module.to_string(),
+                module: found.to_string(),
             }),
             None => Err(MemoryError::ProcessNotFound {
                 names: names.join(", "),
@@ -105,14 +106,15 @@ impl Process {
     }
 }
 
-fn process_matches(pid: i32, names: &[&str]) -> bool {
+/// Nombre del módulo que coincide con este proceso, para resolver su base con el correcto.
+fn matching_module<'a>(pid: i32, names: &'a [&'a str]) -> Option<&'a str> {
     let comm = fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
 
-    if names
+    if let Some(name) = names
         .iter()
-        .any(|name| comm.trim().eq_ignore_ascii_case(name))
+        .find(|name| comm.trim().eq_ignore_ascii_case(name))
     {
-        return true;
+        return Some(name);
     }
 
     let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
@@ -120,11 +122,12 @@ fn process_matches(pid: i32, names: &[&str]) -> bool {
     cmdline
         .split(|byte| *byte == 0)
         .filter_map(|argument| std::str::from_utf8(argument).ok())
-        .any(|argument| {
+        .find_map(|argument| {
             let executable = argument.rsplit(['/', '\\']).next().unwrap_or(argument);
             names
                 .iter()
-                .any(|name| executable.eq_ignore_ascii_case(name))
+                .copied()
+                .find(|name| executable.eq_ignore_ascii_case(name))
         })
 }
 
@@ -232,5 +235,21 @@ mod tests {
         let error = Process::find(&["no-existe-este-proceso-12345"]).unwrap_err();
 
         assert!(matches!(error, MemoryError::ProcessNotFound { .. }));
+    }
+
+    #[test]
+    fn a_multi_name_search_resolves_the_base_of_the_name_that_matched() {
+        let pid = std::process::id() as i32;
+        let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+        let first_argument = cmdline
+            .split(|byte| *byte == 0)
+            .next()
+            .and_then(|argument| std::str::from_utf8(argument).ok())
+            .expect("el proceso de test tiene cmdline");
+        let name = first_argument.rsplit('/').next().unwrap();
+
+        let found = Process::find(&["no-existe-este-proceso-12345", name]).unwrap();
+
+        assert_eq!(found.module(), name);
     }
 }

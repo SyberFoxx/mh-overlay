@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use crate::buffs::{RISE_BUFFS, RiseGroup};
 use crate::model::{
     Ailment, Buff, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
-    Snapshot, Weapon, WeaponGauge, WeaponKind,
+    Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 
 /// Monstruos grandes que pueden coexistir en una zona.
@@ -88,6 +88,11 @@ const MAX_BUFF_TIMER: f32 = 3600.0;
 const SONG_TIMER: u64 = 0x10;
 /// Ranura de la tabla de visto-por-primera-vez reservada a las canciones.
 const SONG_KEY: u32 = 0x10000;
+/// `MHRPlayerStatusContext`: ataque, elemento y afinidad que el juego calcula al equipar.
+const STATUS_ATTACK: u64 = 0x44;
+const STATUS_ELEMENT: u64 = 0x50;
+const STATUS_ELEMENT_SECONDARY: u64 = 0x54;
+const STATUS_AFFINITY: u64 = 0x68;
 
 // Medidores de clase: todos se leen desde `LOCAL_PLAYER_DATA_ADDRESS` con
 // `CURRENT_WEAPON_OFFSETS` (HunterPie: `MHRLongSwordStructure`, `MHRChargeBladeStructure`,
@@ -224,7 +229,45 @@ impl<'map> Rise<'map> {
             kind,
             sharpness,
             gauge,
+            detail: self.weapon_detail(),
         })
+    }
+
+    /// Ataque, afinidad y elemento que el juego calcula para el arma equipada. Rise los expone en
+    /// el contexto de estado del jugador; World no tiene una estructura equivalente en el lector.
+    fn weapon_detail(&self) -> WeaponDetail {
+        let (Ok(base), Ok(local_offsets), Ok(status_offsets)) = (
+            self.map.absolute("LOCAL_PLAYER_DATA_ADDRESS"),
+            self.map.offsets("Player::Local"),
+            self.map.offsets("Player::Status"),
+        ) else {
+            return WeaponDetail::default();
+        };
+        let Ok(player) = self.memory.deref_chain(base, local_offsets) else {
+            return WeaponDetail::default();
+        };
+        let Ok(status) = self.memory.deref_chain(player, status_offsets) else {
+            return WeaponDetail::default();
+        };
+        if status == 0 {
+            return WeaponDetail::default();
+        }
+
+        let attack = self.memory.read_f32(status + STATUS_ATTACK).ok();
+        let element = self
+            .memory
+            .read_f32(status + STATUS_ELEMENT)
+            .ok()
+            .zip(self.memory.read_f32(status + STATUS_ELEMENT_SECONDARY).ok())
+            .map(|(primary, secondary)| primary.max(secondary));
+        let affinity = self.memory.read_i32(status + STATUS_AFFINITY).ok();
+
+        WeaponDetail {
+            attack: attack.filter(|value| value.is_finite() && (0.0..=10_000.0).contains(value)),
+            element: element.filter(|value| value.is_finite() && (0.0..=10_000.0).contains(value)),
+            affinity: affinity.filter(|value| (-100..=100).contains(value)),
+            ..WeaponDetail::default()
+        }
     }
 
     /// El filo se arma con dos piezas: el color y las unidades actuales, y la tabla de
