@@ -11,8 +11,9 @@ use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
 use crate::buffs::WORLD_BUFFS;
 use crate::model::{
-    Ailment, Buff, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
-    Snapshot, Weapon, WeaponGauge, WeaponKind,
+    Ailment, AmmoSlot, BowState, Buff, Extracts, GunlanceState, Health, HornNote, HornSong,
+    HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel, Snapshot,
+    Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
@@ -96,6 +97,105 @@ const KINSECT_STAMINA: u64 = 0x0A8C;
 const IG_MAX_STAMINA: u64 = 0x12B4;
 /// Tope de cordura para un temporizador de buff: más de una hora es basura.
 const MAX_BUFF_TIMER: f32 = 3600.0;
+
+// Datos de combate de las clases que HunterPie legacy sí lee. Todos cuelgan del mismo bloque
+// `WEAPON_MECHANICS_ADDRESS` que los medidores, con desplazamientos relativos a su base; están
+// verificados contra la build 421810 (Iceborne) y se copian de `HunterPie-legacy` sin cambiar
+// la forma de la cadena.
+
+/// Lanza pistola: proyectiles normales y cargados, y el puntero del dragón de fuego.
+const GL_TOTAL_SHELLS: i64 = -0x4;
+const GL_SHELLS: u64 = 0x00;
+const GL_CHARGED: u64 = 0x0C;
+const GL_TOTAL_CHARGED: u64 = 0x10;
+const GL_WYVERN_STAKE: u64 = 0xBC;
+const GL_WYVERN_STAKE_MAX: u64 = 0xC0;
+const GL_WYVERN_STAKE_TIMER: u64 = 0x204;
+const GL_STAKE_TIMER_VALUE: u64 = 0xE20;
+const GL_WYVERN_FIRE: u64 = 0xC20;
+/// Ballestas: 40 entradas de `sAmmo` (0x18 bytes) y `sEquippedAmmo` con el índice equipado.
+const AMMO_ARRAY: u64 = 0x34;
+const AMMO_COUNT: usize = 40;
+const AMMO_STRIDE: usize = 0x18;
+const AMMO_LOADED: u64 = 0x08;
+const AMMO_TOTAL: u64 = 0x0C;
+const AMMO_MAX: u64 = 0x10;
+const AMMO_EQUIPPED: u64 = 0x454;
+const AMMO_EQUIPPED_INDEX: u64 = 0x08;
+/// Arco: progreso de carga, nivel actual y nivel máximo.
+const BOW_CHARGE: u64 = 0x44;
+const BOW_LEVEL: u64 = 0x48;
+const BOW_MAX_LEVEL: u64 = 0x4C;
+/// Cornamusa: `sHuntingHornMechanics` y las diez melodías disponibles antes de la base.
+const HH_MECHANICS: u64 = 0xD4;
+const HH_NOTES: u64 = 0x00;
+const HH_FIRST_NOTE: u64 = 0x08;
+const HH_NOTES_LENGTH: u64 = 0x10;
+const HH_SONG_IDS: u64 = 0x58;
+const HH_SONG_ID_FIRST: u64 = 0x68;
+const HH_SONG_ID_LENGTH: u64 = 0x70;
+const HH_SONG_IDS_CAPACITY: usize = 3;
+const HH_AVAILABLE_SONGS: i64 = -0x1C;
+const HH_AVAILABLE_COUNT: usize = 10;
+const HH_SONG_STRIDE: u64 = 0x18;
+const HH_SONG_ID: u64 = 0x00;
+const HH_SONG_LENGTH: u64 = 0x08;
+const HH_SONG_NOTES: u64 = 0x14;
+/// Nombre de las 40 municiones de World, en el orden en que las numera el juego.
+const AMMO_NAMES: [Option<&str>; AMMO_COUNT] = [
+    Some("Normal 1"),
+    Some("Normal 2"),
+    Some("Normal 3"),
+    Some("Perforante 1"),
+    Some("Perforante 2"),
+    Some("Perforante 3"),
+    Some("Dispersión 1"),
+    Some("Dispersión 2"),
+    Some("Dispersión 3"),
+    Some("Adhesiva 1"),
+    Some("Adhesiva 2"),
+    Some("Adhesiva 3"),
+    Some("Racimo 1"),
+    Some("Racimo 2"),
+    Some("Racimo 3"),
+    Some("Ígnea"),
+    Some("Agua"),
+    Some("Rayo"),
+    Some("Hielo"),
+    Some("Dragón"),
+    Some("Veneno 1"),
+    Some("Veneno 2"),
+    Some("Parálisis 1"),
+    Some("Parálisis 2"),
+    Some("Sueño 1"),
+    Some("Sueño 2"),
+    Some("Agotamiento 1"),
+    Some("Agotamiento 2"),
+    Some("Cortante"),
+    Some("Wyvern"),
+    Some("Demoníaca"),
+    Some("Armadura"),
+    Some("Tranquilizante"),
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+];
+
+fn relative(address: u64, offset: i64) -> u64 {
+    address.wrapping_add_signed(offset)
+}
+
+fn read_u32_at(bytes: &[u8], offset: usize) -> u32 {
+    bytes
+        .get(offset..offset + 4)
+        .and_then(|slice| slice.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0)
+}
 
 /// Normaliza una fracción del juego (0..1) a porcentaje y descarta NaN.
 fn percent(value: f32) -> f32 {
@@ -260,11 +360,13 @@ impl<'map> World<'map> {
         let kind = WeaponKind::from_id(self.memory.read_u8(address).ok()?)?;
         let sharpness = kind.has_sharpness().then(|| self.sharpness(root)).flatten();
         let gauge = self.gauge(kind);
+        let detail = self.detail(kind);
 
         Some(Weapon {
             kind,
             sharpness,
             gauge,
+            detail,
         })
     }
 
@@ -279,6 +381,256 @@ impl<'map> World<'map> {
             .ok()?;
 
         (address != 0).then_some(address)
+    }
+
+    /// Datos de combate propios de la clase que no son un medidor: munición, proyectiles de la
+    /// lanza pistola, notas de la cornamusa y carga del arco.
+    fn detail(&self, kind: WeaponKind) -> WeaponDetail {
+        let Some(address) = self.mechanics() else {
+            return WeaponDetail::default();
+        };
+
+        match kind {
+            WeaponKind::Gunlance => self.gunlance_detail(address),
+            WeaponKind::LightBowgun | WeaponKind::HeavyBowgun => self.ranged_detail(address),
+            WeaponKind::HuntingHorn => self.horn_detail(address),
+            WeaponKind::Bow => self.bow_detail(address),
+            _ => WeaponDetail::default(),
+        }
+    }
+
+    fn gunlance_detail(&self, address: u64) -> WeaponDetail {
+        let total_shells = self.memory.read_i32(relative(address, GL_TOTAL_SHELLS));
+        let shells = self.memory.read_i32(address + GL_SHELLS);
+        let charged = self.memory.read_i32(address + GL_CHARGED);
+        let total_charged = self.memory.read_i32(address + GL_TOTAL_CHARGED);
+        let (Ok(total_shells), Ok(shells), Ok(charged), Ok(total_charged)) =
+            (total_shells, shells, charged, total_charged)
+        else {
+            return WeaponDetail::default();
+        };
+
+        if !(0..=99).contains(&total_shells)
+            || !(0..=total_shells).contains(&shells)
+            || !(0..=99).contains(&total_charged)
+            || !(0..=total_charged).contains(&charged)
+        {
+            return WeaponDetail::default();
+        }
+
+        let wyvern_fire = self
+            .memory
+            .read_f32(address + GL_WYVERN_FIRE)
+            .unwrap_or(0.0)
+            .max(0.0);
+        let stake_loaded = self
+            .memory
+            .read_f32(address + GL_WYVERN_STAKE)
+            .is_ok_and(|value| value != 0.0);
+        let stake_max = self
+            .memory
+            .read_f32(address + GL_WYVERN_STAKE_MAX)
+            .unwrap_or(0.0)
+            .max(0.0);
+        let stake_timer = self
+            .memory
+            .read_u64(address + GL_WYVERN_STAKE_TIMER)
+            .ok()
+            .filter(|pointer| *pointer != 0)
+            .and_then(|pointer| self.memory.read_f32(pointer + GL_STAKE_TIMER_VALUE).ok())
+            .unwrap_or(0.0)
+            .max(0.0);
+
+        WeaponDetail {
+            gunlance: Some(GunlanceState {
+                shells: shells as u32,
+                max_shells: total_shells as u32,
+                charged: charged as u32,
+                max_charged: total_charged as u32,
+                wyvern_fire,
+                stake_loaded,
+                stake_timer,
+                stake_max,
+            }),
+            ..WeaponDetail::default()
+        }
+    }
+
+    fn ranged_detail(&self, address: u64) -> WeaponDetail {
+        let Ok(raw) = self
+            .memory
+            .read_vec(address + AMMO_ARRAY, AMMO_COUNT * AMMO_STRIDE)
+        else {
+            return WeaponDetail::default();
+        };
+
+        let mut ammo = Vec::new();
+
+        for (index, name) in AMMO_NAMES.iter().enumerate() {
+            let start = index * AMMO_STRIDE;
+            let loaded = read_u32_at(&raw, start + AMMO_LOADED as usize);
+            let total = read_u32_at(&raw, start + AMMO_TOTAL as usize);
+            let max = read_u32_at(&raw, start + AMMO_MAX as usize);
+
+            // Las ranuras que el arma no admite llegan a cero; no llenan la lista.
+            if loaded == 0 && total == 0 && max == 0 {
+                continue;
+            }
+
+            if loaded > 999 || total > 9999 || max > 9999 {
+                return WeaponDetail::default();
+            }
+
+            ammo.push(AmmoSlot {
+                index,
+                name: *name,
+                loaded,
+                total,
+                max,
+            });
+        }
+
+        let equipped = self
+            .memory
+            .read_i32(address + AMMO_EQUIPPED + AMMO_EQUIPPED_INDEX)
+            .ok()
+            .and_then(|index| usize::try_from(index).ok())
+            .filter(|index| *index < AMMO_COUNT);
+
+        if ammo.is_empty() && equipped.is_none() {
+            return WeaponDetail::default();
+        }
+
+        WeaponDetail {
+            ranged: Some(RangedState { ammo, equipped }),
+            ..WeaponDetail::default()
+        }
+    }
+
+    fn horn_detail(&self, address: u64) -> WeaponDetail {
+        let mechanics = address + HH_MECHANICS;
+        let Ok(notes_length) = self.memory.read_u64(mechanics + HH_NOTES_LENGTH) else {
+            return WeaponDetail::default();
+        };
+        let Ok(first_note) = self.memory.read_u64(mechanics + HH_FIRST_NOTE) else {
+            return WeaponDetail::default();
+        };
+
+        if notes_length > 4 || first_note > 4 {
+            return WeaponDetail::default();
+        }
+
+        let Ok(raw_notes) = self.memory.read_bytes::<4>(mechanics + HH_NOTES) else {
+            return WeaponDetail::default();
+        };
+        let notes: Vec<HornNote> = (0..notes_length as usize)
+            .filter_map(|index| {
+                let position = (first_note as usize + index) % 4;
+                self.note_color(mechanics, position)
+                    .or_else(|| HornNote::from_index(i32::from(raw_notes[position]) % 8))
+            })
+            .collect();
+
+        let Ok(song_length) = self.memory.read_u64(mechanics + HH_SONG_ID_LENGTH) else {
+            return WeaponDetail::default();
+        };
+        let Ok(song_first) = self.memory.read_u64(mechanics + HH_SONG_ID_FIRST) else {
+            return WeaponDetail::default();
+        };
+
+        let songs = if song_length <= HH_SONG_IDS_CAPACITY as u64 && song_first <= 8 {
+            let mut songs = Vec::new();
+            for index in 0..song_length as usize {
+                let position = (song_first as usize + index) % HH_SONG_IDS_CAPACITY;
+                if let Ok(id) = self
+                    .memory
+                    .read_u32(mechanics + HH_SONG_IDS + (position as u64) * 4)
+                    && id != 0
+                {
+                    songs.push(HornSong {
+                        id,
+                        notes: [0; 4],
+                        length: 0,
+                    });
+                }
+            }
+            songs
+        } else {
+            Vec::new()
+        };
+
+        let available = self.available_songs(address);
+
+        if notes.is_empty() && songs.is_empty() && available.is_empty() {
+            return WeaponDetail::default();
+        }
+
+        WeaponDetail {
+            horn: Some(HornState {
+                notes,
+                songs,
+                available,
+                playing: None,
+            }),
+            ..WeaponDetail::default()
+        }
+    }
+
+    fn note_color(&self, mechanics: u64, position: usize) -> Option<HornNote> {
+        let offset = match position {
+            0 => 0x8C,
+            1 => 0x90,
+            2 => 0x94,
+            _ => return None,
+        };
+        HornNote::from_index(self.memory.read_i32(mechanics + offset).ok()?)
+    }
+
+    fn available_songs(&self, address: u64) -> Vec<HornSong> {
+        let mut songs = Vec::new();
+        for index in 0..HH_AVAILABLE_COUNT {
+            let song = relative(address, HH_AVAILABLE_SONGS) + (index as u64) * HH_SONG_STRIDE;
+            let Ok(id) = self.memory.read_u32(song + HH_SONG_ID) else {
+                break;
+            };
+            if id == 0 {
+                continue;
+            }
+            let length = self
+                .memory
+                .read_i32(song + HH_SONG_LENGTH)
+                .unwrap_or(0)
+                .clamp(0, 4) as u8;
+            let notes = self
+                .memory
+                .read_bytes::<4>(song + HH_SONG_NOTES)
+                .unwrap_or([0; 4]);
+            songs.push(HornSong { id, notes, length });
+        }
+        songs
+    }
+
+    fn bow_detail(&self, address: u64) -> WeaponDetail {
+        let (Ok(charge), Ok(level), Ok(max_level)) = (
+            self.memory.read_f32(address + BOW_CHARGE),
+            self.memory.read_i32(address + BOW_LEVEL),
+            self.memory.read_i32(address + BOW_MAX_LEVEL),
+        ) else {
+            return WeaponDetail::default();
+        };
+
+        if !charge.is_finite() || !(0..=5).contains(&level) || !(0..=5).contains(&max_level) {
+            return WeaponDetail::default();
+        }
+
+        WeaponDetail {
+            bow: Some(BowState {
+                charge: charge.clamp(0.0, 1.0),
+                level: level as u32,
+                max_level: max_level as u32,
+            }),
+            ..WeaponDetail::default()
+        }
     }
 
     /// Medidores propios de la clase de arma. Solo se leen los que HunterPie también lee; el
