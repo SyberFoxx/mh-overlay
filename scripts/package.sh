@@ -31,7 +31,7 @@ install -m644 packaging/mh-overlay.svg "$stage/mh-overlay.svg"
 # La plantilla se genera con el propio binario para que no se separe nunca de los valores por
 # defecto del código.
 config_home=$(mktemp -d)
-HOME="$config_home" "$stage/mh-overlay" --init-config >/dev/null
+env -u XDG_CONFIG_HOME HOME="$config_home" "$stage/mh-overlay" --init-config >/dev/null
 install -m644 "$config_home/.config/mh-overlay/config.toml" "$stage/config.example.toml"
 rm -rf "$config_home"
 
