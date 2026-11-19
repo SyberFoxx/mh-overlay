@@ -11,6 +11,11 @@ use crate::canvas::Canvas;
 /// Bytes de la fuente, embebida para no depender de las fuentes del sistema.
 const FONT: &[u8] = include_bytes!("../assets/Rajdhani-SemiBold.ttf");
 
+/// La misma tipografía del panel, para que el hub no tenga un aspecto distinto.
+pub fn font_bytes() -> &'static [u8] {
+    FONT
+}
+
 pub struct Text {
     font: fontdue::Font,
 }
