@@ -6,10 +6,12 @@
 
 use mh_overlay_config::{Color, Config, StyleSection};
 use mh_overlay_games::{
-    Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon, WeaponGauge,
+    Buff, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon, WeaponDetail,
+    WeaponGauge,
 };
 
 use crate::canvas::{Canvas, Rect};
+use crate::icons::{self, BuffGlyph};
 use crate::text::Text;
 
 /// Partes visibles por monstruo.
@@ -25,12 +27,17 @@ const LABEL_WIDTH: f32 = 86.0;
 /// Ancho reservado a la derecha de cada barra para su valor ("62 %", "2/3", "18 s").
 const VALUE_WIDTH: f32 = 46.0;
 /// Alto de la barra de filo, en unidades lógicas.
-const SHARPNESS_BAR: f32 = 9.0;
-/// Lado de los rombos que marcan el nivel de espíritu.
-const PIP_RADIUS: f32 = 3.4;
-/// Ancho máximo de la etiqueta en las filas de detalle (buffs y medidores): sus nombres son
-/// más largos que los de una parte.
-const DETAIL_LABEL_WIDTH: f32 = 118.0;
+const SHARPNESS_BAR: f32 = 8.0;
+/// Lado del icono del arma en la cabecera del jugador.
+const WEAPON_ICON: f32 = 22.0;
+/// Fichas de datos del arma por fila; se reparten en varias filas si no caben.
+const CHIP_HEIGHT: f32 = 21.0;
+/// Iconos de buff por fila: la cuadrícula sustituye a una lista de barras.
+const BUFF_COLUMNS: usize = 8;
+/// Lado de cada baldosa de buff, en unidades lógicas.
+const BUFF_TILE: f32 = 32.0;
+/// Baldosas de buff como máximo; el resto se resume en una baldosa "+N".
+const MAX_BUFFS: usize = BUFF_COLUMNS * 2;
 
 /// Dibuja el panel completo; el tamaño depende de la configuración y del contenido.
 pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<&str>) -> Canvas {
@@ -177,6 +184,12 @@ struct Geometry {
     gap: f32,
     small: f32,
     divider: f32,
+    weapon: f32,
+    icon: f32,
+    chip: f32,
+    chip_gap: f32,
+    buff: f32,
+    buff_gap: f32,
 }
 
 impl Geometry {
@@ -191,6 +204,12 @@ impl Geometry {
             gap: 10.0 * scale,
             small: 5.0 * scale,
             divider: 1.0 * scale,
+            weapon: 27.0 * scale,
+            icon: WEAPON_ICON * scale,
+            chip: CHIP_HEIGHT * scale,
+            chip_gap: 4.0 * scale,
+            buff: BUFF_TILE * scale,
+            buff_gap: 4.0 * scale,
         }
     }
 
@@ -232,7 +251,8 @@ impl Geometry {
         snapshot: &Snapshot,
         monsters: &[Monster],
     ) -> u32 {
-        let session = session_rows(snapshot) as f32 * self.row;
+        let inner = self.width(text, snapshot, monsters) as f32 - self.padding * 2.0;
+        let session = session_height(text, snapshot, self, inner, &config.style);
 
         if monsters.is_empty() {
             let size = 14.0 * self.scale;
@@ -431,21 +451,63 @@ fn draw_health_bar(
     y + bar.height as f32 + geometry.small
 }
 
-/// Cuántas filas consume la cabecera de jugador y cacería.
-fn session_rows(snapshot: &Snapshot) -> usize {
-    usize::from(snapshot.hunt.is_some()) + snapshot.player.as_ref().map_or(0, player_rows)
+/// Alto de la cabecera de jugador y cacería, en píxeles.
+fn session_height(
+    text: &Text,
+    snapshot: &Snapshot,
+    geometry: &Geometry,
+    inner: f32,
+    style: &StyleSection,
+) -> f32 {
+    let hunt = snapshot.hunt.map_or(0.0, |_| geometry.row);
+
+    hunt + snapshot.player.as_ref().map_or(0.0, |player| {
+        player_height(text, player, geometry, inner, style)
+    })
 }
 
-/// Buffs que se dibujan como máximo: con más, el panel tapa al monstruo.
-const MAX_BUFF_ROWS: usize = 6;
+/// Alto del bloque del jugador: arma, filo, fichas de la clase y cuadrícula de buffs.
+fn player_height(
+    text: &Text,
+    player: &Player,
+    geometry: &Geometry,
+    inner: f32,
+    style: &StyleSection,
+) -> f32 {
+    let mut height = 0.0;
 
-/// Vida y aguante, el arma (tipo, filo y medidores) y los buffs activos.
-fn player_rows(player: &Player) -> usize {
-    let weapon = player.weapon.as_ref().map_or(0, |weapon| {
-        1 + usize::from(weapon.sharpness.is_some()) + spirit_rows(weapon) + gauge_rows(weapon).len()
-    });
+    if let Some(weapon) = &player.weapon {
+        height += geometry.weapon;
 
-    2 + weapon + player.buffs.len().min(MAX_BUFF_ROWS)
+        if weapon.sharpness.is_some() {
+            height += SHARPNESS_BAR * geometry.scale + geometry.small;
+        }
+
+        let chips = weapon_chips(weapon, style);
+
+        if !chips.is_empty() {
+            let rows = chip_rows(text, &chips, geometry, inner);
+            height += rows as f32 * geometry.chip
+                + rows.saturating_sub(1) as f32 * geometry.chip_gap
+                + geometry.small;
+        }
+    }
+
+    height += geometry.row * 2.0;
+
+    if !player.buffs.is_empty() {
+        let rows = buff_rows(player.buffs.len());
+        height += geometry.small
+            + rows as f32 * geometry.buff
+            + rows.saturating_sub(1) as f32 * geometry.buff_gap;
+    }
+
+    height
+}
+
+/// Filas que ocupa la cuadrícula de buffs, con el resumen `+N` incluido.
+fn buff_rows(buffs: usize) -> usize {
+    buffs.min(MAX_BUFFS).div_ceil(BUFF_COLUMNS)
 }
 
 /// Separador de una sección, del ancho interior del panel.
@@ -508,7 +570,7 @@ fn draw_hunt(
     y + geometry.row
 }
 
-/// Vida y aguante del jugador local, con los mismos colores que los monstruos.
+/// Vida y aguante, el arma con su icono y sus fichas, y los buffs como iconos con temporizador.
 fn draw_player(
     canvas: &mut Canvas,
     config: &Config,
@@ -521,32 +583,14 @@ fn draw_player(
     let health = player.health.percent();
     let mut y = y;
 
-    // El arma va arriba, como en HunterPie: primero el tipo y después el filo.
     if let Some(weapon) = &player.weapon {
         y = draw_weapon(canvas, config, text, geometry, weapon, y);
 
-        if let Some(WeaponGauge::Spirit { regen, .. }) = &weapon.gauge {
-            y = draw_spirit(canvas, config, text, geometry, weapon, y);
+        let chips = weapon_chips(weapon, style);
 
-            if *regen > 0.0 {
-                y = draw_detail(
-                    canvas,
-                    config,
-                    text,
-                    geometry,
-                    y,
-                    Detail {
-                        label: "Regen. espíritu",
-                        fraction: None,
-                        text: format!("{regen:.0}s"),
-                        color: timer_color(),
-                    },
-                );
-            }
-        }
-
-        for row in gauge_rows(weapon) {
-            y = draw_detail(canvas, config, text, geometry, y, row);
+        if !chips.is_empty() {
+            y = draw_chips(canvas, config, text, geometry, y, &chips);
+            y += geometry.small;
         }
     }
 
@@ -593,299 +637,15 @@ fn draw_player(
 
     y += geometry.row * 2.0;
 
-    // Buffs y estados: nombre, barra de lo que queda y tiempo en segundos.
-    for buff in player.buffs.iter().take(MAX_BUFF_ROWS) {
-        y = draw_detail(
-            canvas,
-            config,
-            text,
-            geometry,
-            y,
-            Detail {
-                label: buff.name,
-                fraction: Some(buff.fraction()),
-                text: if buff.infinite {
-                    "∞".to_string()
-                } else {
-                    format!("{:.0}s", buff.timer)
-                },
-                color: if buff.debuff {
-                    style.low_health
-                } else {
-                    style.capture
-                },
-            },
-        );
+    if !player.buffs.is_empty() {
+        y += geometry.small;
+        y = draw_buffs(canvas, config, text, geometry, y, &player.buffs);
     }
 
     y
 }
 
-/// Fila de detalle: etiqueta, barra opcional y texto libre a la derecha.
-struct Detail<'a> {
-    label: &'a str,
-    fraction: Option<f32>,
-    text: String,
-    color: Color,
-}
-
-/// Dibuja una fila de detalle y devuelve la `y` de la siguiente.
-fn draw_detail(
-    canvas: &mut Canvas,
-    config: &Config,
-    text: &Text,
-    geometry: &Geometry,
-    y: f32,
-    detail: Detail<'_>,
-) -> f32 {
-    let style = &config.style;
-    let size = 12.0 * geometry.scale;
-    let label = fit_label(
-        text,
-        detail.label,
-        size,
-        DETAIL_LABEL_WIDTH * geometry.scale,
-    );
-
-    text.draw(
-        canvas,
-        &label,
-        geometry.padding,
-        y + text.ascent(size),
-        size,
-        style.muted,
-    );
-
-    let value_width = text.width(&detail.text, size);
-    // Columna derecha fija: todas las barras de detalle terminan a la misma altura y los
-    // nombres de buffs más largos no las encogen frame a frame.
-    let label_width = DETAIL_LABEL_WIDTH * geometry.scale + 6.0 * geometry.scale;
-    let bar_right = canvas.width() as f32 - geometry.padding - VALUE_WIDTH * geometry.scale;
-
-    if let Some(fraction) = detail.fraction {
-        let fraction = fraction.clamp(0.0, 1.0);
-        let bar_height = geometry.track.max(3.0);
-        let bar = Rect::new(
-            geometry.padding as i32 + label_width as i32,
-            (y + geometry.row * 0.5 - bar_height * 0.5).round() as i32,
-            (bar_right - geometry.padding - label_width).max(1.0) as u32,
-            bar_height as u32,
-        );
-        let radius = bar.height as f32 / 2.0;
-
-        canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
-
-        let filled = (bar.width as f32 * fraction).round() as u32;
-        if filled > 1 {
-            canvas.fill_rounded_gradient(
-                Rect::new(bar.x, bar.y, filled, bar.height),
-                radius,
-                lighten(detail.color, 0.3),
-                detail.color,
-            );
-        }
-    }
-
-    text.draw(
-        canvas,
-        &detail.text,
-        canvas.width() as f32 - geometry.padding - value_width,
-        y + text.ascent(size),
-        size,
-        style.text,
-    );
-
-    y + geometry.row
-}
-
-/// Un color para medidores de carga, otro para temporizadores y otro para estados.
-fn meter_color() -> Color {
-    Color::rgb(0x4f, 0x8d, 0xd6)
-}
-
-fn timer_color() -> Color {
-    Color::rgb(0xe6, 0xb4, 0x5e)
-}
-
-fn state_color() -> Color {
-    Color::rgb(0xd6, 0x9a, 0x4f)
-}
-
-/// Convierte los medidores del arma en filas del panel. Las armas sin medidor extra no
-/// aportan ninguna fila.
-fn gauge_rows(weapon: &Weapon) -> Vec<Detail<'static>> {
-    let Some(gauge) = &weapon.gauge else {
-        return Vec::new();
-    };
-
-    match gauge {
-        // El espíritu tiene su propio dibujo (rombos de nivel y color por nivel).
-        WeaponGauge::Spirit { .. } => Vec::new(),
-        WeaponGauge::ChargeBlade {
-            phials,
-            max_phials,
-            charge,
-            shield,
-            sword,
-            axe,
-        } => {
-            let mut rows = vec![
-                Detail {
-                    label: "Carga",
-                    fraction: Some(charge / 100.0),
-                    text: format!("{charge:.0}%"),
-                    color: meter_color(),
-                },
-                Detail {
-                    label: "Frascos",
-                    fraction: Some(f32::from(*phials) / f32::from(*max_phials).max(1.0)),
-                    text: format!("{phials}/{max_phials}"),
-                    color: state_color(),
-                },
-            ];
-
-            for (label, timer) in [("Escudo", shield), ("Espada", sword), ("Hacha", axe)] {
-                if *timer > 0.0 {
-                    rows.push(Detail {
-                        label,
-                        fraction: None,
-                        text: format!("{timer:.0}s"),
-                        color: timer_color(),
-                    });
-                }
-            }
-
-            rows
-        }
-        WeaponGauge::SwitchAxe {
-            buildup,
-            charge,
-            timer,
-        } => {
-            let mut rows = vec![
-                Detail {
-                    label: "Filo",
-                    fraction: Some(buildup / 100.0),
-                    text: format!("{buildup:.0}%"),
-                    color: meter_color(),
-                },
-                Detail {
-                    label: "Carga amped",
-                    fraction: Some(charge / 100.0),
-                    text: format!("{charge:.0}%"),
-                    color: state_color(),
-                },
-            ];
-
-            if *timer > 0.0 {
-                rows.push(Detail {
-                    label: "Bono amped",
-                    fraction: None,
-                    text: format!("{timer:.0}s"),
-                    color: timer_color(),
-                });
-            }
-
-            rows
-        }
-        WeaponGauge::DualBlades {
-            demon,
-            arch_demon,
-            buildup,
-        } => vec![
-            Detail {
-                label: "Modo",
-                fraction: None,
-                text: if *arch_demon {
-                    "archidemonio"
-                } else if *demon {
-                    "demonio"
-                } else {
-                    "—"
-                }
-                .to_string(),
-                color: state_color(),
-            },
-            Detail {
-                label: "Carga demonio",
-                fraction: Some(buildup / 100.0),
-                text: format!("{buildup:.0}%"),
-                color: meter_color(),
-            },
-        ],
-        WeaponGauge::InsectGlaive {
-            extracts,
-            attack,
-            speed,
-            defense,
-            stamina,
-            max_stamina,
-        } => {
-            let mut rows = vec![Detail {
-                label: "Esencias",
-                fraction: None,
-                text: extracts.label(),
-                color: state_color(),
-            }];
-
-            for (label, timer) in [
-                ("Ataque", attack),
-                ("Velocidad", speed),
-                ("Defensa", defense),
-            ] {
-                if *timer > 0.0 {
-                    rows.push(Detail {
-                        label,
-                        fraction: None,
-                        text: format!("{timer:.0}s"),
-                        color: timer_color(),
-                    });
-                }
-            }
-
-            if *max_stamina > 0.0 {
-                rows.push(Detail {
-                    label: "Kinsecto",
-                    fraction: Some(stamina / max_stamina),
-                    text: format!("{stamina:.0}/{max_stamina:.0}"),
-                    color: meter_color(),
-                });
-            }
-
-            rows
-        }
-    }
-}
-
-/// Icono de espada vertical: hoja con punta, guarda y empuñadura. Da contexto al filo sin
-/// gastar una palabra y se reconoce a 11 px de alto.
-fn draw_blade_icon(canvas: &mut Canvas, x: f32, center_y: f32, scale: f32, color: Color) {
-    let center_x = x + 5.0 * scale;
-    let thickness = 1.5 * scale;
-
-    canvas.fill_line(
-        (center_x, center_y - 5.5 * scale),
-        (center_x, center_y + 1.0 * scale),
-        thickness * 1.5,
-        color,
-    );
-    canvas.fill_diamond((center_x, center_y - 6.0 * scale), 1.4 * scale, color);
-    canvas.fill_line(
-        (center_x - 3.5 * scale, center_y + 1.5 * scale),
-        (center_x + 3.5 * scale, center_y + 1.5 * scale),
-        thickness,
-        color,
-    );
-    canvas.fill_line(
-        (center_x, center_y + 1.5 * scale),
-        (center_x, center_y + 6.0 * scale),
-        thickness * 1.2,
-        color,
-    );
-    canvas.fill_diamond((center_x, center_y + 6.5 * scale), 1.3 * scale, color);
-}
-
-/// Tipo de arma y, si gasta filo, su barra de colores con la posición actual marcada.
+/// Cabecera del arma: icono de la clase, nombre y, a la derecha, el filo actual.
 fn draw_weapon(
     canvas: &mut Canvas,
     config: &Config,
@@ -896,60 +656,90 @@ fn draw_weapon(
 ) -> f32 {
     let style = &config.style;
     let scale = geometry.scale;
-    let size = 12.0 * scale;
+    let size = 13.0 * scale;
     let right = canvas.width() as f32 - geometry.padding;
-    let icon = 14.0 * scale;
+    let baseline = y + (geometry.weapon - text.height(size)) * 0.5 + text.ascent(size);
 
-    draw_blade_icon(
+    icons::weapon(
         canvas,
+        weapon.kind,
         geometry.padding,
-        y + geometry.row * 0.5,
-        scale,
-        style.muted,
+        y + (geometry.weapon - geometry.icon) * 0.5,
+        geometry.icon,
+        if weapon.kind.has_sharpness() {
+            style.text
+        } else {
+            style.muted
+        },
     );
 
     text.draw(
         canvas,
         weapon.kind.label(),
-        geometry.padding + icon,
-        y + text.ascent(size),
+        geometry.padding + geometry.icon + 6.0 * scale,
+        baseline,
         size,
         style.text,
     );
 
-    let Some(sharpness) = &weapon.sharpness else {
-        return y + geometry.row;
-    };
+    if let Some(sharpness) = &weapon.sharpness {
+        let level = sharpness.level.label();
+        let level_width = text.width(level, 12.0 * scale);
+        let value = format!("filo {:.0}", sharpness.current);
+        let value_width = text.width(&value, 12.0 * scale);
 
-    // El nivel va con el color del filo: el nombre del color se lee solo una vez.
-    let level = format!(" · {}", sharpness.level.label());
-    let level_width = text.width(&level, size);
-    let value = format!("filo {:.0}", sharpness.current);
-    let value_width = text.width(&value, size);
-    let value_y = y + text.ascent(size);
+        text.draw(
+            canvas,
+            level,
+            right - level_width,
+            baseline,
+            12.0 * scale,
+            sharpness_color(sharpness.level),
+        );
+        text.draw(
+            canvas,
+            &value,
+            right - level_width - value_width - 6.0 * scale,
+            baseline,
+            12.0 * scale,
+            style.muted,
+        );
+    } else {
+        let label = "a distancia";
+        text.draw(
+            canvas,
+            label,
+            right - text.width(label, 12.0 * scale),
+            baseline,
+            12.0 * scale,
+            style.muted,
+        );
+    }
 
-    text.draw(
-        canvas,
-        &level,
-        right - level_width,
-        value_y,
-        size,
-        sharpness_color(sharpness.level),
-    );
-    text.draw(
-        canvas,
-        &value,
-        right - level_width - value_width,
-        value_y,
-        size,
-        style.muted,
-    );
+    let mut y = y + geometry.weapon;
 
-    let y = y + geometry.row;
+    if let Some(sharpness) = &weapon.sharpness {
+        draw_sharpness(canvas, config, geometry, sharpness, y);
+        y += SHARPNESS_BAR * scale + geometry.small;
+    }
+
+    y
+}
+
+/// Barra de filo con un hueco entre colores y la posición actual marcada.
+fn draw_sharpness(
+    canvas: &mut Canvas,
+    config: &Config,
+    geometry: &Geometry,
+    sharpness: &mh_overlay_games::Sharpness,
+    y: f32,
+) {
+    let style = &config.style;
+    let scale = geometry.scale;
     let height = SHARPNESS_BAR * scale;
     let bar = Rect::new(
         geometry.padding as i32,
-        (y + geometry.row * 0.5 - height * 0.5).round() as i32,
+        y.round() as i32,
         geometry.inner_width(canvas).max(1.0) as u32,
         height.max(3.0) as u32,
     );
@@ -958,46 +748,703 @@ fn draw_weapon(
     canvas.fill_rounded(bar, radius, lighten(style.panel, 0.22));
 
     let total = sharpness.total();
-    if total > 0.0 {
-        let mut x = bar.x as f32;
-
-        for (index, level) in SharpnessLevel::ALL.iter().enumerate() {
-            let length = f32::from(sharpness.lengths[index]);
-            let width = bar.width as f32 * length / total;
-
-            if width >= 1.5 {
-                let color = sharpness_color(*level);
-                let segment = Rect::new(
-                    (x + scale).round() as i32,
-                    bar.y + scale.round() as i32,
-                    (width - scale * 2.0).max(1.0) as u32,
-                    bar.height.saturating_sub((2.0 * scale).round() as u32),
-                );
-
-                canvas.fill_rounded_gradient(segment, radius, lighten(color, 0.32), color);
-            }
-
-            x += width;
-        }
-
-        let marker_x = bar.x as f32 + bar.width as f32 * sharpness.fraction();
-        canvas.fill_rect(
-            Rect::new(
-                marker_x.round() as i32 - 1,
-                bar.y - scale.round() as i32,
-                (scale * 2.0).max(2.0) as u32,
-                bar.height + (scale * 2.0).round() as u32,
-            ),
-            style.text,
-        );
-        canvas.fill_diamond(
-            (marker_x, bar.y as f32 - 3.0 * scale),
-            2.0 * scale,
-            style.text,
-        );
+    if total <= 0.0 {
+        return;
     }
 
-    y + geometry.row
+    let mut x = bar.x as f32;
+
+    for (index, level) in SharpnessLevel::ALL.iter().enumerate() {
+        let length = f32::from(sharpness.lengths[index]);
+        let width = bar.width as f32 * length / total;
+
+        if width >= 1.5 {
+            let color = sharpness_color(*level);
+            let segment = Rect::new(
+                (x + scale).round() as i32,
+                bar.y + scale.round() as i32,
+                (width - scale * 2.0).max(1.0) as u32,
+                bar.height.saturating_sub((2.0 * scale).round() as u32),
+            );
+
+            canvas.fill_rounded_gradient(segment, radius, lighten(color, 0.32), color);
+        }
+
+        x += width;
+    }
+
+    let marker_x = bar.x as f32 + bar.width as f32 * sharpness.fraction();
+    canvas.fill_rect(
+        Rect::new(
+            marker_x.round() as i32 - 1,
+            bar.y - scale.round() as i32,
+            (scale * 2.0).max(2.0) as u32,
+            bar.height + (scale * 2.0).round() as u32,
+        ),
+        style.text,
+    );
+    canvas.fill_diamond(
+        (marker_x, bar.y as f32 - 3.0 * scale),
+        2.0 * scale,
+        style.text,
+    );
+}
+
+/// Ficha compacta de un dato del arma.
+struct Chip {
+    glyph: BuffGlyph,
+    label: &'static str,
+    value: String,
+    /// Relleno de la línea inferior; `None` para los temporizadores.
+    fraction: Option<f32>,
+    color: Color,
+}
+
+/// Fichas del arma: el medidor de clase, los datos de combate de la clase y el filo máximo.
+fn weapon_chips(weapon: &Weapon, style: &StyleSection) -> Vec<Chip> {
+    let mut chips = weapon_gauge_chips(weapon, style);
+    chips.extend(weapon_detail_chips(&weapon.detail, style));
+
+    if let Some(sharpness) = &weapon.sharpness {
+        chips.push(Chip {
+            glyph: BuffGlyph::Sharpness,
+            label: "Filo máx.",
+            value: sharpness.max_level.label().to_string(),
+            fraction: None,
+            color: sharpness_color(sharpness.max_level),
+        });
+    }
+
+    chips
+}
+
+/// Datos de combate que el juego expone además del medidor: munición, proyectiles, notas y
+/// estadísticas calculadas del arma.
+fn weapon_detail_chips(detail: &WeaponDetail, style: &StyleSection) -> Vec<Chip> {
+    let mut chips = Vec::new();
+    let meter = style.part;
+    let state = style.capture;
+
+    if let Some(attack) = detail.attack {
+        chips.push(Chip {
+            glyph: BuffGlyph::Attack,
+            label: "Ataque",
+            value: format!("{attack:.0}"),
+            fraction: None,
+            color: meter,
+        });
+    }
+
+    if let Some(affinity) = detail.affinity {
+        chips.push(Chip {
+            glyph: BuffGlyph::Misc,
+            label: "Afinidad",
+            value: format!("{affinity:+}%"),
+            fraction: None,
+            color: if affinity >= 0 {
+                state
+            } else {
+                style.low_health
+            },
+        });
+    }
+
+    if let Some(element) = detail.element.filter(|value| *value > 0.0) {
+        chips.push(Chip {
+            glyph: BuffGlyph::Flame,
+            label: "Elemento",
+            value: format!("{element:.0}"),
+            fraction: None,
+            color: meter,
+        });
+    }
+
+    if let Some(ranged) = &detail.ranged {
+        if let Some(selected) = ranged.selected() {
+            chips.push(Chip {
+                glyph: BuffGlyph::Bolt,
+                label: "Cargada",
+                value: selected.loaded.to_string(),
+                fraction: None,
+                color: meter,
+            });
+        }
+
+        let reserve: u32 = ranged.ammo.iter().map(|slot| slot.total).sum();
+        if reserve > 0 {
+            chips.push(Chip {
+                glyph: BuffGlyph::Misc,
+                label: "Reserva",
+                value: reserve.to_string(),
+                fraction: None,
+                color: state,
+            });
+        }
+    }
+
+    if let Some(gunlance) = detail.gunlance {
+        chips.push(Chip {
+            glyph: BuffGlyph::Bolt,
+            label: "Proyectiles",
+            value: format!("{}/{}", gunlance.shells, gunlance.max_shells),
+            fraction: Some(if gunlance.max_shells > 0 {
+                gunlance.shells as f32 / gunlance.max_shells as f32
+            } else {
+                0.0
+            }),
+            color: meter,
+        });
+
+        if gunlance.max_charged > 0 {
+            chips.push(Chip {
+                glyph: BuffGlyph::Flame,
+                label: "Cargados",
+                value: format!("{}/{}", gunlance.charged, gunlance.max_charged),
+                fraction: Some(gunlance.charged as f32 / gunlance.max_charged as f32),
+                color: state,
+            });
+        }
+
+        if gunlance.wyvern_fire > 0.0 {
+            chips.push(Chip {
+                glyph: BuffGlyph::Flame,
+                label: "Dragón",
+                value: format!("{:.0}s", gunlance.wyvern_fire),
+                fraction: None,
+                color: state,
+            });
+        }
+
+        if gunlance.stake_loaded {
+            chips.push(Chip {
+                glyph: BuffGlyph::Misc,
+                label: "Estaca",
+                value: if gunlance.stake_timer > 0.0 {
+                    format!("{:.0}s", gunlance.stake_timer)
+                } else {
+                    "cargada".to_string()
+                },
+                fraction: None,
+                color: state,
+            });
+        }
+    }
+
+    if let Some(horn) = &detail.horn {
+        if !horn.notes.is_empty() {
+            chips.push(Chip {
+                glyph: BuffGlyph::Song,
+                label: "Notas",
+                value: horn
+                    .notes
+                    .iter()
+                    .map(|note| horn_note_short(*note))
+                    .collect::<Vec<_>>()
+                    .join("·"),
+                fraction: None,
+                color: state,
+            });
+        }
+
+        if !horn.songs.is_empty() {
+            chips.push(Chip {
+                glyph: BuffGlyph::Song,
+                label: "Melodías",
+                value: horn.songs.len().to_string(),
+                fraction: None,
+                color: meter,
+            });
+        }
+    }
+
+    if let Some(bow) = detail.bow {
+        chips.push(Chip {
+            glyph: BuffGlyph::Bolt,
+            label: "Carga",
+            value: format!("{}/{}", bow.level, bow.max_level),
+            fraction: Some(bow.charge),
+            color: meter,
+        });
+    }
+
+    chips
+}
+
+/// Convierte el medidor de clase en fichas cortas, que ocupan menos alto que una fila por dato.
+fn weapon_gauge_chips(weapon: &Weapon, style: &StyleSection) -> Vec<Chip> {
+    let Some(gauge) = &weapon.gauge else {
+        return Vec::new();
+    };
+
+    let meter = style.part;
+    let state = style.capture;
+    let timer = style.capture;
+
+    match gauge {
+        WeaponGauge::Spirit {
+            buildup,
+            level,
+            timer: time,
+            max_timer,
+            regen,
+        } => {
+            let mut chips = vec![
+                Chip {
+                    glyph: BuffGlyph::Attack,
+                    label: "Espíritu",
+                    value: format!("{buildup:.0}%"),
+                    fraction: Some(buildup / 100.0),
+                    color: spirit_color(*level),
+                },
+                Chip {
+                    glyph: BuffGlyph::Stun,
+                    label: "Nivel",
+                    value: format!("{level}/3"),
+                    fraction: None,
+                    color: spirit_color(*level),
+                },
+            ];
+
+            if *max_timer > 0.0 {
+                chips.push(Chip {
+                    glyph: BuffGlyph::Misc,
+                    label: "Duración",
+                    value: format!("{time:.0}s"),
+                    fraction: None,
+                    color: timer,
+                });
+            }
+
+            if *regen > 0.0 {
+                chips.push(Chip {
+                    glyph: BuffGlyph::Health,
+                    label: "Regen",
+                    value: format!("{regen:.0}s"),
+                    fraction: None,
+                    color: timer,
+                });
+            }
+
+            chips
+        }
+        WeaponGauge::ChargeBlade {
+            phials,
+            max_phials,
+            charge,
+            shield,
+            sword,
+            axe,
+        } => {
+            let mut chips = vec![
+                Chip {
+                    glyph: BuffGlyph::Bolt,
+                    label: "Carga",
+                    value: format!("{charge:.0}%"),
+                    fraction: Some(charge / 100.0),
+                    color: meter,
+                },
+                Chip {
+                    glyph: BuffGlyph::Bubble,
+                    label: "Frascos",
+                    value: format!("{phials}/{max_phials}"),
+                    fraction: Some(f32::from(*phials) / f32::from(*max_phials).max(1.0)),
+                    color: state,
+                },
+            ];
+
+            for (label, glyph, time) in [
+                ("Escudo", BuffGlyph::Defense, shield),
+                ("Espada", BuffGlyph::Attack, sword),
+                ("Hacha", BuffGlyph::Sharpness, axe),
+            ] {
+                if *time > 0.0 {
+                    chips.push(Chip {
+                        glyph,
+                        label,
+                        value: format!("{time:.0}s"),
+                        fraction: None,
+                        color: timer,
+                    });
+                }
+            }
+
+            chips
+        }
+        WeaponGauge::SwitchAxe {
+            buildup,
+            charge,
+            timer: time,
+        } => {
+            let mut chips = vec![
+                Chip {
+                    glyph: BuffGlyph::Sharpness,
+                    label: "Filo",
+                    value: format!("{buildup:.0}%"),
+                    fraction: Some(buildup / 100.0),
+                    color: meter,
+                },
+                Chip {
+                    glyph: BuffGlyph::Bolt,
+                    label: "Amped",
+                    value: format!("{charge:.0}%"),
+                    fraction: Some(charge / 100.0),
+                    color: state,
+                },
+            ];
+
+            if *time > 0.0 {
+                chips.push(Chip {
+                    glyph: BuffGlyph::Misc,
+                    label: "Bono",
+                    value: format!("{time:.0}s"),
+                    fraction: None,
+                    color: timer,
+                });
+            }
+
+            chips
+        }
+        WeaponGauge::DualBlades {
+            demon,
+            arch_demon,
+            buildup,
+        } => vec![
+            Chip {
+                glyph: BuffGlyph::Flame,
+                label: "Modo",
+                value: if *arch_demon {
+                    "archidemonio"
+                } else if *demon {
+                    "demonio"
+                } else {
+                    "—"
+                }
+                .to_string(),
+                fraction: None,
+                color: if *demon || *arch_demon {
+                    spirit_color(3)
+                } else {
+                    style.muted
+                },
+            },
+            Chip {
+                glyph: BuffGlyph::Bolt,
+                label: "Carga",
+                value: format!("{buildup:.0}%"),
+                fraction: Some(buildup / 100.0),
+                color: meter,
+            },
+        ],
+        WeaponGauge::InsectGlaive {
+            extracts,
+            attack,
+            speed,
+            defense,
+            stamina,
+            max_stamina,
+        } => {
+            let mut chips = vec![Chip {
+                glyph: BuffGlyph::Stamina,
+                label: "Esencias",
+                value: extracts.label(),
+                fraction: None,
+                color: state,
+            }];
+
+            for (label, time) in [
+                ("Ataque", attack),
+                ("Velocidad", speed),
+                ("Defensa", defense),
+            ] {
+                if *time > 0.0 {
+                    chips.push(Chip {
+                        glyph: BuffGlyph::Misc,
+                        label,
+                        value: format!("{time:.0}s"),
+                        fraction: None,
+                        color: timer,
+                    });
+                }
+            }
+
+            if *max_stamina > 0.0 {
+                chips.push(Chip {
+                    glyph: BuffGlyph::Evasion,
+                    label: "Kinsecto",
+                    value: format!("{stamina:.0}/{max_stamina:.0}"),
+                    fraction: Some(stamina / max_stamina),
+                    color: meter,
+                });
+            }
+
+            chips
+        }
+    }
+}
+
+fn horn_note_short(note: HornNote) -> &'static str {
+    match note {
+        HornNote::Purple => "P",
+        HornNote::Red => "R",
+        HornNote::Orange => "N",
+        HornNote::Yellow => "A",
+        HornNote::Green => "V",
+        HornNote::Blue => "Z",
+        HornNote::LightBlue => "L",
+        HornNote::White => "B",
+    }
+}
+
+fn chip_width(text: &Text, chip: &Chip, geometry: &Geometry) -> f32 {
+    let size = 10.5 * geometry.scale;
+    let padding = 6.0 * geometry.scale;
+
+    padding * 2.0
+        + 12.0 * geometry.scale
+        + 4.0 * geometry.scale
+        + text.width(chip.label, size)
+        + 4.0 * geometry.scale
+        + text.width(&chip.value, size)
+}
+
+fn chip_rows(text: &Text, chips: &[Chip], geometry: &Geometry, inner: f32) -> usize {
+    let mut rows = 1;
+    let mut x = 0.0;
+
+    for chip in chips {
+        let width = chip_width(text, chip, geometry);
+
+        if x > 0.0 && x + width > inner {
+            rows += 1;
+            x = 0.0;
+        }
+
+        x += width + geometry.chip_gap;
+    }
+
+    rows
+}
+
+/// Dibuja las fichas del arma y devuelve la `y` de la siguiente sección.
+fn draw_chips(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    y: f32,
+    chips: &[Chip],
+) -> f32 {
+    let style = &config.style;
+    let scale = geometry.scale;
+    let size = 10.5 * scale;
+    let padding = 6.0 * scale;
+    let icon = 12.0 * scale;
+    let right = canvas.width() as f32 - geometry.padding;
+    let mut x = geometry.padding;
+    let mut row_y = y;
+
+    for chip in chips {
+        let width = chip_width(text, chip, geometry);
+
+        if x > geometry.padding && x + width > right {
+            x = geometry.padding;
+            row_y += geometry.chip + geometry.chip_gap;
+        }
+
+        let rect = Rect::new(
+            x.round() as i32,
+            row_y.round() as i32,
+            width.round().max(1.0) as u32,
+            geometry.chip.round().max(1.0) as u32,
+        );
+        canvas.fill_rounded(rect, 4.0 * scale, lighten(style.panel, 0.10));
+
+        if let Some(fraction) = chip.fraction {
+            let filled = (rect.width as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
+            if filled > 1 {
+                canvas.fill_rect(
+                    Rect::new(
+                        rect.x + 1,
+                        rect.bottom() - (2.0 * scale).round().max(1.0) as i32,
+                        filled.saturating_sub(2),
+                        (2.0 * scale).round().max(1.0) as u32,
+                    ),
+                    chip.color,
+                );
+            }
+        }
+
+        icons::buff(
+            canvas,
+            chip.glyph,
+            x + padding,
+            row_y + (geometry.chip - icon) * 0.5,
+            icon,
+            chip.color,
+        );
+
+        let baseline = row_y + (geometry.chip - text.height(size)) * 0.5 + text.ascent(size);
+        let label_x = x + padding + icon + 4.0 * scale;
+
+        text.draw(canvas, chip.label, label_x, baseline, size, style.muted);
+        text.draw(
+            canvas,
+            &chip.value,
+            label_x + text.width(chip.label, size) + 4.0 * scale,
+            baseline,
+            size,
+            style.text,
+        );
+
+        x += width + geometry.chip_gap;
+    }
+
+    row_y + geometry.chip
+}
+
+/// Cuadrícula de buffs: una baldosa por buff, con icono y tiempo; los estados negativos llevan
+/// borde rojo. Si hay más de los que caben, la última baldosa resume el resto.
+fn draw_buffs(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    y: f32,
+    buffs: &[Buff],
+) -> f32 {
+    let shown = buffs.len().min(MAX_BUFFS);
+    let hidden = buffs.len().saturating_sub(MAX_BUFFS);
+    let mut x = geometry.padding;
+    let mut row_y = y;
+    let mut column = 0;
+
+    for (index, buff) in buffs.iter().take(shown).enumerate() {
+        if index > 0 && column == BUFF_COLUMNS {
+            column = 0;
+            x = geometry.padding;
+            row_y += geometry.buff + geometry.buff_gap;
+        }
+
+        if hidden > 0 && index == MAX_BUFFS - 1 {
+            draw_more_tile(canvas, config, text, geometry, x, row_y, hidden);
+        } else {
+            draw_buff_tile(canvas, config, text, geometry, x, row_y, buff);
+        }
+
+        x += geometry.buff + geometry.buff_gap;
+        column += 1;
+    }
+
+    row_y + geometry.buff
+}
+
+fn draw_buff_tile(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    x: f32,
+    y: f32,
+    buff: &Buff,
+) {
+    let style = &config.style;
+    let scale = geometry.scale;
+    let glyph = icons::buff_glyph(buff.name);
+    let tile = Rect::new(
+        x.round() as i32,
+        y.round() as i32,
+        geometry.buff.round().max(1.0) as u32,
+        geometry.buff.round().max(1.0) as u32,
+    );
+    let radius = 5.0 * scale;
+
+    if buff.debuff {
+        canvas.fill_rounded(tile, radius, style.low_health);
+        canvas.fill_rounded(
+            tile.inset(1, 1),
+            (radius - 1.0).max(0.0),
+            lighten(style.panel, 0.13),
+        );
+    } else {
+        canvas.fill_rounded(tile, radius, lighten(style.panel, 0.13));
+    }
+
+    let icon = 17.0 * scale;
+    icons::buff(
+        canvas,
+        glyph,
+        x + (geometry.buff - icon) * 0.5,
+        y + 4.0 * scale,
+        icon,
+        if buff.debuff {
+            style.low_health
+        } else {
+            buff_color(style, glyph)
+        },
+    );
+
+    let label = if buff.infinite {
+        "∞".to_string()
+    } else {
+        buff_time_label(buff.timer)
+    };
+    let size = 9.0 * scale;
+    let baseline = y + geometry.buff - 5.0 * scale;
+    text.draw(
+        canvas,
+        &label,
+        x + (geometry.buff - text.width(&label, size)) * 0.5,
+        baseline,
+        size,
+        if buff.debuff {
+            style.low_health
+        } else {
+            style.text
+        },
+    );
+}
+
+fn draw_more_tile(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    x: f32,
+    y: f32,
+    hidden: usize,
+) {
+    let style = &config.style;
+    let tile = Rect::new(
+        x.round() as i32,
+        y.round() as i32,
+        geometry.buff.round().max(1.0) as u32,
+        geometry.buff.round().max(1.0) as u32,
+    );
+
+    canvas.fill_rounded(tile, 5.0 * geometry.scale, lighten(style.panel, 0.10));
+
+    let label = format!("+{hidden}");
+    let size = 11.0 * geometry.scale;
+    text.draw(
+        canvas,
+        &label,
+        x + (geometry.buff - text.width(&label, size)) * 0.5,
+        y + (geometry.buff + text.ascent(size)) * 0.5,
+        size,
+        style.muted,
+    );
+}
+
+/// Temporizador corto para una baldosa de 32 px: segundos por debajo de un minuto y minutos
+/// por encima, para que nunca se salga del icono.
+fn buff_time_label(timer: f32) -> String {
+    if !timer.is_finite() || timer <= 0.0 {
+        "—".to_string()
+    } else if timer < 60.0 {
+        format!("{timer:.0}s")
+    } else {
+        format!("{:.0}m", timer / 60.0)
+    }
 }
 
 /// Color del medidor de espíritu según el nivel cargado.
@@ -1010,107 +1457,23 @@ fn spirit_color(level: u8) -> Color {
     }
 }
 
-/// Filas que ocupa el medidor de espíritu (el propio medidor y, si toca, su regeneración).
-fn spirit_rows(weapon: &Weapon) -> usize {
-    match &weapon.gauge {
-        Some(WeaponGauge::Spirit { regen, .. }) => 1 + usize::from(*regen > 0.0),
-        _ => 0,
-    }
-}
-
-/// Espíritu del mandoble: barra con el color del nivel y tres rombos que marcan cuál está
-/// cargado, para no tener que leer "nivel 2" en mitad del combate.
-fn draw_spirit(
-    canvas: &mut Canvas,
-    config: &Config,
-    text: &Text,
-    geometry: &Geometry,
-    weapon: &Weapon,
-    y: f32,
-) -> f32 {
-    let Some(WeaponGauge::Spirit {
-        buildup,
-        level,
-        timer,
-        max_timer,
-        ..
-    }) = &weapon.gauge
-    else {
-        return y;
-    };
-    let style = &config.style;
-    let scale = geometry.scale;
-    let size = 12.0 * scale;
-    let inner = geometry.inner_width(canvas);
-    let color = spirit_color(*level);
-
-    text.draw(
-        canvas,
-        "Espíritu",
-        geometry.padding,
-        y + text.ascent(size),
-        size,
-        style.muted,
-    );
-
-    let value = if *max_timer > 0.0 {
-        format!("{timer:.0}s")
-    } else {
-        "—".to_string()
-    };
-    let value_width = text.width(&value, size);
-    text.draw(
-        canvas,
-        &value,
-        canvas.width() as f32 - geometry.padding - value_width,
-        y + text.ascent(size),
-        size,
-        style.text,
-    );
-
-    // Tres rombos: el nivel cargado se rellena con el color del propio medidor.
-    let pip_gap = 4.0 * scale;
-    let pip_space = 3.0 * (PIP_RADIUS * 2.0 + pip_gap) * scale;
-    let pips_x = canvas.width() as f32 - geometry.padding - value_width - 6.0 * scale - pip_space;
-    let center_y = y + geometry.row * 0.5;
-
-    for pip in 0..3u8 {
-        let center = (
-            pips_x
-                + (PIP_RADIUS + pip_gap * 0.5) * scale
-                + f32::from(pip) * (PIP_RADIUS * 2.0 + pip_gap) * scale,
-            center_y,
-        );
-        if pip < *level {
-            canvas.fill_diamond(center, PIP_RADIUS * scale, color);
-        } else {
-            canvas.fill_diamond(center, PIP_RADIUS * scale, lighten(style.panel, 0.22));
+/// Un color por familia, para distinguir el buff por el icono sin leer el nombre.
+fn buff_color(style: &StyleSection, glyph: BuffGlyph) -> Color {
+    match glyph {
+        BuffGlyph::Attack | BuffGlyph::Food | BuffGlyph::Song => style.capture,
+        BuffGlyph::Defense | BuffGlyph::Water => style.part,
+        BuffGlyph::Health | BuffGlyph::Stamina => style.health,
+        BuffGlyph::Evasion | BuffGlyph::Ice | BuffGlyph::Bubble | BuffGlyph::Wind => {
+            Color::rgb(0x7f, 0xd8, 0xe6)
         }
+        BuffGlyph::Sharpness => style.text,
+        BuffGlyph::Flame => Color::rgb(0xf0, 0x6e, 0x3c),
+        BuffGlyph::Bolt | BuffGlyph::Stun => Color::rgb(0xf0, 0xd0, 0x4a),
+        BuffGlyph::Dragon | BuffGlyph::Poison => Color::rgb(0xb0, 0x7a, 0xd6),
+        BuffGlyph::Bleed => style.low_health,
+        BuffGlyph::Sleep => Color::rgb(0x8f, 0x9f, 0xe6),
+        BuffGlyph::Misc => style.muted,
     }
-
-    let bar_height = geometry.track.max(3.0);
-    let bar = Rect::new(
-        geometry.padding as i32 + (LABEL_WIDTH * scale) as i32,
-        (center_y - bar_height * 0.5).round() as i32,
-        (inner - LABEL_WIDTH * scale - VALUE_WIDTH * scale - pip_space - 12.0 * scale).max(1.0)
-            as u32,
-        bar_height as u32,
-    );
-    let radius = bar.height as f32 / 2.0;
-
-    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
-
-    let filled = (bar.width as f32 * (buildup / 100.0).clamp(0.0, 1.0)).round() as u32;
-    if filled > 1 {
-        canvas.fill_rounded_gradient(
-            Rect::new(bar.x, bar.y, filled, bar.height),
-            radius,
-            lighten(color, 0.3),
-            color,
-        );
-    }
-
-    y + geometry.row
 }
 
 /// Un color por nivel de filo, del rojo al púrpura.
@@ -1399,6 +1762,7 @@ mod tests {
                 current: 10.0,
             }),
             gauge: None,
+            detail: WeaponDetail::default(),
         });
         let with_weapon = render(&config, &text, &preview(&player), None);
 
@@ -1416,6 +1780,7 @@ mod tests {
                 kind: WeaponKind::Longsword,
                 sharpness: None,
                 gauge: None,
+                detail: WeaponDetail::default(),
             }),
             buffs: Vec::new(),
         };
@@ -1432,6 +1797,7 @@ mod tests {
                     max_timer: 140.0,
                     regen: 0.0,
                 }),
+                detail: WeaponDetail::default(),
             }),
             ..player
         };
@@ -1469,6 +1835,90 @@ mod tests {
     }
 
     #[test]
+    fn the_buff_icons_fit_in_a_grid_instead_of_one_row_each() {
+        let (config, text) = config();
+        let plain = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: None,
+            buffs: Vec::new(),
+        };
+        let without = render(&config, &text, &preview(&plain), None);
+
+        let mut with_buffs = plain.clone();
+        with_buffs.buffs = (0..8)
+            .map(|index| Buff {
+                name: "Semilla del poder",
+                timer: 60.0 + index as f32,
+                max_timer: 180.0,
+                debuff: false,
+                infinite: false,
+            })
+            .collect();
+        let with = render(&config, &text, &preview(&with_buffs), None);
+
+        // Ocho buffs ocupan una sola fila de 32 px, no ocho filas de texto.
+        assert!(
+            with.height() - without.height() < 60,
+            "la cuadrícula creció {} px",
+            with.height() - without.height()
+        );
+    }
+
+    #[test]
+    fn the_measured_player_height_matches_what_is_drawn() {
+        let (config, text) = config();
+        let geometry = Geometry::new(1.0);
+        let player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: Some(40.0),
+            weapon: Some(Weapon {
+                kind: WeaponKind::ChargeBlade,
+                sharpness: Some(Sharpness {
+                    lengths: [40, 30, 30, 30, 30, 20, 10],
+                    level: SharpnessLevel::White,
+                    max_level: SharpnessLevel::Purple,
+                    current: 15.0,
+                }),
+                gauge: Some(WeaponGauge::ChargeBlade {
+                    phials: 3,
+                    max_phials: 5,
+                    charge: 62.0,
+                    shield: 30.0,
+                    sword: 12.0,
+                    axe: 0.0,
+                }),
+                detail: WeaponDetail::default(),
+            }),
+            buffs: (0..10)
+                .map(|index| Buff {
+                    name: "Ataque +",
+                    timer: 30.0 + index as f32,
+                    max_timer: 120.0,
+                    debuff: index == 9,
+                    infinite: false,
+                })
+                .collect(),
+        };
+
+        let inner = BASE_WIDTH - geometry.padding * 2.0;
+        let measured = player_height(&text, &player, &geometry, inner, &config.style);
+        let mut canvas = Canvas::new(BASE_WIDTH as u32, 800);
+        let drawn = draw_player(
+            &mut canvas,
+            &config,
+            &text,
+            &geometry,
+            &player,
+            geometry.padding,
+        );
+
+        assert_eq!((drawn - geometry.padding).round(), measured.round());
+    }
+
+    #[test]
     fn the_sharpness_colors_are_drawn_in_the_bar() {
         let (config, text) = config();
         let player = Player {
@@ -1484,6 +1934,7 @@ mod tests {
                     current: 10.0,
                 }),
                 gauge: None,
+                detail: WeaponDetail::default(),
             }),
             buffs: Vec::new(),
         };

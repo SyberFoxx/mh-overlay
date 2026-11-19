@@ -11,7 +11,7 @@ use std::error::Error;
 use mh_overlay_config::Config;
 use mh_overlay_games::{
     Ailment, Buff, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot,
-    Weapon, WeaponGauge, WeaponKind,
+    Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
@@ -79,6 +79,7 @@ fn sample() -> Snapshot {
                     max_timer: 140.0,
                     regen: 0.0,
                 }),
+                detail: WeaponDetail::default(),
             }),
             buffs: vec![
                 Buff {

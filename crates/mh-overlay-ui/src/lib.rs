@@ -10,6 +10,7 @@
 
 pub mod canvas;
 pub mod editor;
+pub mod icons;
 pub mod text;
 pub mod view;
 pub mod wayland;
