@@ -34,7 +34,7 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
 
 **Ir a:** [instalación rápida](#instalación-rápida) · [estado](#estado) · [requisitos](#requisitos) ·
 [uso](#compilar-y-usar) · [actualizar](#actualizar) · [configuración](#configuración) ·
-[arquitectura](#arquitectura) · [límites](#límites-conocidos)
+[arquitectura](#arquitectura) · [límites](#límites-conocidos) · [roadmap](ROADMAP.md)
 
 ```text
 cacería  12:34 restante   vidas 0/3
@@ -56,6 +56,9 @@ dale permiso de ejecución y ábrelo:
 chmod +x mh-overlay-*-linux-x86_64.AppImage
 ./mh-overlay-*-linux-x86_64.AppImage
 ```
+
+Si tienes más de un AppImage en la carpeta, el comodín del segundo comando no sirve: escribe
+el nombre exacto del que acabas de descargar.
 
 No hay que instalar la aplicación: se integra en el menú y, desde ese momento, comprueba si hay
 versiones nuevas al abrir el hub. Para abrir la imagen solo hace falta FUSE 2 (o
@@ -92,14 +95,17 @@ o [compila desde el código](#compilar-y-usar).
 | Iconos de las 14 armas y fichas de datos de clase | ✅ escrito | ✅ escrito |
 | Buffs como iconos con temporizador | ✅ escrito | ✅ escrito |
 | Hub gráfico con vista previa en vivo | ✅ probado | ✅ probado |
-| Bandeja de sistema (minimizar y cerrar) | ✅ escrito | ✅ escrito |
+| Bandeja de sistema (ocultar y salir) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
 | Hub rediseñado con barra lateral y tarjetas | ✅ probado | ✅ probado |
-| AppImage con actualización en sitio | ✅ probado | ✅ probado |
+| AppImage con actualización en sitio | ⚠️ parcial | ⚠️ parcial |
 | Permiso de memoria desde el hub (polkit) | ✅ escrito | ✅ escrito |
 
-Leyenda: ✅ hecho · ⚠️ parcial · ⏳ pendiente
+Leyenda: ✅ escrito o probado · ⚠️ parcial · ⏳ pendiente
+
+La autoactualización se probó contra un servidor local; falta comprobarla entre dos releases
+publicadas. El estado vivo y lo que queda está en [ROADMAP.md](ROADMAP.md).
 
 > **Sin validar en juego.** El entorno donde se escribió esto no tiene ninguno de los dos
 títulos instalados. La capa de memoria, el parser de `.map` y la CLI están probados con tests;
@@ -235,6 +241,9 @@ chmod +x mh-overlay-0.1.0-linux-x86_64.AppImage
 ./mh-overlay-0.1.0-linux-x86_64.AppImage
 ```
 
+Los nombres de archivo de los ejemplos llevan la versión de esta release; si descargas otra,
+usa su nombre.
+
 Un solo archivo: lleva dentro el binario, los mapas y el lanzador. Al abrirlo por primera vez se
 integra en el menú de aplicaciones del usuario y se queda ahí; no hay que instalar, ni copiar
 carpetas, ni ejecutar nada con `sudo`.
@@ -280,6 +289,8 @@ cd mh-overlay-0.1.0-linux-x86_64
 ./install.sh --check     # qué hay en el sistema antes de tocar nada
 ./install.sh             # instalación de usuario, sin sudo
 ```
+
+Sustituye `0.1.0` por la versión del tarball que hayas descargado.
 
 La instalación de usuario deja el programa en `$XDG_DATA_HOME/mh-overlay` (por defecto
 `~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador
@@ -585,6 +596,12 @@ los huecos; World las identifica por el índice que reporta el juego.
 - **Los colores se editan solo en el TOML**: el editor cubre posición, tamaño y visibilidad.
 - **Online**: leer memoria no modifica el juego, pero ningún método de este tipo tiene garantía
   del publisher. Úsalo bajo tu criterio.
+
+## Próximos pasos
+
+La lista viva de lo que falta —validar los lectores en juego, publicar `v0.1.1` y probar la
+actualización real, onboarding, diagnóstico exportable— está en [ROADMAP.md](ROADMAP.md), junto
+con el criterio para dar el proyecto por completo.
 
 ## Licencia
 

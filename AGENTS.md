@@ -4,13 +4,16 @@
 
 `mh-overlay` is a Linux-native overlay for Monster Hunter titles. It reads the game
 process memory (Proton/Wine) and reports monster health, part damage and ailments.
-Written in Rust 2024, workspace with three crates:
+Written in Rust 2024, workspace with six crates:
 
 | Crate | Path | Responsibility |
 | --- | --- | --- |
 | `mh-overlay-memory` | `crates/mh-overlay-memory` | Process discovery, `/proc` parsing, `process_vm_readv`, pointer chains, `.map` parser |
 | `mh-overlay-games` | `crates/mh-overlay-games` | Per-game readers (`rise.rs`, `world.rs`) and the shared `model` |
-| `mh-overlay-cli` | `crates/mh-overlay-cli` | Binary `mh-overlay`, argument parsing, rendering |
+| `mh-overlay-config` | `crates/mh-overlay-config` | Documented TOML, validation, hot reload and XDG path |
+| `mh-overlay-ui` | `crates/mh-overlay-ui` | Canvas, typography and the X11/Wayland surface |
+| `mh-overlay-app` | `crates/mh-overlay-app` | Desktop hub: diagnostics, settings and live preview |
+| `mh-overlay-cli` | `crates/mh-overlay-cli` | Binary `mh-overlay`, argument parsing, update and console output |
 
 Supported games today: Monster Hunter Rise (`MonsterHunterRise.exe`) and
 Monster Hunter World (`MonsterHunterWorld.exe`), both through Proton.
@@ -67,6 +70,8 @@ Three rules govern every read, and getting one wrong silently returns garbage:
 - A `.map` file that cannot be parsed is an error, never a silent fallback to another
   version: wrong offsets read plausible garbage.
 - Update `README.md` (status table) in the same change that alters what a game can report.
+- Pending work and the definition of done live in `ROADMAP.md`; move finished entries to Done
+  with the version or commit.
 - Commits: conventional prefix (`feat`, `fix`, `docs`, `chore`), one logical change, and the
   message says why.
 
