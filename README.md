@@ -1,20 +1,40 @@
-# mh-overlay
+<p align="center">
+  <img src="docs/banner.jpeg" alt="mh-overlay mostrando la vida, las partes y los estados de un Rathian" width="100%">
+</p>
 
-Overlay nativo para Linux que muestra la vida de los monstruos, el daño acumulado en cada
-parte y los estados alterados en **Monster Hunter: World** y **Monster Hunter Rise**,
-leyendo la memoria del juego mientras corre bajo Proton.
+<h1 align="center">mh-overlay</h1>
 
-Es la alternativa a [HunterPie](https://github.com/HunterPie/HunterPie) en Linux: no necesita
-Wine para sí mismo, no inyecta DLLs y no escribe ni un byte en el proceso del juego.
+<p align="center">
+  <strong>Vida de monstruos, daño por parte y estados alterados en Monster Hunter: World y Rise.</strong><br>
+  Overlay nativo para Linux, sin inyección ni escritura en la memoria del juego.
+</p>
 
-Al ejecutarlo sin argumentos abre el **hub gráfico**; desde ahí se abre el panel sobre el juego.
-El panel se queda en la **bandeja del sistema** al cerrar la ventana, dibuja un icono por cada
-una de las 14 clases de arma y muestra los buffs como iconos con temporizador, no como barras.
+<p align="center">
+  <a href="https://github.com/SyberFoxx/mh-overlay/releases/latest"><img alt="Última release" src="https://img.shields.io/github/v/release/SyberFoxx/mh-overlay?style=flat-square&label=release&color=e6b45e"></a>
+  <a href="https://github.com/SyberFoxx/mh-overlay/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/SyberFoxx/mh-overlay/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-2b2f3a?style=flat-square&logo=linux&logoColor=white">
+  <img alt="Rust 1.85+" src="https://img.shields.io/badge/rust-1.85%2B-2b2f3a?style=flat-square&logo=rust&logoColor=white">
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-4f8dd6?style=flat-square"></a>
+</p>
 
-Se publica como **AppImage** de un solo archivo: se abre con doble clic, se integra en el menú la
-primera vez y se actualiza sola, desde el propio hub o con `--update`, sin desinstalar nada.
+Lee la memoria del juego mientras corre bajo Proton y dibuja el estado de la cacería encima, sin
+inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
+[HunterPie](https://github.com/HunterPie/HunterPie) en Linux.
 
-```
+- **Panel sobre el juego** — vida, umbral de captura, reloj y vidas del equipo; partes con
+  flinch/romper/cortar; estados alterados; filo, medidores de clase, munición y buffs con
+  temporizador. Las 14 armas tienen icono propio.
+- **Hub de escritorio** — diagnóstico de la conexión, selección de mapa, vista previa en vivo y
+  todos los ajustes con selector de color, sin editar el TOML a mano.
+- **Un solo archivo** — el AppImage se integra en el menú la primera vez y se actualiza solo,
+  desde el hub o con `--update`, sin desinstalar ni perder la configuración.
+- **Solo lectura** — el crate de memoria no expone un writer a propósito.
+
+**Ir a:** [instalación rápida](#instalación-rápida) · [estado](#estado) · [requisitos](#requisitos) ·
+[uso](#compilar-y-usar) · [actualizar](#actualizar) · [configuración](#configuración) ·
+[arquitectura](#arquitectura) · [límites](#límites-conocidos)
+
+```text
 cacería  12:34 restante   vidas 0/3
 
 tú  HP  71.2%  (712 / 1000)   aguante  84.0%  (126 / 150)
@@ -24,6 +44,24 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
   Cola         flinch  88.1%  romper  41.9%  cortar  41.9%
   Veneno  45.2%  (120 / 265)
 ```
+
+## Instalación rápida
+
+Descarga el AppImage desde la [última release](https://github.com/SyberFoxx/mh-overlay/releases/latest),
+dale permiso de ejecución y ábrelo:
+
+```bash
+chmod +x mh-overlay-*-linux-x86_64.AppImage
+./mh-overlay-*-linux-x86_64.AppImage
+```
+
+No hay que instalar la aplicación: se integra en el menú y, desde ese momento, comprueba si hay
+versiones nuevas al abrir el hub. Para abrir la imagen solo hace falta FUSE 2 (o
+`--appimage-extract-and-run` si no está). Para leer la memoria del juego hace falta además el
+permiso de `ptrace`; el hub lo explica y ofrece concederlo con polkit.
+
+¿Prefieres un paquete con `setcap`? Salta a [instalar el paquete](#instalar-el-paquete-alternativa-con-setcap)
+o [compila desde el código](#compilar-y-usar).
 
 ## Estado
 
@@ -66,8 +104,7 @@ títulos instalados. La capa de memoria, el parser de `.map` y la CLI están pro
 los lectores de Rise y World están escritos contra el layout documentado por HunterPie y la
 primera ejecución contra un juego real es lo primero que hay que hacer. Los datos de munición,
 proyectiles y melodías de World vienen de HunterPie legacy y tampoco se han visto en partida; si
-un número sale
-mal, el sospechoso es el `.map` o el desplazamiento fijo, no la capa de memoria.
+un número sale mal, el sospechoso es el `.map` o el desplazamiento fijo, no la capa de memoria.
 
 ## Requisitos
 
@@ -271,7 +308,9 @@ si falta. Los mapas van dentro del paquete porque son pequeños y así funciona 
 código. En Alpine/musl, o en una arquitectura distinta de `x86_64`/`aarch64`, hay que compilar
 con `cargo build --release`.
 
-### Publicar una releaseEl flujo `.github/workflows/release.yml` compila en Ubuntu, ejecuta `scripts/package.sh` y
+### Publicar una release
+
+El flujo `.github/workflows/release.yml` compila en Ubuntu, ejecuta `scripts/package.sh` y
 `scripts/appimage.sh`, y deja el `.tar.gz`, el `.AppImage` y sus `.sha256` como artefacto. Al
 empujar una etiqueta `v*` también los adjunta a la release de GitHub:
 
