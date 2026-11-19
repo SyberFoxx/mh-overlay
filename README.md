@@ -7,6 +7,13 @@ leyendo la memoria del juego mientras corre bajo Proton.
 Es la alternativa a [HunterPie](https://github.com/HunterPie/HunterPie) en Linux: no necesita
 Wine para sí mismo, no inyecta DLLs y no escribe ni un byte en el proceso del juego.
 
+Al ejecutarlo sin argumentos abre el **hub gráfico**; desde ahí se abre el panel sobre el juego.
+El panel se queda en la **bandeja del sistema** al cerrar la ventana, dibuja un icono por cada
+una de las 14 clases de arma y muestra los buffs como iconos con temporizador, no como barras.
+
+Se publica como **AppImage** de un solo archivo: se abre con doble clic, se integra en el menú la
+primera vez y se actualiza sola, desde el propio hub o con `--update`, sin desinstalar nada.
+
 ```
 cacería  12:34 restante   vidas 0/3
 
@@ -28,6 +35,12 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Jugador: vida y aguante | ✅ escrito | ✅ escrito |
 | Jugador: arma y filo | ✅ escrito | ✅ escrito |
 | Medidores de clase (espíritu, frascos, hacha, demonio, kinsecto) | ✅ escrito | ✅ escrito |
+| Ataque, afinidad y elemento calculados | ✅ escrito | — |
+| Munición de ballestas y reserva | — | ✅ escrito |
+| Proyectiles de la lanza pistola | — | ✅ escrito |
+| Cola de notas y melodías de la cornamusa | — | ✅ escrito |
+| Carga del arco | — | ✅ escrito |
+| Pestaña **Arma** en el hub | ✅ escrito | ✅ escrito |
 | Buffs y estados del jugador | ✅ escrito | ✅ escrito |
 | Cacería: reloj y vidas del equipo | ✅ escrito | ✅ escrito |
 | Umbral de captura | ✅ escrito | ✅ escrito |
@@ -36,21 +49,39 @@ id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
 | Estados alterados | ✅ escrito | ✅ escrito |
 | Nombres de monstruo | ✅ escrito | ✅ escrito |
 | Overlay gráfico (X11 y Wayland) | ✅ escrito | ✅ escrito |
+| Iconos de las 14 armas y fichas de datos de clase | ✅ escrito | ✅ escrito |
+| Buffs como iconos con temporizador | ✅ escrito | ✅ escrito |
+| Hub gráfico con vista previa en vivo | ✅ probado | ✅ probado |
+| Bandeja de sistema (minimizar y cerrar) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
+| Hub rediseñado con barra lateral y tarjetas | ✅ probado | ✅ probado |
+| AppImage con actualización en sitio | ✅ probado | ✅ probado |
+| Permiso de memoria desde el hub (polkit) | ✅ escrito | ✅ escrito |
 
 Leyenda: ✅ hecho · ⚠️ parcial · ⏳ pendiente
 
 > **Sin validar en juego.** El entorno donde se escribió esto no tiene ninguno de los dos
 títulos instalados. La capa de memoria, el parser de `.map` y la CLI están probados con tests;
 los lectores de Rise y World están escritos contra el layout documentado por HunterPie y la
-primera ejecución contra un juego real es lo primero que hay que hacer. Si un número sale
+primera ejecución contra un juego real es lo primero que hay que hacer. Los datos de munición,
+proyectiles y melodías de World vienen de HunterPie legacy y tampoco se han visto en partida; si
+un número sale
 mal, el sospechoso es el `.map` o el desplazamiento fijo, no la capa de memoria.
 
 ## Requisitos
 
-- Linux, kernel ≥ 3.2 (`process_vm_readv`).
+- Linux con glibc (Arch, Debian, Ubuntu, Fedora, openSUSE, Mint, Pop!_OS…). En Alpine/musl hay
+  que compilar desde el código.
+- Kernel ≥ 3.2 (`process_vm_readv`).
 - Rust 1.85+ para compilar.
+- Para el **hub**: OpenGL (Mesa o el driver de la tarjeta) y una sesión X11 o Wayland. El panel
+  sobre el juego no necesita GL.
+- Para el **AppImage**: FUSE 2 (`libfuse2`, en Ubuntu 24.04 `libfuse2t64`). Sin FUSE se puede
+  abrir igual con
+  `./mh-overlay-*.AppImage --appimage-extract-and-run`.
+- Para la **bandeja**: un escritorio con StatusNotifierItem. KDE, XFCE, Cinnamon, Budgie y los
+  compositores wlroots lo traen; GNOME necesita la extensión AppIndicator/KStatusNotifierItem.
 - El juego corriendo bajo Proton con **modo ventana sin bordes** (el overlay necesita dibujar
   encima; el fullscreen exclusivo lo impide).
 
@@ -75,33 +106,36 @@ ignora y hay que usar la B.
 
 ```bash
 cargo build --release
-./target/release/mh-overlay --overlay --game rise
+./target/release/mh-overlay                 # hub gráfico
+./target/release/mh-overlay --overlay       # panel sobre el juego
 ```
 
 ```
--g, --game <JUEGO>      rise o world (por defecto, el del archivo de configuración)
+-g, --game <JUEGO>      rise o world; fija el juego y desactiva la detección automática
     --pid <PID>         pid explícito, si hay más de una instancia corriendo
     --map <ARCHIVO>     address map concreto; por defecto, el más nuevo que coincida con el juego
     --base <HEX>        base del módulo, si /proc no la expone
     --overlay           dibujar el panel encima del juego
     --backend <BACKEND> auto (layer-shell de Wayland, cae a X11), wayland o x11
     --settings          abrir el editor de ajustes (no necesita el juego)
-    --hub               abrir el hub: diagnóstico de la conexión y ajustes con vista previa
+    --hub               abrir el hub (es lo que hace sin argumentos)
+    --print             imprimir una lectura en la consola y salir
     --position <POS>    top-left, top-right, bottom-left, bottom-right o center
     --config <ARCHIVO>  configuración a usar (por defecto ~/.config/mh-overlay/config.toml)
     --init-config       escribir la configuración documentada y salir
-    --watch             refresco continuo en lugar de una sola lectura
+    --watch             refresco continuo en la consola, sin ventana
     --interval <MS>     periodo de refresco; por defecto, el de la configuración
     --list-maps         muestra los address maps disponibles
-    --update            instalar la última release encima de esta instalación
+    --update            actualizar esta instalación (AppImage o paquete) y salir
 ```
 
-Sin `--overlay` la ejecución imprime la cacería, el jugador, y una línea por monstruo, por
-parte y por estado activo; el README abre con un ejemplo de esa salida.
+Sin argumentos se abre el hub. La salida de consola sigue disponible con `--print` (una
+lectura) y `--watch` (refresco continuo); el README abre con un ejemplo de esa salida.
 
 ```bash
 sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
-./target/release/mh-overlay --game world --watch --interval 250
+./target/release/mh-overlay --print --game world
+./target/release/mh-overlay --watch --game rise --interval 250
 ```
 
 ### El panel
@@ -124,13 +158,19 @@ Xorg»** (sesión de la pantalla de acceso, donde el `override-redirect` sí que
 el juego en **ventana sin bordes**, o usar uno de los compositores de la lista. `--backend x11`
 fuerza el backend X11 y `--backend wayland` exige layer-shell en vez de caer a X11, para saber
 qué está pasando sin adivinar; la CLI imprime el backend que usa al arrancar. Arriba lleva el reloj que
-queda de la cacería con las vidas del equipo. Debajo va el jugador: el arma equipada con su
-filo (longitudes por color y la posición actual marcada), los medidores de la clase (espíritu
-de la espada larga, frascos y cargas de la espada cargada, hojas del hacha espada, modo demonio
-y kinsecto), la vida —con la parte recuperable en rojo—, el aguante y los buffs y estados
-activos con su tiempo restante. La barra de filo separa cada color con un hueco y lleva un puntero
-con su posición; el espíritu de la espada larga se pinta con tres rombos —el nivel cargado— y
-una barra del color de ese nivel, así que se lee de un vistazo sin leer «nivel 2». Por
+queda de la cacería con las vidas del equipo. Debajo va el jugador: el icono de la clase de arma
+(las 14: espadón, espada y escudo, espadas dobles, espada larga, martillo, cornamusa, lanza,
+lanza pistola, hacha espada, espada cargada, glaive insecto, ballesta ligera, ballesta pesada y
+arco), el nombre, el filo con sus colores y la posición actual, y una fila de **fichas** con los
+datos de la clase (espíritu y nivel, frascos y carga, hojas del hacha, modo demonio, esencias y
+kinsecto). En World las fichas añaden munición cargada y reserva, proyectiles normales y
+cargados de la lanza pistola, dragón de fuego y estaca, notas en cola de la cornamusa y carga
+del arco. En Rise se añaden ataque, afinidad y elemento calculados por el juego. Cada ficha
+lleva su icono, su valor y una línea fina cuando el dato es una carga. La
+vida —con la parte recuperable en rojo— y el aguante van debajo. Los buffs y estados ya no son
+rayas: son una cuadrícula compacta de iconos con el tiempo restante; los negativos llevan borde
+rojo y las familias (ataque, defensa, vida, aguante, elemento, filo, comida, canción…) tienen
+dibujo y color propios. Por
 monstruo muestra el nombre, la vida en porcentaje, una barra de vida con bisel, marcas cada
 10 % y la marca del umbral de captura, y debajo las barras finas de partes (azul, rompible;
 ámbar, cortable; dorada cuando ya se rompió) y de estados activos. Las partes rompibles llevan
@@ -148,27 +188,96 @@ Para ver el diseño sin abrir el juego:
 cargo run -p mh-overlay-ui --example preview
 ```
 
-### Instalar en el sistema
+### AppImage (recomendado)
+
+```bash
+chmod +x mh-overlay-0.1.0-linux-x86_64.AppImage
+./mh-overlay-0.1.0-linux-x86_64.AppImage
+```
+
+Un solo archivo: lleva dentro el binario, los mapas y el lanzador. Al abrirlo por primera vez se
+integra en el menú de aplicaciones del usuario y se queda ahí; no hay que instalar, ni copiar
+carpetas, ni ejecutar nada con `sudo`.
+
+Para actualizar, pulsa **Buscar actualización** en el hub o ejecuta:
+
+```bash
+./mh-overlay-0.1.0-linux-x86_64.AppImage --update
+```
+
+Baja la última release, comprueba su SHA-256 y reemplaza **ese mismo archivo** de forma atómica.
+No hay que desinstalar: la configuración vive en `~/.config/mh-overlay` y se conserva, y el
+lanzador del menú sigue apuntando al AppImage actualizado. Si el archivo está en una carpeta de
+solo lectura, el actualizador lo dice y no toca nada.
+
+El AppImage se genera con:
+
+```bash
+./scripts/appimage.sh
+```
+
+Deja `dist/mh-overlay-<versión>-linux-<arquitectura>.AppImage` y su `.sha256`. Descarga
+`appimagetool` la primera vez en `target/appimage/` y no necesita FUSE para empaquetar.
+
+### Instalar el paquete (alternativa con `setcap`)
 
 ```bash
 ./scripts/package.sh
 ```
 
 Deja en `dist/` un `mh-overlay-<versión>-linux-<arquitectura>.tar.gz` con el binario, los mapas,
-la plantilla de configuración, el lanzador de menú y un `install.sh` que no pide sudo: copia el
-programa y sus mapas a `~/.local/share/mh-overlay`, enlaza `~/.local/bin/mh-overlay` y añade la
-entrada de menú que abre el hub. En la otra máquina:
+la plantilla de configuración, el icono, el lanzador de menú y un `install.sh` que funciona en
+cualquier distribución. En la otra máquina:
 
 ```bash
 tar xzf mh-overlay-0.1.0-linux-x86_64.tar.gz
 cd mh-overlay-0.1.0-linux-x86_64
-./install.sh
+./install.sh --check     # qué hay en el sistema antes de tocar nada
+./install.sh             # instalación de usuario, sin sudo
 ```
 
-El binario solo depende de glibc y de las bibliotecas gráficas que ya trae el escritorio; los
-mapas van dentro del paquete porque son pequeños y así funciona sin el árbol de código. Volver a
-ejecutar `install.sh` sobre una instalación existente la deja en la versión del paquete y
-conserva la configuración, que vive en `~/.config/mh-overlay`.
+La instalación de usuario deja el programa en `$XDG_DATA_HOME/mh-overlay` (por defecto
+`~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador en
+`~/.local/share/applications` y el icono en `~/.local/share/icons/hicolor/scalable/apps`. Los
+directorios se pueden cambiar con `XDG_DATA_HOME`, `XDG_BIN_HOME` y `XDG_CONFIG_HOME`.
+
+Para todos los usuarios, con root o sudo:
+
+```bash
+sudo ./install.sh --system
+```
+
+Eso instala en `/usr/local/lib/mh-overlay`, enlaza `/usr/local/bin/mh-overlay` y deja el lanzador
+y el icono en `/usr/local/share`. Un prefijo propio (útil para probar o para empaquetar):
+
+```bash
+./install.sh --prefix /tmp/mh-overlay
+DESTDIR=/tmp/pkg ./install.sh --system --prefix /usr   # para un .deb/.rpm
+```
+
+Volver a ejecutar `install.sh` sobre una instalación existente la actualiza en sitio y conserva
+`~/.config/mh-overlay`. Para desinstalar:
+
+```bash
+./install.sh --uninstall          # conserva la configuración
+./install.sh --uninstall --purge  # borra también ~/.config/mh-overlay
+```
+
+El binario del paquete solo enlaza glibc; el hub carga OpenGL/EGL en tiempo de ejecución y avisa
+si falta. Los mapas van dentro del paquete porque son pequeños y así funciona sin el árbol de
+código. En Alpine/musl, o en una arquitectura distinta de `x86_64`/`aarch64`, hay que compilar
+con `cargo build --release`.
+
+### Publicar una releaseEl flujo `.github/workflows/release.yml` compila en Ubuntu, ejecuta `scripts/package.sh` y
+`scripts/appimage.sh`, y deja el `.tar.gz`, el `.AppImage` y sus `.sha256` como artefacto. Al
+empujar una etiqueta `v*` también los adjunta a la release de GitHub:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Sin etiqueta, `workflow_dispatch` sirve para comprobar el empaquetado desde la pestaña Actions.
 
 ### Actualizar
 
@@ -176,11 +285,13 @@ conserva la configuración, que vive en `~/.config/mh-overlay`.
 mh-overlay --update
 ```
 
-Baja la última release de GitHub, comprueba su SHA-256 y reemplaza el binario y los mapas de la
-instalación **en sitio**: no hay que desinstalar nada y la configuración no se toca. El binario
-se escribe al lado con otro nombre y se renombra encima, así que una actualización a mitad de
+Baja la última release de GitHub, comprueba su SHA-256 y reemplaza la instalación **en sitio**:
+si corre desde un AppImage cambia la imagen entera, y si corre desde el paquete cambia el binario
+y los mapas. No hay que desinstalar nada y la configuración no se toca. El archivo nuevo se
+escribe al lado con otro nombre y se renombra encima, así que una actualización a mitad de
 cacería nunca deja un ejecutable truncado, y un paquete cuyo checksum no coincide se rechaza sin
-tocar lo instalado. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
+tocar lo instalado. El botón **Buscar actualización** del hub hace exactamente lo mismo sin abrir
+una terminal. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
 de inodo: el actualizador intenta restaurarla y, si no tiene permisos, imprime la orden exacta.
 
 Para probar el actualizador o usar un espejo, `MH_OVERLAY_UPDATE_API` y
@@ -188,10 +299,16 @@ Para probar el actualizador o usar un espejo, `MH_OVERLAY_UPDATE_API` y
 
 ### Configuración
 
-La primera vez que se ejecuta `--overlay` o `--watch` se escribe una plantilla comentada en
+La primera vez que se ejecuta se escribe una plantilla comentada en
 `$XDG_CONFIG_HOME/mh-overlay/config.toml` (o en la ruta de `--config`). El archivo se relee al
 guardarlo: cambiar un color o la posición con el juego abierto se aplica en el siguiente
 refresco, sin reiniciar.
+
+**El juego se detecta solo.** Con `auto_detect = true` (por defecto), el hub y la CLI miran si
+está corriendo `MonsterHunterRise.exe` o `MonsterHunterWorld.exe` y usan ese juego, sin tocar
+`kind`. Elegir uno a mano en el hub apaga la detección para que la elección no se pierda en el
+siguiente refresco; se vuelve a activar con la casilla «Detectar Rise/World automáticamente».
+`--game` también manda sobre la detección.
 
 Los flags de la CLI ganan al archivo, y el archivo gana a los valores por defecto. Un valor sin
 sentido (una escala de 12, un juego que no existe, un color mal escrito) es un error con el
@@ -200,6 +317,11 @@ anterior, porque cerrar el overlay en mitad de una cacería es peor que quedarse
 estado bueno.
 
 ```toml
+[game]
+kind = "rise"          # solo si no hay juego abierto o auto_detect = false
+auto_detect = true
+interval_ms = 500
+
 [overlay]
 position = "top-left"
 margin_x = 24
@@ -244,21 +366,38 @@ editarlos en el TOML.
 ### Hub de escritorio
 
 ```bash
-./target/release/mh-overlay --hub
+mh-overlay          # sin argumentos: abre el hub
+mh-overlay --hub    # equivalente explícito
 ```
 
 Una ventana normal pensada para cuando algo no funciona, porque el panel sobre el juego no
-tiene sitio para explicarse. La pestaña **Diagnóstico** enseña el proceso encontrado, la base
-del módulo, qué `.map` se está usando y si sus CRC coinciden con la build, cuántos monstruos,
-jugador y cacería se leyeron y el último error, refrescándose sola al ritmo configurado. La
+tiene sitio para explicarse. La barra lateral cambia entre **Diagnóstico**, **Arma** y
+**Ajustes**, y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, **Buscar
+actualización** y la versión instalada. La pestaña **Diagnóstico** enseña el proceso encontrado,
+la base del módulo, qué `.map` se está usando y si sus CRC coinciden con la build, cuántos
+monstruos, jugador y cacería se leyeron y el último error, refrescándose sola al ritmo
+configurado. Si el error es de permisos, ofrece copiar la orden exacta o **conceder el acceso
+con polkit**, sin abrir una terminal. La
+pestaña **Arma** enseña la clase equipada, el detalle del filo, el medidor completo y los datos
+de combate disponibles: munición y reserva de las ballestas, proyectiles de la lanza pistola,
+notas y melodías de la cornamusa, carga del arco y, en Rise, ataque, afinidad y elemento. La
 pestaña **Ajustes** edita juego, refresco, anclaje, márgenes, escala, monstruos a la vez, los
 interruptores y todos los colores con un selector de color real, con el panel de ejemplo al
 lado: lo que ves es lo que se dibuja. Los cambios se guardan solos en el TOML en cuanto sueltas
 el control, así que un overlay abierto los aplica en el siguiente refresco.
 
-El juego se cambia desde la barra superior, sin pasar por Ajustes, y en «Mapa» puedes elegir a
-mano cualquiera de los `.map` de `data/maps` en vez de dejar que se use el más nuevo: es la
-salida cuando la build del juego es más nueva que el último mapa y el CRC no coincide. Con
+La vista previa usa la lectura **en vivo** cuando hay partida: enseña el arma, el filo, los
+buffs, los monstruos y las partes tal como están en ese momento. Sin juego cae a datos de
+ejemplo. El botón **Abrir panel** lanza el overlay como proceso aparte y **Cerrar panel** lo
+termina, sin salir del hub. Al cerrar la ventana con la X, el hub se minimiza a la bandeja y
+sigue leyendo; el icono de la bandeja tiene «Mostrar», «Abrir/Cerrar panel» y «Salir». Si el
+escritorio no ofrece bandeja, la X cierra de verdad en vez de esconder la ventana.
+
+El hub detecta solo si estás jugando Rise o World y cambia de juego (y de mapa) en el siguiente
+refresco; la barra superior lo marca con «auto». Si eliges un juego a mano, la detección se
+apaga para no pisar tu elección, y se reactiva con la casilla de Ajustes. En «Mapa» puedes
+elegir a mano cualquiera de los `.map` de `data/maps` en vez de dejar que se use el más nuevo:
+es la salida cuando la build del juego es más nueva que el último mapa y el CRC no coincide. Con
 `--game` y `--map` el hub arranca ya apuntando a ese juego y ese archivo, y esos dos flags **no**
 se guardan en el TOML: son de la ejecución, no de la configuración.
 
@@ -335,6 +474,25 @@ los huecos; World las identifica por el índice que reporta el juego.
 ## Límites conocidos
 
 - **Solo lectura.** No hay escritura ni inyección; el crate no expone un writer a propósito.
+- **El detalle del arma depende de lo que exponga cada juego.** World tiene munición,
+  proyectiles de la lanza pistola, cola de la cornamusa y carga del arco a partir de los offsets
+  de HunterPie legacy; Rise no publica esas estructuras en los mapas que lee HunterPie v2, así
+  que allí solo se muestran ataque, afinidad y elemento. El nombre del arma y sus estadísticas
+  base no están en los mapas: no se inventan.
+- **La tabla de nombres de munición de World es posicional.** Si una build cambia el orden de
+  las 40 ranuras, los contadores siguen siendo correctos pero el nombre puede no corresponder;
+  el índice de la ranura se conserva para detectarlo.
+- **La bandeja necesita StatusNotifierItem.** KDE, XFCE, Cinnamon, Budgie y los compositores
+  wlroots la traen; GNOME necesita la extensión AppIndicator/KStatusNotifierItem. Sin bandeja,
+  cerrar la ventana termina el proceso y lo dice por stderr.
+- **El instalador no instala dependencias con apt/dnf/pacman**: comprueba el entorno y deja el
+  binario con sus mapas. OpenGL para el hub y `cap_sys_ptrace` para leer memoria se avisan en
+  `--check` y en el mensaje final.
+- **El AppImage no puede llevar `cap_sys_ptrace`**: la capacidad se aplica al archivo que se
+  ejecuta, y dentro de la imagen es de solo lectura. Con AppImage usa
+  `kernel.yama.ptrace_scope=0` (el hub ofrece «Conceder acceso» con polkit) o instala el tarball y
+  aplica `setcap` al binario. La actualización del AppImage no pierde el permiso porque no depende
+  del archivo.
 - **Wilds no está soportado** todavía, aunque sus mapas están incluidos.
 - **Los nombres están solo en castellano**: la tabla se genera desde la localización `es-es`
   de HunterPie. Otra lengua es volver a generarla con ese archivo.

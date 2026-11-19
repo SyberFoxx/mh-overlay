@@ -34,7 +34,10 @@ enum AppError {
 #[command(
     name = "mh-overlay",
     version,
-    about = "Vida, partes y estados de los monstruos de Monster Hunter en Linux"
+    about = "Vida, partes y estados de los monstruos de Monster Hunter en Linux",
+    long_about = "Vida, partes y estados de los monstruos de Monster Hunter en Linux.\n\n\
+                  Sin argumentos abre el hub gráfico; desde ahí se abre el panel sobre el \
+                  juego. Para la consola están --print y --watch."
 )]
 struct Arguments {
     /// Juego al que adjuntarse: rise o world
@@ -65,7 +68,11 @@ struct Arguments {
     #[arg(long, value_name = "BACKEND", value_enum, default_value_t = BackendChoice::Auto)]
     backend: BackendChoice,
 
-    /// Abrir el hub de escritorio con diagnóstico y ajustes
+    /// Imprimir una lectura en la consola y salir, sin abrir ventana
+    #[arg(long)]
+    print: bool,
+
+    /// Abrir el hub de escritorio con diagnóstico y ajustes (lo que hace sin argumentos)
     #[arg(long)]
     hub: bool,
 
@@ -93,7 +100,7 @@ struct Arguments {
     #[arg(long)]
     list_maps: bool,
 
-    /// Instalar la última release encima de esta instalación y salir
+    /// Actualizar esta instalación (AppImage o paquete) y salir
     #[arg(long)]
     update: bool,
 }
@@ -164,9 +171,10 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
 
     let loaded = Config::load_or_default(&config_path)?;
 
-    // El hub edita el archivo tal cual está; los ajustes de la CLI son de esta ejecución y no
-    // deben acabar guardados en él.
-    if arguments.hub {
+    // Sin una acción explícita, la aplicación es su interfaz gráfica: es lo que espera quien
+    // pulsa el lanzador del menú. La consola queda en --print y --watch.
+    if opens_hub(arguments) {
+        let origin = loaded.origin;
         let mut config = loaded.config;
 
         // El juego y el mapa de esta ejecución sirven para inspeccionar el otro título sin
@@ -175,7 +183,14 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
             config.game.kind = kind.to_string();
         }
 
-        return mh_overlay_app::run(config_path, config, arguments.map.clone())
+        if origin == Origin::Defaults {
+            match Config::write_template(&config_path) {
+                Ok(()) => eprintln!("configuración creada en {}", config_path.display()),
+                Err(error) => eprintln!("aviso: {error}"),
+            }
+        }
+
+        return mh_overlay_app::run(config_path, config, arguments.map.clone(), arguments.game)
             .map_err(AppError::from);
     }
 
@@ -185,10 +200,24 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
         return run_settings(&config_path, config);
     }
 
-    let kind = config.game_kind()?;
+    let configured = config.game_kind()?;
+    // Sin `--game` ni `--pid`, lo que manda es lo que está abierto. Un `--game` explícito es
+    // una elección del usuario y no se detecta por encima de ella.
+    let auto = arguments.game.is_none() && arguments.pid.is_none() && config.game.auto_detect;
+    let detected = auto.then(mh_overlay_games::detect_running_game).flatten();
+    let kind = detected.unwrap_or(configured);
+
+    if detected.is_some_and(|found| found != configured) {
+        eprintln!("juego detectado: {kind}");
+    }
 
     let process = match arguments.pid {
         Some(pid) => Process::from_pid(pid, kind.module())?,
+        // Si la detección no encontró nada, se buscan los dos para que el error diga los dos
+        // ejecutables que se miraron, no solo el que estaba en la configuración.
+        None if auto && detected.is_none() => {
+            Process::find(&mh_overlay_games::GameKind::ALL.map(mh_overlay_games::GameKind::module))?
+        }
         None => Process::find(&[kind.module()])?,
     };
     let memory = process.memory();
@@ -207,7 +236,7 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
         return run_overlay(&config_path, config, arguments, kind, memory, map);
     }
 
-    if !arguments.watch {
+    if arguments.print || !arguments.watch {
         let snapshot = read_snapshot(kind, memory, &map)?;
         emit(&render(kind, &snapshot));
         return Ok(());
@@ -218,6 +247,13 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
         emit(&format!("\x1b[2J\x1b[H{}", render(kind, &snapshot)));
         sleep(Duration::from_millis(config.game.interval_ms));
     }
+}
+
+/// Sin `--overlay`, `--watch`, `--print` ni `--settings` no hay trabajo de consola: se abre el
+/// hub. `--hub` sigue siendo explícito para scripts y lanzadores antiguos.
+fn opens_hub(arguments: &Arguments) -> bool {
+    arguments.hub
+        || !(arguments.overlay || arguments.watch || arguments.print || arguments.settings)
 }
 
 /// Editor de ajustes: guarda cada cambio en el TOML, que un overlay en marcha relee solo.

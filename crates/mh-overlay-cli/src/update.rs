@@ -1,7 +1,9 @@
 //! Actualización en sitio desde las releases de GitHub.
 //!
 //! La instalación no se desinstala: `--update` baja el paquete de la última release, comprueba su
-//! SHA-256, y reemplaza el binario y los mapas que están junto a él. El archivo de configuración
+//! SHA-256, y reemplaza lo que haya en su sitio. Si el programa corre desde un AppImage
+//! (`$APPIMAGE` lo dice), el archivo que se reemplaza es la imagen entera; si corre desde el
+//! tarball instalado, el binario y los mapas que están junto a él. El archivo de configuración
 //! vive en `$XDG_CONFIG_HOME`, fuera de la instalación, así que se conserva tal cual.
 //!
 //! No se añade un cliente HTTP: `curl`, `tar` y `sha256sum` están en cualquier escritorio Linux y
@@ -35,19 +37,64 @@ pub enum UpdateError {
     #[error("no se pudo descomprimir el paquete: {0}")]
     Unpack(String),
     #[error(
-        "no se puede escribir en {0}; instala con `install.sh` o actualiza con permisos sobre esa carpeta"
+        "no se puede escribir en {0}; mueve el AppImage a una carpeta tuya o actualiza con permisos sobre esa carpeta"
     )]
     NotWritable(String),
+    #[error("el AppImage indicado por $APPIMAGE ya no existe: {0}")]
+    MissingAppImage(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
 
-/// Comprueba si hay una versión nueva y, si la hay, la instala sobre este mismo binario.
+/// Forma en la que está instalado el programa, que decide qué archivo se reemplaza.
+enum Install {
+    /// Imagen portable: se reemplaza el archivo que el runtime señala en `$APPIMAGE`.
+    AppImage(PathBuf),
+    /// Paquete instalado: se reemplazan el binario y `data/` junto a él.
+    Directory(PathBuf),
+}
+
+impl Install {
+    /// El AppImage se reconoce por la variable que pone su propio runtime, no por la ruta del
+    /// ejecutable: dentro de la imagen montada el binario es de solo lectura.
+    fn detect() -> Result<Self, UpdateError> {
+        if let Some(path) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
+            if !path.is_file() {
+                return Err(UpdateError::MissingAppImage(path.display().to_string()));
+            }
+
+            return Ok(Self::AppImage(path));
+        }
+
+        let executable = std::env::current_exe()?;
+        let directory = executable
+            .parent()
+            .ok_or_else(|| UpdateError::NotWritable(executable.display().to_string()))?;
+
+        Ok(Self::Directory(directory.to_path_buf()))
+    }
+
+    /// Carpeta donde vive lo que hay que reemplazar.
+    fn directory(&self) -> &Path {
+        match self {
+            Self::AppImage(path) => path.parent().unwrap_or(Path::new(".")),
+            Self::Directory(directory) => directory,
+        }
+    }
+
+    /// Nombre del archivo que publica `scripts/package.sh` o `scripts/appimage.sh`.
+    fn asset_name(&self, version: &str, arch: &str) -> String {
+        match self {
+            Self::AppImage(_) => format!("mh-overlay-{version}-linux-{arch}.AppImage"),
+            Self::Directory(_) => format!("mh-overlay-{version}-linux-{arch}.tar.gz"),
+        }
+    }
+}
+
+/// Comprueba si hay una versión nueva y, si la hay, la instala en el sitio actual.
 pub fn run() -> Result<(), UpdateError> {
-    let executable = std::env::current_exe()?;
-    let directory = executable
-        .parent()
-        .ok_or_else(|| UpdateError::NotWritable(executable.display().to_string()))?;
+    let install = Install::detect()?;
+    let directory = install.directory();
 
     if !is_writable(directory) {
         return Err(UpdateError::NotWritable(directory.display().to_string()));
@@ -63,7 +110,7 @@ pub fn run() -> Result<(), UpdateError> {
     }
 
     let arch = std::env::consts::ARCH.to_string();
-    let name = asset_name(&version, &arch);
+    let name = install.asset_name(&version, &arch);
     println!("actualizando de {CURRENT} a {version}…");
 
     let temporary = staging_dir()?;
@@ -75,38 +122,48 @@ pub fn run() -> Result<(), UpdateError> {
     curl_file(&format!("{downloads}/{tag}/{name}.sha256"), &checksum)?;
     verify_checksum(&temporary, &checksum)?;
 
-    let status = Command::new("tar")
-        .arg("-xzf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(&temporary)
-        .status()?;
-    if !status.success() {
-        return Err(UpdateError::Unpack("`tar` terminó con error".into()));
-    }
+    match &install {
+        Install::AppImage(target) => {
+            install_appimage(&archive, target)?;
+            println!("actualizado: {}", target.display());
+            println!("cierra y vuelve a abrir mh-overlay para usar la versión nueva.");
+        }
+        Install::Directory(directory) => {
+            let status = Command::new("tar")
+                .arg("-xzf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(&temporary)
+                .status()?;
+            if !status.success() {
+                return Err(UpdateError::Unpack("`tar` terminó con error".into()));
+            }
 
-    let extracted = temporary.join(format!("mh-overlay-{version}-linux-{arch}"));
-    if !extracted.is_dir() {
-        return Err(UpdateError::Unpack(format!(
-            "el paquete no trae la carpeta {}",
-            extracted.display()
-        )));
-    }
+            let extracted = temporary.join(format!("mh-overlay-{version}-linux-{arch}"));
+            if !extracted.is_dir() {
+                return Err(UpdateError::Unpack(format!(
+                    "el paquete no trae la carpeta {}",
+                    extracted.display()
+                )));
+            }
 
-    let capabilities = file_capabilities(&executable);
-    install_from_dir(&extracted, directory)?;
+            let executable = directory.join("mh-overlay");
+            let capabilities = file_capabilities(&executable);
+            install_from_dir(&extracted, directory)?;
 
-    if let Some(capabilities) = capabilities {
-        restore_capabilities(&executable, &capabilities);
-    }
+            if let Some(capabilities) = capabilities {
+                restore_capabilities(&executable, &capabilities);
+            }
 
-    let updated = Command::new(&executable).arg("--version").output();
-    match updated {
-        Ok(output) if output.status.success() => println!(
-            "actualizado: {}",
-            String::from_utf8_lossy(&output.stdout).trim()
-        ),
-        _ => println!("actualizado en {}", executable.display()),
+            let updated = Command::new(&executable).arg("--version").output();
+            match updated {
+                Ok(output) if output.status.success() => println!(
+                    "actualizado: {}",
+                    String::from_utf8_lossy(&output.stdout).trim()
+                ),
+                _ => println!("actualizado en {}", executable.display()),
+            }
+        }
     }
 
     let _ = fs::remove_dir_all(&temporary);
@@ -119,11 +176,6 @@ fn endpoint(variable: &str, default: &str) -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default.to_string())
-}
-
-/// Nombre del paquete que publica `scripts/package.sh`.
-fn asset_name(version: &str, arch: &str) -> String {
-    format!("mh-overlay-{version}-linux-{arch}.tar.gz")
 }
 
 /// Extrae `"tag_name": "v1.2.3"` del JSON de la API sin añadir un analizador.
@@ -169,6 +221,26 @@ fn is_newer(latest: &str, current: &str) -> bool {
 ///
 /// El binario se escribe al lado con otro nombre y se renombra encima: así una actualización a
 /// mitad de cacería no deja un ejecutable truncado.
+fn install_appimage(image: &Path, target: &Path) -> Result<(), UpdateError> {
+    let directory = target
+        .parent()
+        .ok_or_else(|| UpdateError::NotWritable(target.display().to_string()))?;
+
+    // Se copia dentro de la misma carpeta y se renombra encima: el `rename` es atómico y el
+    // proceso que está corriendo sigue leyendo el inodo viejo hasta que se cierra.
+    let pending = directory.join(format!(".mh-overlay-{}.AppImage", std::process::id()));
+    let result = fs::copy(image, &pending)
+        .and_then(|_| fs::set_permissions(&pending, fs::Permissions::from_mode(0o755)))
+        .and_then(|_| fs::rename(&pending, target));
+
+    if let Err(error) = result {
+        let _ = fs::remove_file(&pending);
+        return Err(UpdateError::Io(error));
+    }
+
+    Ok(())
+}
+
 fn install_from_dir(staged: &Path, directory: &Path) -> Result<(), UpdateError> {
     let binary = staged.join("mh-overlay");
     let destination = directory.join("mh-overlay");
@@ -339,9 +411,16 @@ mod tests {
 
     #[test]
     fn the_asset_matches_the_packager() {
+        let installed = Install::Directory(PathBuf::from("/tmp/mh-overlay"));
+        let portable = Install::AppImage(PathBuf::from("/tmp/mh-overlay.AppImage"));
+
         assert_eq!(
-            asset_name("0.2.0", "x86_64"),
+            installed.asset_name("0.2.0", "x86_64"),
             "mh-overlay-0.2.0-linux-x86_64.tar.gz"
+        );
+        assert_eq!(
+            portable.asset_name("0.2.0", "x86_64"),
+            "mh-overlay-0.2.0-linux-x86_64.AppImage"
         );
     }
 
@@ -368,6 +447,33 @@ mod tests {
             .unwrap()
             .permissions()
             .mode();
+        assert_eq!(mode & 0o777, 0o755);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn updating_an_appimage_replaces_the_file_atomically() {
+        let root = std::env::temp_dir().join(format!("mh-overlay-appimage-{}", std::process::id()));
+        let target = root.join("mh-overlay.AppImage");
+        let download = root.join("download.AppImage");
+
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&target, b"viejo").unwrap();
+        fs::write(&download, b"nuevo").unwrap();
+
+        install_appimage(&download, &target).unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"nuevo");
+        assert!(!root.read_dir().unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".mh-overlay-")
+        }));
+
+        let mode = fs::metadata(&target).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755);
 
         let _ = fs::remove_dir_all(&root);

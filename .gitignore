@@ -4,5 +4,8 @@
 # Python
 __pycache__/
 
-# Paquetes generados por scripts/package.sh
+# Paquetes generados por scripts/package.sh y scripts/appimage.sh
 /dist
+
+# Copias locales de HunterPie usadas solo como referencia
+/.research

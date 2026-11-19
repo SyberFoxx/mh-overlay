@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=mh-overlay
+GenericName=Monster Hunter Overlay
+Comment=HUD de Monster Hunter: vida, partes, estados, arma y buffs
+Exec=mh-overlay
+Icon=mh-overlay
+Terminal=false
+StartupNotify=true
+Categories=Game;Utility;
+Keywords=monster hunter;overlay;hud;world;rise;hunterpie;
+Actions=Overlay;Diagnostics;
+
+[Desktop Action Overlay]
+Name=Abrir panel sobre el juego
+Exec=mh-overlay --overlay
+
+[Desktop Action Diagnostics]
+Name=Diagnóstico y ajustes
+Exec=mh-overlay --hub

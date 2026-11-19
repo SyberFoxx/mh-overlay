@@ -26,6 +26,7 @@ cp -r data/maps "$stage/data/maps"
 install -m644 README.md LICENSE NOTICE "$stage/"
 install -m755 packaging/install.sh "$stage/install.sh"
 install -m644 packaging/mh-overlay.desktop "$stage/mh-overlay.desktop"
+install -m644 packaging/mh-overlay.svg "$stage/mh-overlay.svg"
 
 # La plantilla se genera con el propio binario para que no se separe nunca de los valores por
 # defecto del código.
@@ -41,4 +42,5 @@ echo
 echo "dist/$name.tar.gz"
 cat "dist/$name.tar.gz.sha256"
 echo
-echo "en la máquina destino: tar xzf $name.tar.gz && cd $name && ./install.sh"
+echo "en la máquina destino: tar xzf $name.tar.gz && cd $name && ./install.sh --check"
+echo "después:                ./install.sh   (usuario)   o   sudo ./install.sh --system"
