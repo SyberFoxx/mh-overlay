@@ -2,7 +2,9 @@
   <img src="docs/banner.jpeg" alt="mh-overlay mostrando la vida, las partes y los estados de un Rathian" width="100%">
 </p>
 
-<h1 align="center">mh-overlay</h1>
+<p align="center">
+  <img src="docs/title.png" alt="mh-overlay" width="620">
+</p>
 
 <p align="center">
   <strong>Vida de monstruos, daño por parte y estados alterados en Monster Hunter: World y Rise.</strong><br>
