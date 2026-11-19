@@ -442,9 +442,10 @@ el control, así que un overlay abierto los aplica en el siguiente refresco.
 La vista previa usa la lectura **en vivo** cuando hay partida: enseña el arma, el filo, los
 buffs, los monstruos y las partes tal como están en ese momento. Sin juego cae a datos de
 ejemplo. El botón **Abrir panel** lanza el overlay como proceso aparte y **Cerrar panel** lo
-termina, sin salir del hub. Al cerrar la ventana con la X, el hub se minimiza a la bandeja y
-sigue leyendo; el icono de la bandeja tiene «Mostrar», «Abrir/Cerrar panel» y «Salir». Si el
-escritorio no ofrece bandeja, la X cierra de verdad en vez de esconder la ventana.
+termina, sin salir del hub. Si cierras la ventana con el panel abierto, el hub se oculta en la
+bandeja para no cortarlo y sigue leyendo; sin panel, cerrar termina el proceso, también con
+Super+Q. El icono de la bandeja tiene «Mostrar», «Abrir/Cerrar panel» y «Salir». Si el escritorio
+no ofrece bandeja, cerrar termina el proceso en vez de esconder la ventana sin retorno.
 
 El hub detecta solo si estás jugando Rise o World y cambia de juego (y de mapa) en el siguiente
 refresco; la barra superior lo marca con «auto». Si eliges un juego a mano, la detección se

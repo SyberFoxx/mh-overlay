@@ -1813,14 +1813,15 @@ impl eframe::App for Hub {
             }
         }
 
-        // Con bandeja, la X minimiza; sin bandeja no hay forma de recuperar la ventana, así que
-        // cerrar termina el proceso como en cualquier aplicación.
+        // Cerrar solo oculta la ventana si hay un panel vivo que conservar. Sin panel no hay
+        // nada que mantener en segundo plano: cerrar termina, como espera Super+Q.
+        // `Minimized` no existe en Wayland; para esconder de verdad se oculta la superficie.
         if !self.closing
-            && self.tray.is_some()
             && ctx.input(|input| input.viewport().close_requested())
+            && close_hides_window(self.tray.is_some(), self.overlay_running())
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
     }
 
@@ -2022,6 +2023,11 @@ fn sharpness_bar(ui: &mut egui::Ui, sharpness: &Sharpness) {
         egui::Stroke::new(1.0, BORDER),
         egui::StrokeKind::Inside,
     );
+}
+
+/// Cerrar la ventana solo la esconde si hay bandeja y un panel que conservar; si no, termina.
+fn close_hides_window(has_tray: bool, overlay_running: bool) -> bool {
+    has_tray && overlay_running
 }
 
 /// Extrae la versión de la salida de `--check-update`; `None` si ya es la última.
@@ -2305,6 +2311,13 @@ fn ailment(name: &'static str, buildup: f32, max: f32, timer: f32, max_timer: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_quits_without_a_panel_and_hides_with_one() {
+        assert!(!close_hides_window(true, false));
+        assert!(!close_hides_window(false, true));
+        assert!(close_hides_window(true, true));
+    }
 
     #[test]
     fn the_update_check_output_is_parsed() {
