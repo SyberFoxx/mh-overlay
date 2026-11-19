@@ -25,8 +25,14 @@ install -m755 target/release/mh-overlay "$stage/mh-overlay"
 cp -r data/maps "$stage/data/maps"
 install -m644 README.md LICENSE NOTICE "$stage/"
 install -m755 packaging/install.sh "$stage/install.sh"
-install -m644 packaging/mh-overlay.desktop "$stage/mh-overlay.desktop"
+install -m644 packaging/mh-overlay.desktop \
+    "$stage/io.github.syberfoxx.mh_overlay.desktop"
 install -m644 packaging/mh-overlay.svg "$stage/mh-overlay.svg"
+install -m644 packaging/mh-overlay-128.png "$stage/mh-overlay-128.png"
+install -m644 packaging/mh-overlay.png "$stage/mh-overlay-256.png"
+install -m644 packaging/mh-overlay-512.png "$stage/mh-overlay-512.png"
+install -m644 packaging/io.github.syberfoxx.mh_overlay.appdata.xml \
+    "$stage/io.github.syberfoxx.mh_overlay.appdata.xml"
 
 # La plantilla se genera con el propio binario para que no se separe nunca de los valores por
 # defecto del código.

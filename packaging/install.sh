@@ -87,13 +87,15 @@ if [ "$mode" = "sistema" ]; then
     app="$destdir$prefix/lib/mh-overlay"
     bindir="$destdir$prefix/bin"
     desktop_dir="$destdir$prefix/share/applications"
-    icon_dir="$destdir$prefix/share/icons/hicolor/scalable/apps"
+    icon_root="$destdir$prefix/share/icons/hicolor"
+    metainfo_dir="$destdir$prefix/share/metainfo"
     config_path="${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/mh-overlay"
 elif [ "$mode" = "prefijo" ]; then
     app="$destdir$prefix/share/mh-overlay"
     bindir="$destdir$prefix/bin"
     desktop_dir="$destdir$prefix/share/applications"
-    icon_dir="$destdir$prefix/share/icons/hicolor/scalable/apps"
+    icon_root="$destdir$prefix/share/icons/hicolor"
+    metainfo_dir="$destdir$prefix/share/metainfo"
     config_path="${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/mh-overlay"
 else
     data_home=${XDG_DATA_HOME:-${HOME:-/root}/.local/share}
@@ -101,7 +103,8 @@ else
     app="$destdir$data_home/mh-overlay"
     bindir="$destdir$bin_home"
     desktop_dir="$destdir$data_home/applications"
-    icon_dir="$destdir$data_home/icons/hicolor/scalable/apps"
+    icon_root="$destdir$data_home/icons/hicolor"
+    metainfo_dir="$destdir$data_home/metainfo"
     config_path="${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/mh-overlay"
 fi
 
@@ -190,8 +193,13 @@ remove_file() {
 if [ "$uninstall" = "sí" ]; then
     say "desinstalando mh-overlay"
     remove_file "$bindir/mh-overlay"
+    remove_file "$desktop_dir/io.github.syberfoxx.mh_overlay.desktop"
     remove_file "$desktop_dir/mh-overlay.desktop"
-    remove_file "$icon_dir/mh-overlay.svg"
+    remove_file "$icon_root/scalable/apps/mh-overlay.svg"
+    remove_file "$icon_root/128x128/apps/mh-overlay.png"
+    remove_file "$icon_root/256x256/apps/mh-overlay.png"
+    remove_file "$icon_root/512x512/apps/mh-overlay.png"
+    remove_file "$metainfo_dir/io.github.syberfoxx.mh_overlay.appdata.xml"
 
     if [ -d "$app" ]; then
         rm -rf "$app"
@@ -227,7 +235,9 @@ fi
 
 install -d "$app" "$bindir"
 if [ "$menu" = "sí" ]; then
-    install -d "$desktop_dir" "$icon_dir"
+    install -d "$desktop_dir" "$metainfo_dir" \
+        "$icon_root/scalable/apps" \
+        "$icon_root/128x128/apps" "$icon_root/256x256/apps" "$icon_root/512x512/apps"
 fi
 
 # Reemplazar el archivo pierde las capacidades que puso `setcap`, así que se miran antes.
@@ -249,11 +259,25 @@ ln -sf "$app/mh-overlay" "$bindir/mh-overlay"
 
 if [ "$menu" = "sí" ]; then
     # El .desktop se genera con la ruta real de este prefijo.
-    sed "s|@APP@|$app|g" "$here/mh-overlay.desktop" >"$desktop_dir/mh-overlay.desktop"
-    chmod 644 "$desktop_dir/mh-overlay.desktop"
+    sed "s|@APP@|$app|g" "$here/io.github.syberfoxx.mh_overlay.desktop" \
+        >"$desktop_dir/io.github.syberfoxx.mh_overlay.desktop"
+    chmod 644 "$desktop_dir/io.github.syberfoxx.mh_overlay.desktop"
+    # Instalaciones anteriores usaban el nombre corto: no dejar dos entradas de menú.
+    rm -f "$desktop_dir/mh-overlay.desktop"
 
     if [ -f "$here/mh-overlay.svg" ]; then
-        install -m644 "$here/mh-overlay.svg" "$icon_dir/mh-overlay.svg"
+        install -m644 "$here/mh-overlay.svg" "$icon_root/scalable/apps/mh-overlay.svg"
+    fi
+
+    for size in 128 256 512; do
+        source_icon="$here/mh-overlay-$size.png"
+        [ -f "$source_icon" ] || continue
+        install -m644 "$source_icon" "$icon_root/${size}x${size}/apps/mh-overlay.png"
+    done
+
+    if [ -f "$here/io.github.syberfoxx.mh_overlay.appdata.xml" ]; then
+        install -m644 "$here/io.github.syberfoxx.mh_overlay.appdata.xml" \
+            "$metainfo_dir/io.github.syberfoxx.mh_overlay.appdata.xml"
     fi
 fi
 
@@ -262,13 +286,13 @@ if [ "$menu" = "sí" ] && [ -z "$destdir" ]; then
     command -v update-desktop-database >/dev/null 2>&1 \
         && update-desktop-database "$desktop_dir" >/dev/null 2>&1 || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 \
-        && gtk-update-icon-cache -q "$(dirname "$(dirname "$(dirname "$icon_dir")")")" >/dev/null 2>&1 || true
+        && gtk-update-icon-cache -q "$icon_root" >/dev/null 2>&1 || true
 fi
 
 version=$("$app/mh-overlay" --version 2>/dev/null || echo "versión desconocida")
 say "instalado $version en $app"
 say "  binario:  $bindir/mh-overlay"
-[ "$menu" = "sí" ] && say "  menú:     $desktop_dir/mh-overlay.desktop"
+[ "$menu" = "sí" ] && say "  menú:     $desktop_dir/io.github.syberfoxx.mh_overlay.desktop"
 say
 
 if [ -n "$capabilities" ] && printf '%s' "$capabilities" | grep -q cap_sys_ptrace; then

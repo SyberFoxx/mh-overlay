@@ -23,7 +23,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
-            libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev pkg-config
+            libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev pkg-config \
+            appstream desktop-file-utils
+
+      - name: Validar metadatos
+        run: |
+          appstreamcli validate --no-net packaging/io.github.syberfoxx.mh_overlay.appdata.xml
+          desktop-file-validate packaging/mh-overlay.desktop packaging/mh-overlay-appimage.desktop
 
       - name: Compilar y empaquetar
         run: ./scripts/package.sh

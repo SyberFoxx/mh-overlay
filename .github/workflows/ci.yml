@@ -27,3 +27,50 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Dependencias gráficas y de escritorio
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
+            libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev pkg-config \
+            appstream desktop-file-utils
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validar metadatos
+        run: |
+          appstreamcli validate --no-net packaging/io.github.syberfoxx.mh_overlay.appdata.xml
+          desktop-file-validate packaging/mh-overlay.desktop packaging/mh-overlay-appimage.desktop
+
+      - name: Empaquetar
+        run: |
+          ./scripts/package.sh
+          ./scripts/appimage.sh
+
+      - name: Probar el AppImage
+        run: |
+          appimage=$(ls dist/*.AppImage)
+          "$appimage" --appimage-extract-and-run --version
+          printf '{"tag_name":"v0.0.0"}\n' > /tmp/release.json
+          MH_OVERLAY_UPDATE_API=file:///tmp/release.json \
+            "$appimage" --appimage-extract-and-run --check-update
+
+      - name: Probar el instalador
+        run: |
+          tar xzf dist/*.tar.gz -C /tmp
+          package=$(ls -d /tmp/mh-overlay-*-linux-*)
+          "$package/install.sh" --prefix /tmp/mh-prefix
+          test -x /tmp/mh-prefix/share/mh-overlay/mh-overlay
+          test -f /tmp/mh-prefix/share/metainfo/io.github.syberfoxx.mh_overlay.appdata.xml
+          test -f /tmp/mh-prefix/share/icons/hicolor/512x512/apps/mh-overlay.png
+          "$package/install.sh" --prefix /tmp/mh-prefix --uninstall

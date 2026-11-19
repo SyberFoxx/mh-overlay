@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.syberfoxx.mh_overlay</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>mh-overlay</name>
+  <summary>Overlay de Monster Hunter para Linux</summary>
+
+  <developer id="io.github.syberfoxx">
+    <name>SyberFoxx</name>
+  </developer>
+
+  <description>
+    <p>
+      mh-overlay lee la memoria de Monster Hunter: World y Monster Hunter Rise mientras corren
+      bajo Proton y dibuja la vida de los monstruos, el daño por parte y los estados alterados
+      encima del juego.
+    </p>
+    <p>
+      No inyecta DLLs ni escribe en el proceso del juego: todo el crate de memoria es de solo
+      lectura.
+    </p>
+    <ul>
+      <li>Vida, umbral de captura, reloj y vidas del equipo.</li>
+      <li>Partes con flinch, rompimiento y corte; estados alterados.</li>
+      <li>Arma, filo, medidores de clase, munición y buffs con temporizador.</li>
+      <li>Hub de diagnóstico, ajustes y actualización en sitio desde un AppImage.</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.syberfoxx.mh_overlay.desktop</launchable>
+  <url type="homepage">https://github.com/SyberFoxx/mh-overlay</url>
+  <url type="bugtracker">https://github.com/SyberFoxx/mh-overlay/issues</url>
+  <url type="vcs-browser">https://github.com/SyberFoxx/mh-overlay</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://raw.githubusercontent.com/SyberFoxx/mh-overlay/main/docs/banner.jpeg</image>
+      <caption>Vida, partes y estados de un Rathian con el panel de mh-overlay.</caption>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.1.0" date="2026-11-19">
+      <description>
+        <p>Primera release: AppImage autoactualizable, hub gráfico y lectores de World y Rise.</p>
+      </description>
+    </release>
+  </releases>
+
+  <categories>
+    <category>Game</category>
+  </categories>
+
+  <keywords>
+    <keyword>monster hunter</keyword>
+    <keyword>overlay</keyword>
+    <keyword>hud</keyword>
+    <keyword>world</keyword>
+    <keyword>rise</keyword>
+    <keyword>hunterpie</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1"/>
+  <icon type="stock">mh-overlay</icon>
+
+  <provides>
+    <binary>mh-overlay</binary>
+  </provides>
+</component>

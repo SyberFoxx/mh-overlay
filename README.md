@@ -259,7 +259,9 @@ El AppImage se genera con:
 ```
 
 Deja `dist/mh-overlay-<versión>-linux-<arquitectura>.AppImage` y su `.sha256`. Descarga
-`appimagetool` la primera vez en `target/appimage/` y no necesita FUSE para empaquetar.
+`appimagetool` 1.9.1 la primera vez en `target/appimage/`, comprueba su SHA-256 y no necesita FUSE
+para empaquetar. La imagen lleva los iconos en 128, 256 y 512 px, el lanzador con el ID de la
+aplicación y metadatos AppStream; `appimagetool` los valida antes de generar la imagen.
 
 ### Instalar el paquete (alternativa con `setcap`)
 
@@ -268,8 +270,9 @@ Deja `dist/mh-overlay-<versión>-linux-<arquitectura>.AppImage` y su `.sha256`. 
 ```
 
 Deja en `dist/` un `mh-overlay-<versión>-linux-<arquitectura>.tar.gz` con el binario, los mapas,
-la plantilla de configuración, el icono, el lanzador de menú y un `install.sh` que funciona en
-cualquier distribución. En la otra máquina:
+la plantilla de configuración, los iconos (SVG y PNG de 128, 256 y 512 px), los metadatos
+AppStream, el lanzador de menú y un `install.sh` que funciona en cualquier distribución. En la
+otra máquina:
 
 ```bash
 tar xzf mh-overlay-0.1.0-linux-x86_64.tar.gz
@@ -279,9 +282,11 @@ cd mh-overlay-0.1.0-linux-x86_64
 ```
 
 La instalación de usuario deja el programa en `$XDG_DATA_HOME/mh-overlay` (por defecto
-`~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador en
-`~/.local/share/applications` y el icono en `~/.local/share/icons/hicolor/scalable/apps`. Los
-directorios se pueden cambiar con `XDG_DATA_HOME`, `XDG_BIN_HOME` y `XDG_CONFIG_HOME`.
+`~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador
+`io.github.syberfoxx.mh_overlay.desktop` en `~/.local/share/applications`, los iconos en
+`~/.local/share/icons/hicolor/{128x128,256x256,512x512,scalable}/apps` y los metadatos en
+`~/.local/share/metainfo`. Los directorios se pueden cambiar con `XDG_DATA_HOME`, `XDG_BIN_HOME` y
+`XDG_CONFIG_HOME`; la instalación de sistema usa `share/` bajo el prefijo.
 
 Para todos los usuarios, con root o sudo:
 
@@ -312,9 +317,11 @@ con `cargo build --release`.
 
 ### Publicar una release
 
-El flujo `.github/workflows/release.yml` compila en Ubuntu, ejecuta `scripts/package.sh` y
-`scripts/appimage.sh`, y deja el `.tar.gz`, el `.AppImage` y sus `.sha256` como artefacto. Al
-empujar una etiqueta `v*` también los adjunta a la release de GitHub:
+El job `package` de CI valida AppStream y los `.desktop`, empaqueta el tarball y el AppImage, y
+prueba el binario, la actualización y una instalación real en un prefijo temporal en cada push.
+El flujo `.github/workflows/release.yml` repite el empaquetado en Ubuntu, ejecuta
+`scripts/package.sh` y `scripts/appimage.sh`, y deja el `.tar.gz`, el `.AppImage` y sus `.sha256`
+como artefacto. Al empujar una etiqueta `v*` también los adjunta a la release de GitHub:
 
 ```bash
 git tag v0.1.0
