@@ -91,6 +91,22 @@ impl Install {
     }
 }
 
+/// Etiqueta y versión de la última release publicada.
+fn latest() -> Result<(String, String), UpdateError> {
+    let metadata = curl_text(&endpoint(API_OVERRIDE, API))?;
+    let tag = parse_tag(&metadata).ok_or(UpdateError::NoReleases)?;
+    let version = tag.trim_start_matches('v').to_string();
+
+    Ok((tag, version))
+}
+
+/// Versión publicada más nueva que esta, sin descargar nada.
+pub fn check() -> Result<Option<String>, UpdateError> {
+    let (_tag, version) = latest()?;
+
+    Ok(is_newer(&version, CURRENT).then_some(version))
+}
+
 /// Comprueba si hay una versión nueva y, si la hay, la instala en el sitio actual.
 pub fn run() -> Result<(), UpdateError> {
     let install = Install::detect()?;
@@ -100,9 +116,7 @@ pub fn run() -> Result<(), UpdateError> {
         return Err(UpdateError::NotWritable(directory.display().to_string()));
     }
 
-    let metadata = curl_text(&endpoint(API_OVERRIDE, API))?;
-    let tag = parse_tag(&metadata).ok_or(UpdateError::NoReleases)?;
-    let version = tag.trim_start_matches('v').to_string();
+    let (tag, version) = latest()?;
 
     if !is_newer(&version, CURRENT) {
         println!("mh-overlay {CURRENT} ya es la última versión publicada ({tag}).");

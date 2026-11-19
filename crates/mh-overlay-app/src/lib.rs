@@ -264,6 +264,14 @@ struct Hub {
     access_note: Option<String>,
     /// El usuario abrió la confirmación de «Conceder acceso».
     confirm_access: bool,
+    /// Comprobación de versión corriendo en segundo plano.
+    check: Option<Receiver<Option<String>>>,
+    /// La comprobación la pidió el botón: hay que dar feedback aunque no haya novedad.
+    check_manual: bool,
+    /// Versión nueva publicada, si la hay.
+    available: Option<String>,
+    /// La actualización ya está instalada y toca reiniciar.
+    restart_ready: bool,
 }
 
 impl Hub {
@@ -302,10 +310,15 @@ impl Hub {
             access: None,
             access_note: None,
             confirm_access: false,
+            check: None,
+            check_manual: false,
+            available: None,
+            restart_ready: false,
         };
 
         hub.tray = Tray::spawn();
         hub.refresh_maps();
+        hub.start_check(false);
         hub
     }
 
@@ -694,25 +707,60 @@ impl Hub {
                 .color(MUTED),
             );
 
+            if let Some(version) = &self.available {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!("Actualización {version} disponible"))
+                        .small()
+                        .color(ACCENT),
+                );
+            }
+
             ui.add_space(6.0);
+            let checking = self.check.is_some();
             let updating = self.update.is_some();
+            let busy = checking || updating;
+            let (label, hint, enabled) = if self.restart_ready {
+                (
+                    "Reiniciar ahora",
+                    "Cierra y vuelve a abrir mh-overlay con la versión nueva",
+                    true,
+                )
+            } else if self.available.is_some() {
+                (
+                    "Instalar actualización",
+                    "Descarga y reemplaza esta instalación sin desinstalar nada",
+                    !updating,
+                )
+            } else if checking {
+                (
+                    "Buscando actualización…",
+                    "Consultando la última release",
+                    false,
+                )
+            } else {
+                (
+                    "Buscar actualización",
+                    "Comprueba si hay una versión nueva, sin descargar nada",
+                    !busy,
+                )
+            };
+
             if ui
                 .add_enabled(
-                    !updating,
-                    egui::Button::new(if updating {
-                        "Buscando actualización…"
-                    } else {
-                        "Buscar actualización"
-                    })
-                    .min_size(egui::vec2(ui.available_width(), 30.0)),
+                    enabled,
+                    egui::Button::new(label).min_size(egui::vec2(ui.available_width(), 30.0)),
                 )
-                .on_hover_text(
-                    "Comprueba la última release y, si hay una nueva, reemplaza esta instalación \
-                     sin desinstalar ni perder la configuración.",
-                )
+                .on_hover_text(hint)
                 .clicked()
             {
-                self.start_update();
+                if self.restart_ready {
+                    self.restart(ui.ctx());
+                } else if self.available.is_some() {
+                    self.start_update();
+                } else {
+                    self.start_check(true);
+                }
             }
 
             if let Some((ok, message)) = &self.update_note {
@@ -806,14 +854,113 @@ impl Hub {
         self.update_note = None;
     }
 
+    /// Pregunta a la última release si hay versión nueva. No descarga nada.
+    fn start_check(&mut self, manual: bool) {
+        if self.check.is_some() {
+            return;
+        }
+
+        let executable = match std::env::current_exe() {
+            Ok(executable) => executable,
+            Err(error) => {
+                if manual {
+                    self.update_note =
+                        Some((false, format!("no se pudo localizar el binario: {error}")));
+                }
+                return;
+            }
+        };
+
+        if manual {
+            self.update_note = None;
+        }
+        self.check_manual = manual;
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let available = Command::new(&executable)
+                .arg("--check-update")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| parse_available(&String::from_utf8_lossy(&output.stdout)));
+            let _ = sender.send(available);
+        });
+
+        self.check = Some(receiver);
+    }
+
+    fn poll_check(&mut self) {
+        let Some(receiver) = &self.check else {
+            return;
+        };
+
+        match receiver.try_recv() {
+            Ok(available) => {
+                if let Some(version) = &available {
+                    self.available = Some(version.clone());
+                }
+
+                if self.check_manual {
+                    self.update_note = Some(match &available {
+                        Some(version) => (true, format!("versión {version} disponible")),
+                        None => (true, "estás al día".to_string()),
+                    });
+                }
+
+                self.check_manual = false;
+                self.check = None;
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                if self.check_manual {
+                    self.update_note = Some((false, "no se pudo comprobar la versión".to_string()));
+                }
+                self.check_manual = false;
+                self.check = None;
+            }
+        }
+    }
+
+    /// Relanza la instalación ya actualizada: el AppImage si lo hay, o este binario.
+    fn restart(&mut self, ctx: &egui::Context) {
+        let executable = std::env::var_os("APPIMAGE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_exe().ok());
+
+        let Some(executable) = executable else {
+            self.update_note = Some((
+                false,
+                "no se pudo localizar la instalación para reiniciar".to_string(),
+            ));
+            return;
+        };
+
+        match Command::new(executable).spawn() {
+            Ok(_) => {
+                self.closing = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(error) => {
+                self.update_note = Some((false, format!("no se pudo reiniciar: {error}")));
+            }
+        }
+    }
+
     fn poll_update(&mut self) {
         let Some(receiver) = &self.update else {
             return;
         };
 
         match receiver.try_recv() {
-            Ok(result) => {
-                self.update_note = Some(result);
+            Ok((ok, message)) => {
+                if ok && message.contains("actualizado") {
+                    self.available = None;
+                    self.restart_ready = true;
+                    self.update_note = Some((true, "actualización instalada".to_string()));
+                } else {
+                    self.update_note = Some((ok, message));
+                }
                 self.update = None;
             }
             Err(TryRecvError::Empty) => {}
@@ -1681,6 +1828,7 @@ impl eframe::App for Hub {
         let ctx = ui.ctx().clone();
 
         self.poll_update();
+        self.poll_check();
         self.poll_access();
 
         if self.last_refresh.is_none_or(|last| {
@@ -1874,6 +2022,15 @@ fn sharpness_bar(ui: &mut egui::Ui, sharpness: &Sharpness) {
         egui::Stroke::new(1.0, BORDER),
         egui::StrokeKind::Inside,
     );
+}
+
+/// Extrae la versión de la salida de `--check-update`; `None` si ya es la última.
+fn parse_available(output: &str) -> Option<String> {
+    output
+        .trim()
+        .strip_prefix("actualización disponible: ")
+        .map(|version| version.trim().to_string())
+        .filter(|version| !version.is_empty())
 }
 
 fn command_exists(name: &str) -> bool {
@@ -2148,6 +2305,16 @@ fn ailment(name: &'static str, buildup: f32, max: f32, timer: f32, max_timer: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_update_check_output_is_parsed() {
+        assert_eq!(
+            parse_available("actualización disponible: 0.2.0\n"),
+            Some("0.2.0".to_string())
+        );
+        assert_eq!(parse_available("sin actualizaciones: 0.1.0\n"), None);
+        assert_eq!(parse_available(""), None);
+    }
 
     #[test]
     fn the_sample_fills_every_section_of_the_panel() {

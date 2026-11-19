@@ -127,6 +127,7 @@ cargo build --release
     --interval <MS>     periodo de refresco; por defecto, el de la configuración
     --list-maps         muestra los address maps disponibles
     --update            actualizar esta instalación (AppImage o paquete) y salir
+    --check-update      comprobar si hay versión nueva y salir, sin descargar nada
 ```
 
 Sin argumentos se abre el hub. La salida de consola sigue disponible con `--print` (una
@@ -199,7 +200,9 @@ Un solo archivo: lleva dentro el binario, los mapas y el lanzador. Al abrirlo po
 integra en el menú de aplicaciones del usuario y se queda ahí; no hay que instalar, ni copiar
 carpetas, ni ejecutar nada con `sudo`.
 
-Para actualizar, pulsa **Buscar actualización** en el hub o ejecuta:
+El hub comprueba la última release al arrancar y, si hay una versión nueva, lo avisa en la barra
+lateral con el botón **Instalar actualización**. Al terminar ofrece **Reiniciar ahora**, que
+vuelve a abrir el AppImage ya reemplazado. También se puede actualizar a mano con:
 
 ```bash
 ./mh-overlay-0.1.0-linux-x86_64.AppImage --update
@@ -290,8 +293,10 @@ si corre desde un AppImage cambia la imagen entera, y si corre desde el paquete 
 y los mapas. No hay que desinstalar nada y la configuración no se toca. El archivo nuevo se
 escribe al lado con otro nombre y se renombra encima, así que una actualización a mitad de
 cacería nunca deja un ejecutable truncado, y un paquete cuyo checksum no coincide se rechaza sin
-tocar lo instalado. El botón **Buscar actualización** del hub hace exactamente lo mismo sin abrir
-una terminal. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
+tocar lo instalado. El hub consulta la última release al arrancar (solo la etiqueta, sin bajar
+nada), avisa si hay una versión nueva y deja instalarla y reiniciar sin abrir una terminal;
+**Buscar actualización** repite la consulta cuando se pide, y `--check-update` la hace desde la
+consola. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
 de inodo: el actualizador intenta restaurarla y, si no tiene permisos, imprime la orden exacta.
 
 Para probar el actualizador o usar un espejo, `MH_OVERLAY_UPDATE_API` y
@@ -372,8 +377,8 @@ mh-overlay --hub    # equivalente explícito
 
 Una ventana normal pensada para cuando algo no funciona, porque el panel sobre el juego no
 tiene sitio para explicarse. La barra lateral cambia entre **Diagnóstico**, **Arma** y
-**Ajustes**, y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, **Buscar
-actualización** y la versión instalada. La pestaña **Diagnóstico** enseña el proceso encontrado,
+**Ajustes**, y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, la comprobación de
+actualizaciones (aviso, **Instalar** y **Reiniciar** cuando toca) y la versión instalada. La pestaña **Diagnóstico** enseña el proceso encontrado,
 la base del módulo, qué `.map` se está usando y si sus CRC coinciden con la build, cuántos
 monstruos, jugador y cacería se leyeron y el último error, refrescándose sola al ritmo
 configurado. Si el error es de permisos, ofrece copiar la orden exacta o **conceder el acceso

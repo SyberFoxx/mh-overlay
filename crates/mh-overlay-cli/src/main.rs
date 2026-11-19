@@ -103,6 +103,10 @@ struct Arguments {
     /// Actualizar esta instalación (AppImage o paquete) y salir
     #[arg(long)]
     update: bool,
+
+    /// Comprobar si hay una versión nueva y salir, sin descargar nada
+    #[arg(long)]
+    check_update: bool,
 }
 
 /// Backend pedido en la línea de órdenes.
@@ -150,6 +154,19 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
     // reemplazar, ni una sesión gráfica.
     if arguments.update {
         return update::run().map_err(AppError::from);
+    }
+
+    if arguments.check_update {
+        return match update::check()? {
+            Some(version) => {
+                println!("actualización disponible: {version}");
+                Ok(())
+            }
+            None => {
+                println!("sin actualizaciones: {}", update::CURRENT);
+                Ok(())
+            }
+        };
     }
 
     let maps_directory = maps_directory()?;
