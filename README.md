@@ -237,8 +237,8 @@ cargo run -p mh-overlay-ui --example preview
 ### AppImage (recomendado)
 
 ```bash
-chmod +x mh-overlay-0.1.0-linux-x86_64.AppImage
-./mh-overlay-0.1.0-linux-x86_64.AppImage
+chmod +x mh-overlay-0.1.1-linux-x86_64.AppImage
+./mh-overlay-0.1.1-linux-x86_64.AppImage
 ```
 
 Los nombres de archivo de los ejemplos llevan la versión de esta release; si descargas otra,
@@ -253,7 +253,7 @@ lateral con el botón **Instalar actualización**. Al terminar ofrece **Reinicia
 vuelve a abrir el AppImage ya reemplazado. También se puede actualizar a mano con:
 
 ```bash
-./mh-overlay-0.1.0-linux-x86_64.AppImage --update
+./mh-overlay-0.1.1-linux-x86_64.AppImage --update
 ```
 
 Baja la última release, comprueba su SHA-256 y reemplaza **ese mismo archivo** de forma atómica.
@@ -284,13 +284,13 @@ AppStream, el lanzador de menú y un `install.sh` que funciona en cualquier dist
 otra máquina:
 
 ```bash
-tar xzf mh-overlay-0.1.0-linux-x86_64.tar.gz
-cd mh-overlay-0.1.0-linux-x86_64
+tar xzf mh-overlay-0.1.1-linux-x86_64.tar.gz
+cd mh-overlay-0.1.1-linux-x86_64
 ./install.sh --check     # qué hay en el sistema antes de tocar nada
 ./install.sh             # instalación de usuario, sin sudo
 ```
 
-Sustituye `0.1.0` por la versión del tarball que hayas descargado.
+Sustituye `0.1.1` por la versión del tarball que hayas descargado.
 
 La instalación de usuario deja el programa en `$XDG_DATA_HOME/mh-overlay` (por defecto
 `~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador
@@ -335,8 +335,8 @@ El flujo `.github/workflows/release.yml` repite el empaquetado en Ubuntu, ejecut
 como artefacto. Al empujar una etiqueta `v*` también los adjunta a la release de GitHub:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 Sin etiqueta, `workflow_dispatch` sirve para comprobar el empaquetado desde la pestaña Actions.

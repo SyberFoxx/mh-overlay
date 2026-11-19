@@ -41,6 +41,11 @@
   </screenshots>
 
   <releases>
+    <release version="0.1.1" date="2026-11-19">
+      <description>
+        <p>Arregla el cierre con Super+Q en Wayland y pule la integración de escritorio.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-19">
       <description>
         <p>Primera release: AppImage autoactualizable, hub gráfico y lectores de World y Rise.</p>
