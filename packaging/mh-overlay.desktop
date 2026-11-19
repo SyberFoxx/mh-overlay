@@ -8,7 +8,7 @@ Exec=@APP@/mh-overlay
 Icon=mh-overlay
 Terminal=false
 StartupNotify=true
-Categories=Game;Utility;
+Categories=Game;
 Keywords=monster hunter;overlay;hud;world;rise;hunterpie;
 Actions=Overlay;Diagnostics;
 

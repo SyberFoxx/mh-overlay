@@ -30,13 +30,17 @@ mkdir -p \
     "$appdir/usr/share/mh-overlay/data" \
     "$appdir/usr/share/applications" \
     "$appdir/usr/share/icons/hicolor/scalable/apps" \
+    "$appdir/usr/share/icons/hicolor/256x256/apps" \
     "$appdir/usr/share/doc/mh-overlay"
 
 install -m755 target/release/mh-overlay "$appdir/usr/bin/mh-overlay"
 cp -r data/maps "$appdir/usr/share/mh-overlay/data/maps"
 install -m644 README.md LICENSE NOTICE "$appdir/usr/share/doc/mh-overlay/"
 install -m644 packaging/mh-overlay.svg "$appdir/mh-overlay.svg"
+install -m644 packaging/mh-overlay.png "$appdir/mh-overlay.png"
 install -m644 packaging/mh-overlay.svg "$appdir/usr/share/icons/hicolor/scalable/apps/mh-overlay.svg"
+install -m644 packaging/mh-overlay.png \
+    "$appdir/usr/share/icons/hicolor/256x256/apps/mh-overlay.png"
 install -m644 packaging/mh-overlay-appimage.desktop "$appdir/mh-overlay.desktop"
 install -m644 packaging/mh-overlay-appimage.desktop \
     "$appdir/usr/share/applications/mh-overlay.desktop"
@@ -53,7 +57,9 @@ export MH_OVERLAY_MAPS="$here/usr/share/mh-overlay/data/maps"
 
 if [ -n "${APPIMAGE:-}" ] && [ -n "${HOME:-}" ]; then
     data=${XDG_DATA_HOME:-$HOME/.local/share}
-    mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
+    mkdir -p "$data/applications" \
+        "$data/icons/hicolor/scalable/apps" \
+        "$data/icons/hicolor/256x256/apps"
 
     desktop="$data/applications/mh-overlay.desktop"
     {
@@ -68,7 +74,7 @@ if [ -n "${APPIMAGE:-}" ] && [ -n "${HOME:-}" ]; then
             'Icon=mh-overlay' \
             'Terminal=false' \
             'StartupNotify=true' \
-            'Categories=Game;Utility;' \
+            'Categories=Game;' \
             'Keywords=monster hunter;overlay;hud;world;rise;hunterpie;' \
             'Actions=Overlay;Diagnostics;' \
             '' \
@@ -84,6 +90,8 @@ if [ -n "${APPIMAGE:-}" ] && [ -n "${HOME:-}" ]; then
 
     install -m644 "$here/mh-overlay.svg" \
         "$data/icons/hicolor/scalable/apps/mh-overlay.svg"
+    install -m644 "$here/mh-overlay.png" \
+        "$data/icons/hicolor/256x256/apps/mh-overlay.png"
 fi
 
 exec "$here/usr/bin/mh-overlay" "$@"
