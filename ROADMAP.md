@@ -26,7 +26,7 @@ Estado: 20 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 - [x] Actualización `v0.2.0 → v0.3.0` probada, reinicio y configuración conservada.
 - [x] Subir la versión del workspace a `0.4.0`.
 - [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
-- [ ] Workflow `v0.4.0` y comprobar que publica release, notas y cuatro artefactos.
+- [x] Workflow `v0.4.0` en 3m43s, con release, notas y cuatro artefactos verificados.
 - [ ] Abrir el AppImage `v0.3.0`, detectar `v0.4.0`, instalar, reiniciar y verificar que la
       configuración sigue intacta.
 - [ ] Confirmar que la release lleva el README y el banner nuevos, AppStream y los iconos.
