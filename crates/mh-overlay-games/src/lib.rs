@@ -15,8 +15,8 @@ use std::str::FromStr;
 use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process};
 
 pub use model::{
-    Ailment, AmmoSlot, BowState, Buff, Crown, CrownThresholds, Extracts, GunlanceState, Health,
-    HornNote, HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness,
+    Ailment, AmmoSlot, BowState, Breaks, Buff, Crown, CrownThresholds, Extracts, GunlanceState,
+    Health, HornNote, HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness,
     SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 

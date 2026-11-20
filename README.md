@@ -39,11 +39,11 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
 ```text
 cacería  12:34 restante   vidas 0/3
 
-tú  HP  71.2%  (712 / 1000)   aguante  84.0%  (126 / 150)
+tú  HP  71.2%  (712/1.000)   aguante  84.0%  (126/150)
 
-id 12  Tigrex  HP  74.3%  (16420 / 22100)   captura ≤ 20%
-  Cabeza       flinch 100.0%  romper  62.4%  cortar 100.0%
-  Cola         flinch  88.1%  romper  41.9%  cortar  41.9%
+id 12  Tigrex  HP  74.3%  (16.420/22.100)   captura ≤ 20%
+  Cabeza       vida 1.376/2.200  flinch 100.0%  romper  62.4%  cortar 100.0%
+  Cola         vida 1.984/2.252  flinch  88.1%  romper  41.9%  cortar  41.9%
   Veneno  45.2%  (120 / 265)
 ```
 
@@ -90,6 +90,8 @@ o [compila desde el código](#compilar-y-usar).
 | Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
 | Vida de las partes en números (opcional) | ✅ escrito | ✅ escrito |
 | Vida del monstruo en números (opcional) | ✅ escrito | ✅ escrito |
+| Umbral del siguiente rompimiento (`2/3`, `roto`) | — | ✅ escrito |
+| Cola cortable y rompible en una sola fila | — | ✅ escrito |
 | Nombres de parte | ✅ escrito | ✅ escrito |
 | Estados alterados | ✅ escrito | ✅ escrito |
 | Nombres de monstruo | ✅ escrito | ✅ escrito |
@@ -228,11 +230,12 @@ corona de talla cuando el ejemplar es excepcional: miniatura (plateada y más pe
 plateada o dorada, con la misma forma que usa el juego en las notas del cazador. Con
 `overlay.monsters = "target"` el panel enseña solo el monstruo que el juego marca como
 objetivo —el fijado en el mapa o el de la cacería— en vez de la zona entera. Las partes rompibles llevan
-un hueco por cada rompimiento que aguantan y el contador `1/2` a la derecha (hechos de
-posibles), para saber cuánto falta sin adivinar por el porcentaje de vida. Con
-`overlay.show_part_health` ese contador y la barra se cambian por la vida real de la parte
-(`1500/2000`), y con `overlay.show_health_numbers` la vida real del monstruo (`1600/2350`) se
-suma al porcentaje.
+un hueco por cada rompimiento que aguantan y, a la derecha, el umbral del siguiente
+(`2/3`; `roto` cuando ya no queda), para saber cuánto falta sin adivinar por el porcentaje de
+vida. Con `overlay.show_part_health` ese umbral y la barra se cambian por la vida real de la
+parte (`1.500/2.000`), y con `overlay.show_health_numbers` la vida real del monstruo
+(`1.600/2.350`) se suma al porcentaje. Si la tabla trae una cola cortable y otra rompible con
+el mismo nombre, el panel las funde en una sola fila.
 Las que el juego no rompe ni corta (cuello, brazos, patas) no se muestran, porque solo son
 barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
 si el servidor no la tiene, el panel sale rectangular y sigue funcionando.
@@ -406,7 +409,7 @@ scale = 1.0
 monsters = "zone"
 max_monsters = 4
 show_parts = true
-# Vida real de cada parte (actual/máximo) en vez del contador de rompimientos.
+# Vida real de cada parte (actual/máximo) en vez del umbral de rompimiento.
 show_part_health = false
 show_ailments = true
 # Vida real del monstruo (actual/máximo) junto al porcentaje.
@@ -586,13 +589,13 @@ los huecos; World las identifica por el índice que reporta el juego.
 - **Las partes de World que no se rompen ni se cortan no se muestran**: el juego las deja con la
   vida al máximo y sin contador, y una barra siempre llena solo estorba. Si un monstruo no tiene
   ninguna parte rompible en la tabla, el panel omite la lista de partes.
-- **Algunas colas traen dos entradas en la tabla de World**: una cortable (barra de corte, sin
-  contador) y otra rompible (barra de rompimiento, con `0/1` → `1/1`). Son dos mecánicas del
-  mismo sitio; el panel dibuja una fila por cada una porque el juego las guarda por separado.
-- **El contador de rompimientos cuenta tramos, no vida**: una parte con un solo tramo pasa de
-  `0/1` a `1/1` justo al romperse, y otra con dos tramos pasa por `1/2` antes de `2/2`. Las
-  partes cortables no llevan contador: manda la barra de corte. Lo que se ve como vida en esos
-  números es la vida real de la parte, disponible con `overlay.show_part_health`.
+- **Algunas colas traen dos entradas en la tabla de World**: una cortable y otra rompible. El
+  panel las funde en una fila: la barra mide el corte y el contador usa los umbrales de la
+  entrada rompible.
+- **El contador de rompimientos usa los umbrales de la tabla, no tramos**: muestra golpes
+  acumulados frente al siguiente umbral (`2/3`, luego `3/6`) y `roto` cuando no queda ninguno;
+  las partes cortables no llevan contador. El número de vida real de la parte está disponible
+  con `overlay.show_part_health`.
 - **El objetivo del panel depende de lo que exponga el mapa**: Rise solo trae el monstruo
   marcado por la cacería desde el mapa 16.0.1.1 y World solo trae el fijado en el mapa desde la
   build 421652. En los anteriores, `overlay.monsters = "target"` no tiene nada que leer y el

@@ -518,13 +518,11 @@ fn hunt_line(hunt: &Hunt) -> String {
 
 fn player_line(player: &Player) -> String {
     let mut output = format!(
-        "tú  HP {:>5.1}%  ({:.0} / {:.0})   aguante {:>5.1}%  ({:.0} / {:.0})\n",
+        "tú  HP {:>5.1}%  ({})   aguante {:>5.1}%  ({})\n",
         player.health.percent(),
-        player.health.current,
-        player.health.max,
+        player.health.label(),
         player.stamina.percent(),
-        player.stamina.current,
-        player.stamina.max,
+        player.stamina.label(),
     );
 
     if let Some(weapon) = &player.weapon {
@@ -623,11 +621,10 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
         let target = if monster.target { "   objetivo" } else { "" };
 
         output.push_str(&format!(
-            "id {:<4}{name}  HP {:>5.1}%  ({:.0} / {:.0}){capture}{crown}{target}\n",
+            "id {:<4}{name}  HP {:>5.1}%  ({}){capture}{crown}{target}\n",
             monster.id,
             monster.health.percent(),
-            monster.health.current,
-            monster.health.max,
+            monster.health.label(),
         ));
 
         for part in &monster.parts {
@@ -638,6 +635,9 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
                     .unwrap_or_else(|| format!("parte {:02}", part.index))
             ));
 
+            if let Some(health) = part.health {
+                output.push_str(&format!("  vida {}", health.label()));
+            }
             if let Some(flinch) = part.flinch {
                 output.push_str(&format!("  flinch {:>5.1}%", flinch.percent()));
             }

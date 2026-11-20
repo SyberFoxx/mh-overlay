@@ -11,9 +11,9 @@ use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
 use crate::buffs::WORLD_BUFFS;
 use crate::model::{
-    Ailment, AmmoSlot, BowState, Buff, Crown, Extracts, GunlanceState, Health, HornNote, HornSong,
-    HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel, Snapshot,
-    Weapon, WeaponDetail, WeaponGauge, WeaponKind,
+    Ailment, AmmoSlot, BowState, Breaks, Buff, Crown, Extracts, GunlanceState, Health, HornNote,
+    HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel,
+    Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
@@ -230,7 +230,7 @@ fn clamp_percent(value: f32) -> f32 {
 /// umbral de la tabla es el golpe que rompe un tramo, así que el relleno avanza dentro del
 /// tramo actual y queda alineado con los huecos de la barra:
 /// `[3, 6]` con 2 golpes da `1/3` del total (dos tercios del primer tramo de dos).
-fn break_state(thresholds: &[u32], counter: u32) -> Option<(f32, u32, u32)> {
+fn break_state(thresholds: &[u32], counter: u32) -> Option<(f32, Breaks)> {
     if thresholds.is_empty() {
         return None;
     }
@@ -246,13 +246,16 @@ fn break_state(thresholds: &[u32], counter: u32) -> Option<(f32, u32, u32)> {
 
     let Some(next) = thresholds.iter().copied().find(|next| *next > counter) else {
         // Sin umbral pendiente la parte está rota del todo: la barra se queda llena.
-        return Some((1.0, total, total));
+        return Some((1.0, Breaks::new(counter, None, total, total)));
     };
 
     let stage = (next - previous).max(1) as f32;
     let local = ((counter - previous) as f32 / stage).clamp(0.0, 1.0);
 
-    Some(((broken as f32 + local) / total as f32, broken, total))
+    Some((
+        (broken as f32 + local) / total as f32,
+        Breaks::new(counter, Some(next), broken, total),
+    ))
 }
 
 /// `MHWMonsterPartStructure`: vida máxima, vida actual, contador de golpes e índice.
@@ -1253,7 +1256,7 @@ impl<'map> World<'map> {
         definition: &crate::tables::WorldPart,
         address: u64,
         health: Health,
-    ) -> Option<(Health, (u32, u32))> {
+    ) -> Option<(Health, Breaks)> {
         if definition.breaks.is_empty() {
             return None;
         }
@@ -1264,12 +1267,9 @@ impl<'map> World<'map> {
             .iter()
             .map(|threshold| u32::from(*threshold))
             .collect();
-        let (fraction, broken, total) = break_state(&thresholds, counter)?;
+        let (fraction, breaks) = break_state(&thresholds, counter)?;
 
-        Some((
-            Health::new(fraction * health.max, health.max),
-            (broken, total),
-        ))
+        Some((Health::new(fraction * health.max, health.max), breaks))
     }
 
     fn part_health(&self, address: u64) -> Option<Health> {
@@ -1291,24 +1291,45 @@ impl<'map> World<'map> {
 
 #[cfg(test)]
 mod tests {
-    use super::break_state;
+    use super::{Breaks, break_state};
 
     #[test]
     fn break_state_fills_one_stage_at_a_time() {
         let head = [3, 6];
 
-        assert_eq!(break_state(&head, 0), Some((0.0, 0, 2)));
-        assert_eq!(break_state(&head, 2), Some((1.0 / 3.0, 0, 2)));
-        assert_eq!(break_state(&head, 3), Some((0.5, 1, 2)));
-        assert_eq!(break_state(&head, 6), Some((1.0, 2, 2)));
+        assert_eq!(
+            break_state(&head, 0),
+            Some((0.0, Breaks::new(0, Some(3), 0, 2)))
+        );
+        assert_eq!(
+            break_state(&head, 2),
+            Some((1.0 / 3.0, Breaks::new(2, Some(3), 0, 2)))
+        );
+        assert_eq!(
+            break_state(&head, 3),
+            Some((0.5, Breaks::new(3, Some(6), 1, 2)))
+        );
+        assert_eq!(
+            break_state(&head, 6),
+            Some((1.0, Breaks::new(6, None, 2, 2)))
+        );
         // Un contador por encima del último umbral no puede pasarse de lleno.
-        assert_eq!(break_state(&head, 9), Some((1.0, 2, 2)));
+        assert_eq!(
+            break_state(&head, 9),
+            Some((1.0, Breaks::new(9, None, 2, 2)))
+        );
     }
 
     #[test]
     fn break_state_ignores_parts_without_thresholds() {
         assert_eq!(break_state(&[], 4), None);
-        assert_eq!(break_state(&[1], 0), Some((0.0, 0, 1)));
-        assert_eq!(break_state(&[1], 1), Some((1.0, 1, 1)));
+        assert_eq!(
+            break_state(&[1], 0),
+            Some((0.0, Breaks::new(0, Some(1), 0, 1)))
+        );
+        assert_eq!(
+            break_state(&[1], 1),
+            Some((1.0, Breaks::new(1, None, 1, 1)))
+        );
     }
 }

@@ -6,7 +6,7 @@
 
 use mh_overlay_config::{Color, Config, Monsters, StyleSection};
 use mh_overlay_games::{
-    Buff, Crown, Health, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
+    Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
     WeaponDetail, WeaponGauge,
 };
 
@@ -119,11 +119,11 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
         y = draw_title(&mut canvas, config, text, &geometry, monster, y);
         y = draw_health_bar(&mut canvas, config, &geometry, monster, y);
 
-        for part in visible_parts(monster) {
+        for part in &visible_parts(monster) {
             let fallback = format!("parte {:02}", part.index);
             let broken = part
                 .breaks
-                .is_some_and(|(done, total)| total > 0 && done >= total);
+                .is_some_and(|breaks| breaks.total > 0 && breaks.done >= breaks.total);
 
             draw_row(
                 &mut canvas,
@@ -142,11 +142,11 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                         config.style.part
                     },
                     recoverable: 0.0,
-                    segments: part.breaks.map(|(_, total)| total),
+                    segments: part.breaks.map(|breaks| breaks.total),
                     value: if config.overlay.show_part_health {
-                        part.health.map(health_label)
+                        part.health.map(|health| health.label())
                     } else {
-                        part.breaks.map(|(done, total)| format!("{done}/{total}"))
+                        part.breaks.map(|breaks| breaks.label())
                     },
                 },
             );
@@ -254,7 +254,7 @@ impl Geometry {
                 CROWN_SLOT
             };
             let numbers = if config.overlay.show_health_numbers {
-                text.width(&health_label(monster.health), TITLE_VALUE_SIZE * self.scale) + 8.0
+                text.width(&monster.health.label(), TITLE_VALUE_SIZE * self.scale) + 8.0
             } else {
                 0.0
             };
@@ -354,13 +354,54 @@ fn rows(config: &Config, monster: &Monster) -> usize {
     rows
 }
 
-fn visible_parts(monster: &Monster) -> Vec<&Part> {
-    monster
+/// Parte visible: la cola rompible y la cortable del mismo nombre se funden en una fila.
+///
+/// World guarda en la tabla dos entradas para algunas colas (una por mecánica). Sin fundirlas,
+/// el panel muestra dos "Cola" y una de ellas parece un rompimiento duplicado.
+fn visible_parts(monster: &Monster) -> Vec<Part> {
+    let mut parts: Vec<Part> = Vec::new();
+
+    for part in monster
         .parts
         .iter()
         .filter(|part| part.breakable.is_some() || part.severable.is_some())
-        .take(MAX_PARTS)
-        .collect()
+    {
+        if let Some(index) = parts.iter().position(|existing| same_tail(existing, part)) {
+            merge_parts(&mut parts[index], part.clone());
+        } else {
+            parts.push(part.clone());
+        }
+    }
+
+    parts.sort_by_key(|part| part.index);
+    parts.truncate(MAX_PARTS);
+    parts
+}
+
+/// Solo se funden dos entradas con el mismo nombre cuando una corta y la otra rompe.
+fn same_tail(left: &Part, right: &Part) -> bool {
+    left.name.is_some()
+        && left.name == right.name
+        && ((left.severable.is_some() && right.severable.is_none() && right.breakable.is_some())
+            || (right.severable.is_some() && left.severable.is_none() && left.breakable.is_some()))
+}
+
+/// La fila conserva la barra de corte y el contador de la entrada rompible.
+fn merge_parts(target: &mut Part, other: Part) {
+    if other.severable.is_some() {
+        target.severable = other.severable;
+        target.index = other.index;
+        target.name = other.name;
+        target.health = other.health;
+    }
+
+    if target.breaks.is_none() {
+        target.breaks = other.breaks;
+    }
+
+    if target.breakable.is_none() {
+        target.breakable = other.breakable;
+    }
 }
 
 /// Lado en unidades lógicas y color de la corona, o `None` si no hay ninguna.
@@ -382,12 +423,6 @@ fn monster_label(monster: &Monster) -> String {
 
 fn percent_label(monster: &Monster) -> String {
     format!("{:.1}%", monster.health.percent())
-}
-
-/// Vida real en enteros, sin decimales: el juego guarda floats, pero la pantalla no necesita
-/// su parte fraccionaria.
-fn health_label(health: Health) -> String {
-    format!("{:.0}/{:.0}", health.current, health.max)
 }
 
 /// Nombre a la izquierda, porcentaje (y aviso de captura) a la derecha.
@@ -463,7 +498,7 @@ fn draw_title(
     }
 
     if config.overlay.show_health_numbers {
-        let numbers = health_label(monster.health);
+        let numbers = monster.health.label();
         column -= gap + text.width(&numbers, value_size);
         text.draw(
             canvas,
@@ -1773,7 +1808,7 @@ fn lighten(color: Color, amount: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mh_overlay_games::{Ailment, Buff, Health, Sharpness, WeaponGauge, WeaponKind};
+    use mh_overlay_games::{Ailment, Breaks, Buff, Health, Sharpness, WeaponGauge, WeaponKind};
 
     fn monster(percent: f32) -> Monster {
         Monster::new(7, Health::new(percent, 100.0))
@@ -1871,6 +1906,38 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_and_a_break_entry_of_the_same_tail_share_a_row() {
+        let mut hunted = Monster::new(34, Health::new(100.0, 100.0));
+        hunted.parts = vec![
+            Part {
+                index: 0,
+                name: Some("Cola"),
+                flinch: None,
+                breakable: None,
+                severable: Some(Health::new(80.0, 100.0)),
+                health: Some(Health::new(80.0, 100.0)),
+                breaks: None,
+            },
+            Part {
+                index: 7,
+                name: Some("Cola"),
+                flinch: None,
+                breakable: Some(Health::new(50.0, 100.0)),
+                severable: None,
+                health: Some(Health::new(50.0, 100.0)),
+                breaks: Some(Breaks::new(1, Some(3), 0, 1)),
+            },
+        ];
+
+        let rows = visible_parts(&hunted);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].index, 0);
+        assert_eq!(rows[0].health, Some(Health::new(80.0, 100.0)));
+        assert!(rows[0].breaks.is_some());
+    }
+
+    #[test]
     fn raw_part_health_replaces_the_break_counter() {
         let (mut config, text) = config();
         let mut detailed = monster(60.0);
@@ -1881,7 +1948,7 @@ mod tests {
             breakable: Some(Health::new(75.0, 100.0)),
             severable: None,
             health: Some(Health::new(1_500.0, 2_000.0)),
-            breaks: Some((1, 2)),
+            breaks: Some(Breaks::new(1, Some(2), 1, 2)),
         });
         let snapshot = Snapshot::of(vec![detailed]);
         let counter = render(&config, &text, &snapshot, None);
@@ -1913,7 +1980,7 @@ mod tests {
                 breakable: Some(Health::new(40.0, 100.0)),
                 severable: None,
                 health: Some(Health::new(40.0, 100.0)),
-                breaks: Some((1, 2)),
+                breaks: Some(Breaks::new(1, Some(2), 1, 2)),
             });
         }
         let canvas = render(&config, &text, &Snapshot::of(vec![detailed]), None);
@@ -2208,7 +2275,7 @@ mod tests {
             breakable: Some(Health::new(40.0, 100.0)),
             severable: None,
             health: Some(Health::new(40.0, 100.0)),
-            breaks: Some((1, 2)),
+            breaks: Some(Breaks::new(1, Some(2), 1, 2)),
         });
         detailed.ailments.push(Ailment {
             name: "fuego",

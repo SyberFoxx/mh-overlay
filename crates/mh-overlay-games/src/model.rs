@@ -12,6 +12,11 @@ impl Health {
         Self { current, max }
     }
 
+    /// Vida en enteros con separador de miles, como `12.345/23.456`.
+    pub fn label(&self) -> String {
+        format!("{}/{}", thousands(self.current), thousands(self.max))
+    }
+
     /// Porcentaje restante, de 0 a 100.
     pub fn percent(&self) -> f32 {
         if self.max > 0.0 {
@@ -32,6 +37,53 @@ impl Health {
     }
 }
 
+/// Entero sin decimales y con punto de miles; la pantalla no necesita la parte fraccionaria.
+fn thousands(value: f32) -> String {
+    let whole = value.round().max(0.0) as u64;
+    let digits = whole.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push('.');
+        }
+        out.push(digit);
+    }
+
+    out
+}
+
+/// Rompimientos de una parte según los umbrales de la tabla del juego.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Breaks {
+    /// Golpes o flinches acumulados que reporta el juego.
+    pub hits: u32,
+    /// Umbral del siguiente rompimiento; `None` cuando ya no queda ninguno.
+    pub next: Option<u32>,
+    /// Rompimientos hechos y posibles, para los huecos de la barra.
+    pub done: u32,
+    pub total: u32,
+}
+
+impl Breaks {
+    pub fn new(hits: u32, next: Option<u32>, done: u32, total: u32) -> Self {
+        Self {
+            hits,
+            next,
+            done,
+            total,
+        }
+    }
+
+    /// `3/6` con el umbral de la tabla, o `roto` cuando ya se agotaron.
+    pub fn label(&self) -> String {
+        match self.next {
+            Some(next) => format!("{}/{next}", self.hits),
+            None => "roto".to_string(),
+        }
+    }
+}
+
 /// Una parte rompible o cortable del monstruo.
 ///
 /// Rise expone las tres resistencias en arrays paralelos; World solo la vida de la parte.
@@ -47,9 +99,9 @@ pub struct Part {
     /// Vida real de la parte tal como la guarda el juego. En World es independiente del
     /// progreso de rompimiento, que se escala a los golpes del siguiente tramo.
     pub health: Option<Health>,
-    /// Rompimientos hechos y totales, cuando la parte se rompe por golpes acumulados. El
-    /// porcentaje de `breakable` ya los incluye; esto deja el marcador "1/2" en la barra.
-    pub breaks: Option<(u32, u32)>,
+    /// Rompimientos y el umbral del siguiente, cuando la parte se rompe por golpes
+    /// acumulados. Los huecos de la barra salen de `total`.
+    pub breaks: Option<Breaks>,
 }
 
 /// Acumulación de un estado alterado.
@@ -708,6 +760,19 @@ mod tests {
         assert_eq!(Crown::of(2.0, thresholds), Crown::Silver);
         assert_eq!(Crown::of(0.5, thresholds), Crown::None);
         assert_eq!(Crown::of(f32::NAN, thresholds), Crown::None);
+    }
+
+    #[test]
+    fn health_numbers_use_thousands_separators() {
+        assert_eq!(Health::new(1_234.0, 23_456.0).label(), "1.234/23.456");
+        assert_eq!(Health::new(0.0, 999.0).label(), "0/999");
+        assert_eq!(Health::new(999.6, 1_000.0).label(), "1.000/1.000");
+    }
+
+    #[test]
+    fn break_labels_use_the_next_threshold() {
+        assert_eq!(Breaks::new(4, Some(6), 1, 2).label(), "4/6");
+        assert_eq!(Breaks::new(6, None, 2, 2).label(), "roto");
     }
 
     #[test]

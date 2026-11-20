@@ -48,7 +48,7 @@ monsters = "zone"
 # Monstruos que se muestran a la vez: 1 a 8.
 max_monsters = 4
 show_parts = true
-# Vida real de cada parte (actual/máximo) en vez del contador de rompimientos.
+# Vida real de cada parte (actual/máximo) en vez del umbral de rompimiento.
 show_part_health = false
 show_ailments = true
 # Vida real del monstruo (actual/máximo) junto al porcentaje.
@@ -104,7 +104,7 @@ pub struct OverlaySection {
     pub monsters: Monsters,
     pub max_monsters: usize,
     pub show_parts: bool,
-    /// Mostrar la vida de cada parte en números en vez del contador de rompimientos.
+    /// Mostrar la vida de cada parte en números en vez del umbral de rompimiento.
     pub show_part_health: bool,
     pub show_ailments: bool,
     /// Mostrar la vida del monstruo en números junto al porcentaje.

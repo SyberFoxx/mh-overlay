@@ -10,8 +10,8 @@ use std::error::Error;
 
 use mh_overlay_config::Config;
 use mh_overlay_games::{
-    Ailment, Buff, Crown, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot,
-    Weapon, WeaponDetail, WeaponGauge, WeaponKind,
+    Ailment, Breaks, Buff, Crown, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
+    Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
@@ -164,7 +164,7 @@ fn part(monster: i32, index: usize, percent: f32) -> Part {
         breakable: Some(Health::new(percent, 100.0)),
         severable: None,
         health: Some(Health::new(percent, 100.0)),
-        breaks: Some((1, 2)),
+        breaks: Some(Breaks::new(1, Some(2), 1, 2)),
     }
 }
 
