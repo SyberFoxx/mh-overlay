@@ -4,7 +4,7 @@
 //! puede probar sin servidor gráfico. Cada cambio se escribe en el TOML, que el overlay relee
 //! mientras corre.
 
-use mh_overlay_config::{Color, Config, Monsters, Position};
+use mh_overlay_config::{Color, Config, Layout, Monsters, Position};
 
 use crate::canvas::{Canvas, Rect};
 use crate::text::Text;
@@ -23,6 +23,7 @@ pub enum Key {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Position,
+    Layout,
     MarginX,
     MarginY,
     Scale,
@@ -38,8 +39,9 @@ pub enum Field {
 }
 
 impl Field {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Position,
+        Self::Layout,
         Self::MarginX,
         Self::MarginY,
         Self::Scale,
@@ -57,6 +59,7 @@ impl Field {
     fn label(self) -> &'static str {
         match self {
             Self::Position => "posición",
+            Self::Layout => "disposición",
             Self::MarginX => "margen horizontal",
             Self::MarginY => "margen vertical",
             Self::Scale => "escala",
@@ -256,6 +259,10 @@ impl Editor {
                 Position::BottomRight => "abajo der.".to_string(),
                 Position::Center => "centro".to_string(),
             },
+            Field::Layout => match self.config.overlay.layout {
+                Layout::Panel => "panel".to_string(),
+                Layout::Free => "libre".to_string(),
+            },
             Field::MarginX => format!("{} px", self.config.overlay.margin_x),
             Field::MarginY => format!("{} px", self.config.overlay.margin_y),
             Field::Scale => format!("{:.2}×", self.config.overlay.scale),
@@ -362,6 +369,12 @@ impl Editor {
                     as usize
                     % order.len();
                 overlay.position = order[next];
+            }
+            Field::Layout => {
+                overlay.layout = match overlay.layout {
+                    Layout::Panel => Layout::Free,
+                    Layout::Free => Layout::Panel,
+                };
             }
             Field::MarginX => {
                 overlay.margin_x = (overlay.margin_x + delta * 4).clamp(0, 200);
@@ -560,6 +573,7 @@ mod tests {
     fn the_keyboard_moves_the_selection_and_changes_values() {
         let mut editor = editor();
 
+        assert!(!editor.key(Key::Down));
         assert!(!editor.key(Key::Down));
         assert!(editor.key(Key::Right));
         assert_eq!(editor.config().overlay.margin_x, 28);

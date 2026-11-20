@@ -105,6 +105,7 @@ o [compila desde el código](#compilar-y-usar).
 | Bandeja de sistema (ocultar y salir) | ✅ escrito | ✅ escrito |
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
+| Barras sueltas con posición propia y placas | ✅ escrito | ✅ escrito |
 | Hub rediseñado con barra lateral y tarjetas | ✅ probado | ✅ probado |
 | AppImage con actualización en sitio | ⚠️ parcial | ⚠️ parcial |
 | Permiso de memoria desde el hub (polkit) | ✅ escrito | ✅ escrito |
@@ -416,8 +417,22 @@ show_part_health = false
 show_ailments = true
 # Vida real del monstruo (actual/máximo) junto al porcentaje.
 show_health_numbers = false
+# panel: una tarjeta con todo; free: una placa por barra.
+layout = "panel"
 click_through = true
 hide_on_empty = true
+# Posiciones del modo free, en píxeles desde la esquina superior izquierda.
+# Las que falten se apilan en una columna desde margin_x/margin_y.
+# [[overlay.bars]]
+# id = "player.health"
+# x = 24
+# y = 760
+#
+# [[overlay.bars]]
+# id = "monster.0"
+# x = 24
+# y = 24
+# direction = "down"   # down: partes debajo; right: partes a la derecha
 
 [style]
 panel = "#0b0d12e6"
@@ -429,8 +444,10 @@ part = "#4f8dd6"
 severable = "#d69a4f"
 ```
 
-Los colores admiten `#rgb`, `#rrggbb` y `#rrggbbaa`. El alfa se compone sobre negro antes de
-subir la imagen, así que el panel se ve igual con o sin compositor.
+Los colores admiten `#rgb`, `#rrggbb` y `#rrggbbaa`. En el modo panel el alfa se compone sobre
+negro antes de subir la imagen, así que se ve igual con o sin compositor. En el modo free el
+fondo es transparente: Wayland compone el alfa y X11 recorta la ventana a las placas con
+`SHAPE`, de modo que entre barra y barra se ve el juego.
 
 ### Editor de ajustes
 
@@ -438,9 +455,9 @@ subir la imagen, así que el panel se ve igual con o sin compositor.
 ./target/release/mh-overlay --settings
 ```
 
-Una ventana normal, con ratón y teclado, que edita lo que más se toca a mano: posición,
-márgenes, escala, monstruos a la vez, refresco y los cuatro interruptores (partes, estados,
-clics que atraviesan, ocultar sin monstruos). Cada cambio se guarda en el TOML al instante, así
+Una ventana normal, con ratón y teclado, que edita lo que más se toca a mano: disposición
+(panel o barras sueltas), posición, márgenes, escala, monstruos a la vez, refresco y los
+interruptores (partes, estados, clics que atraviesan, ocultar sin monstruos). Cada cambio se guarda en el TOML al instante, así
 que un overlay que esté corriendo lo aplica en el siguiente refresco sin reiniciar nada. Con el
 ratón se pulsa `-`/`+` o el interruptor; con el teclado, `arriba`/`abajo` eligen fila,
 `izquierda`/`derecha` cambian el valor y `Esc` cierra.
@@ -448,6 +465,46 @@ ratón se pulsa `-`/`+` o el interruptor; con el teclado, `arriba`/`abajo` elige
 Los colores no están en el editor: son cinco selectores hexadecimales que se tocan una vez y se
 olvidan, y meterlos en la misma ventana sin un selector de color de verdad habría sido peor que
 editarlos en el TOML.
+
+### Barras sueltas
+
+Con `overlay.layout = "free"` el panel desaparece y cada barra pasa a ser una placa con su
+propio fondo y su propia posición. Las posiciones se escriben en píxeles desde la esquina
+superior izquierda de la pantalla:
+
+```toml
+[overlay]
+layout = "free"
+
+[[overlay.bars]]
+id = "player.health"
+x = 24
+y = 760
+
+[[overlay.bars]]
+id = "monster.0"
+x = 24
+y = 24
+direction = "down"
+```
+
+| id | Qué mueve |
+| --- | --- |
+| `hunt` | Reloj y vidas del equipo |
+| `player.health` | Vida del jugador |
+| `player.stamina` | Aguante |
+| `weapon` | Arma, filo, espíritu y fichas de clase |
+| `buffs` | Cuadrícula de buffs |
+| `monster.0` … `monster.7` | Vida del monstruo y, pegadas, sus partes y estados |
+| `status` | Aviso cuando no hay monstruos |
+
+**`monster.N` es un bloque**: mover la vida del monstruo mueve también sus partes y estados,
+siempre. `direction = "down"` las pone debajo, en columna; `direction = "right"`, a la derecha
+de la vida. Las barras que no tengan entrada se apilan en una columna desde `margin_x` y
+`margin_y`, así que se puede empezar con una sola posición y añadir el resto poco a poco. En
+este modo `position` solo elige dónde empieza esa columna por defecto; no recoloca las barras
+que ya tienen coordenadas. Con `click_through = false`, solo las placas reciben clics: el resto
+de la pantalla sigue siendo del juego.
 
 ### Hub de escritorio
 
@@ -467,10 +524,12 @@ con polkit**, sin abrir una terminal. La
 pestaña **Arma** enseña la clase equipada, el detalle del filo, el medidor completo y los datos
 de combate disponibles: munición y reserva de las ballestas, proyectiles de la lanza pistola,
 notas y melodías de la cornamusa, carga del arco y, en Rise, ataque, afinidad y elemento. La
-pestaña **Ajustes** edita juego, refresco, anclaje, márgenes, escala, qué monstruos se
-enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores —incluidos los
-números de vida de partes y monstruo— y todos los colores con un selector de color real, con el panel de ejemplo al
-lado: lo que ves es lo que se dibuja. Los cambios se guardan solos en el TOML en cuanto sueltas
+pestaña **Ajustes** edita juego, refresco, disposición, anclaje, márgenes, escala, qué monstruos
+se enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores —incluidos los
+números de vida de partes y monstruo— y todos los colores con un selector de color real, con el
+panel de ejemplo al lado: lo que ves es lo que se dibuja. Al elegir **Barras sueltas** aparece
+una tarjeta para colocar cada barra con sus coordenadas X/Y y, en los monstruos, elegir si las
+partes cuelgan hacia abajo o hacia la derecha. Los cambios se guardan solos en el TOML en cuanto sueltas
 el control, así que un overlay abierto los aplica en el siguiente refresco.
 
 La vista previa usa la lectura **en vivo** cuando hay partida: enseña el arma, el filo, los

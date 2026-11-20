@@ -18,11 +18,16 @@ use mh_overlay_ui::text::Text;
 use mh_overlay_ui::{view, window::OverlayWindow};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let config = Config::default();
+    let mut config = Config::default();
     let text = Text::bundled()?;
-    let editor = std::env::args().nth(2).as_deref() == Some("editor");
+    let mode = std::env::args().nth(2);
+    let editor = mode.as_deref() == Some("editor");
+    let free = mode.as_deref() == Some("free");
     let canvas = if editor {
         Editor::new(config.clone()).view(&text, "~/.config/mh-overlay/config.toml")
+    } else if free {
+        config.overlay.layout = mh_overlay_config::Layout::Free;
+        view::render_free(&config, &text, &sample(), None, (960, 720))
     } else {
         view::render(&config, &text, &sample(), None)
     };

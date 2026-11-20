@@ -26,6 +26,17 @@ pub const TEMPLATE: &str = r##"# mh-overlay · configuración
 #
 # Se relee sola al guardar: no hace falta reiniciar el overlay.
 # Los colores son #rgb, #rrggbb o #rrggbbaa (el alfa permite paneles translúcidos).
+#
+# En el modo free cada barra es una placa independiente. Se colocan con [[overlay.bars]]:
+#
+#   [[overlay.bars]]
+#   id = "player.health"
+#   x = 24
+#   y = 760
+#
+# "monster.0" mueve la vida del monstruo y sus partes juntas. Con direction = "down" las
+# partes van debajo; con "right", a la derecha. Las barras sin entrada usan la columna por
+# defecto, así que se puede empezar sin escribir todas.
 
 [game]
 # rise o world; se usa si no hay ningún juego abierto o si auto_detect = false.
@@ -53,6 +64,8 @@ show_part_health = false
 show_ailments = true
 # Vida real del monstruo (actual/máximo) junto al porcentaje.
 show_health_numbers = false
+# panel: una sola tarjeta; free: una placa por barra, con posición propia.
+layout = "panel"
 # Los clics atraviesan el panel en vez de quedarse en él.
 click_through = true
 # Ocultar el panel cuando no hay monstruos grandes en la zona.
@@ -92,6 +105,42 @@ impl Default for GameSection {
     }
 }
 
+/// Cómo se agrupan las barras en pantalla.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Layout {
+    /// Una sola tarjeta con todas las secciones.
+    #[default]
+    Panel,
+    /// Una placa independiente por barra, colocada con `[[overlay.bars]]`.
+    Free,
+}
+
+/// Dirección en la que crece el grupo de un monstruo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Direction {
+    /// La vida arriba y las partes debajo, en columna.
+    #[default]
+    Down,
+    /// La vida a la izquierda y las partes a la derecha, en columna.
+    Right,
+}
+
+/// Posición de una barra en el modo libre.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BarPlacement {
+    /// Identificador estable, como `player.health` o `monster.0`.
+    pub id: String,
+    /// Esquina superior izquierda de la placa, en píxeles de pantalla.
+    pub x: i32,
+    pub y: i32,
+    /// Solo se usa en los grupos de monstruo.
+    #[serde(default)]
+    pub direction: Direction,
+}
+
 /// Sección `[overlay]`: dónde y cómo se dibuja el panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -111,6 +160,10 @@ pub struct OverlaySection {
     pub show_health_numbers: bool,
     pub click_through: bool,
     pub hide_on_empty: bool,
+    /// Modo de agrupación: tarjeta única o placas sueltas.
+    pub layout: Layout,
+    /// Posiciones del modo libre; las que falten usan la columna por defecto.
+    pub bars: Vec<BarPlacement>,
 }
 
 impl Default for OverlaySection {
@@ -128,6 +181,8 @@ impl Default for OverlaySection {
             show_health_numbers: false,
             click_through: true,
             hide_on_empty: true,
+            layout: Layout::Panel,
+            bars: Vec::new(),
         }
     }
 }
@@ -359,6 +414,40 @@ impl Config {
             ));
         }
 
+        for bar in &self.overlay.bars {
+            if bar.id.trim().is_empty() {
+                return Err(invalid(
+                    "overlay.bars.id",
+                    "una barra no puede tener el id vacío".to_string(),
+                ));
+            }
+
+            if !(0..=16_384).contains(&bar.x) || !(0..=16_384).contains(&bar.y) {
+                return Err(invalid(
+                    "overlay.bars.x/y",
+                    format!(
+                        "{} está en ({}, {}), fuera de 0..16384",
+                        bar.id, bar.x, bar.y
+                    ),
+                ));
+            }
+        }
+
+        let mut ids: Vec<&str> = self
+            .overlay
+            .bars
+            .iter()
+            .map(|bar| bar.id.as_str())
+            .collect();
+        ids.sort_unstable();
+
+        if let Some(pair) = ids.windows(2).find(|pair| pair[0] == pair[1]) {
+            return Err(invalid(
+                "overlay.bars.id",
+                format!("la barra {} está repetida", pair[0]),
+            ));
+        }
+
         if !self.style.low_health_percent.is_finite()
             || !(0.0..=100.0).contains(&self.style.low_health_percent)
         {
@@ -389,6 +478,41 @@ mod tests {
             Config::from_toml("[overlay]\npositionn = \"top-left\"\n", "prueba").unwrap_err();
 
         assert!(error.to_string().contains("positionn"), "{error}");
+    }
+
+    #[test]
+    fn free_layout_places_and_orients_bars() {
+        let config = Config::from_toml(
+            "[overlay]\nlayout = \"free\"\n\n[[overlay.bars]]\nid = \"monster.0\"\nx = 20\ny = 30\ndirection = \"right\"\n",
+            "prueba",
+        )
+        .unwrap();
+
+        assert_eq!(config.overlay.layout, Layout::Free);
+        assert_eq!(config.overlay.bars[0].id, "monster.0");
+        assert_eq!(config.overlay.bars[0].direction, Direction::Right);
+    }
+
+    #[test]
+    fn a_repeated_bar_id_is_an_error() {
+        let error = Config::from_toml(
+            "[overlay]\n[[overlay.bars]]\nid = \"player.health\"\nx = 0\ny = 0\n[[overlay.bars]]\nid = \"player.health\"\nx = 0\ny = 0\n",
+            "prueba",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("player.health"), "{error}");
+    }
+
+    #[test]
+    fn a_bar_outside_the_screen_is_an_error() {
+        let error = Config::from_toml(
+            "[overlay]\n[[overlay.bars]]\nid = \"player.health\"\nx = 99999\ny = 0\n",
+            "prueba",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("overlay.bars.x/y"), "{error}");
     }
 
     #[test]

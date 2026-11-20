@@ -64,6 +64,16 @@ impl Canvas {
         }
     }
 
+    /// Lienzo transparente: el fondo no se pinta y el alfa de cada trazo se conserva. Es lo que
+    /// necesita el modo de barras sueltas, donde solo deben verse las placas.
+    pub fn transparent(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            pixels: vec![0; (width * height) as usize],
+        }
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -102,6 +112,24 @@ impl Canvas {
             for x in rect.x..rect.right() {
                 let coverage = rounded_rect_coverage(x, y, rect, radius);
                 self.blend(x, y, color, coverage);
+            }
+        }
+    }
+
+    /// Borra el interior de un rectángulo redondeado, para dejar solo un borde.
+    ///
+    /// Se usa en las placas del modo libre: pintar el borde y luego el fondo encima
+    /// duplicaría el alfa y las volvería casi opacas.
+    pub fn clear_rounded(&mut self, rect: Rect, radius: f32) {
+        let radius = radius
+            .max(0.0)
+            .min(rect.width.min(rect.height) as f32 / 2.0);
+
+        for y in rect.y..rect.bottom() {
+            for x in rect.x..rect.right() {
+                if rounded_rect_coverage(x, y, rect, radius) >= 0.5 {
+                    self.pixels[(y as u32 * self.width + x as u32) as usize] = 0;
+                }
             }
         }
     }
@@ -162,29 +190,153 @@ impl Canvas {
     }
 
     /// Mezcla `color` sobre el píxel con una cobertura de 0 a 1 (bordes de texto y esquinas).
+    ///
+    /// Es una composición source-over normal: sobre un lienzo opaco el resultado sigue siendo
+    /// opaco, y sobre uno transparente el alfa se acumula en vez de perderse.
     pub fn blend(&mut self, x: i32, y: i32, color: Color, coverage: f32) {
         if coverage <= 0.0 || x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             return;
         }
 
-        let alpha = (f32::from(color.a) / 255.0) * coverage.clamp(0.0, 1.0);
-        if alpha >= 1.0 {
-            self.pixels[(y as u32 * self.width + x as u32) as usize] =
-                color.to_argb() | 0xff00_0000;
+        let source = (f32::from(color.a) / 255.0) * coverage.clamp(0.0, 1.0);
+        if source <= 0.0 {
             return;
         }
 
         let index = (y as u32 * self.width + x as u32) as usize;
         let destination = self.pixels[index];
-        let mix = |source: u8, target: u8| -> u32 {
-            (f32::from(source) * alpha + f32::from(target) * (1.0 - alpha)).round() as u32
+        let destination_alpha = f32::from((destination >> 24) as u8) / 255.0;
+        let alpha = source + destination_alpha * (1.0 - source);
+
+        if alpha <= f32::EPSILON {
+            return;
+        }
+
+        let mix = |source_component: u8, destination_component: u8| -> u32 {
+            ((f32::from(source_component) * source
+                + f32::from(destination_component) * destination_alpha * (1.0 - source))
+                / alpha)
+                .round()
+                .clamp(0.0, 255.0) as u32
         };
 
         let r = mix(color.r, ((destination >> 16) & 0xff) as u8);
         let g = mix(color.g, ((destination >> 8) & 0xff) as u8);
         let b = mix(color.b, (destination & 0xff) as u8);
+        let a = (alpha * 255.0).round().clamp(0.0, 255.0) as u32;
 
-        self.pixels[index] = 0xff00_0000 | (r << 16) | (g << 8) | b;
+        self.pixels[index] = (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    /// Copia otro lienzo encima, respetando el alfa de cada píxel. Las placas del modo libre se
+    /// componen así sobre el lienzo de la pantalla.
+    pub fn composite(&mut self, other: &Canvas, x: i32, y: i32) {
+        for row in 0..other.height as i32 {
+            for column in 0..other.width as i32 {
+                let pixel = other.pixels[(row as u32 * other.width + column as u32) as usize];
+                let a = (pixel >> 24) as u8;
+
+                if a == 0 {
+                    continue;
+                }
+
+                self.blend(
+                    x + column,
+                    y + row,
+                    Color {
+                        r: ((pixel >> 16) & 0xff) as u8,
+                        g: ((pixel >> 8) & 0xff) as u8,
+                        b: (pixel & 0xff) as u8,
+                        a,
+                    },
+                    1.0,
+                );
+            }
+        }
+    }
+
+    /// Caja que rodea los píxeles con alfa; `None` si el lienzo está vacío.
+    pub fn content_bounds(&self) -> Option<Rect> {
+        let mut left = self.width;
+        let mut top = self.height;
+        let mut right = 0;
+        let mut bottom = 0;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if (self.pixels[(y * self.width + x) as usize] >> 24) == 0 {
+                    continue;
+                }
+
+                left = left.min(x);
+                top = top.min(y);
+                right = right.max(x + 1);
+                bottom = bottom.max(y + 1);
+            }
+        }
+
+        (right > left && bottom > top)
+            .then(|| Rect::new(left as i32, top as i32, right - left, bottom - top))
+    }
+
+    /// Copia un rectángulo a un lienzo transparente; se usa para la vista previa recortada.
+    pub fn crop(&self, rect: Rect) -> Canvas {
+        let width = rect.width.min(self.width).max(1);
+        let height = rect.height.min(self.height).max(1);
+        let mut out = Canvas::transparent(width, height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let source_x = rect.x + x as i32;
+                let source_y = rect.y + y as i32;
+
+                if source_x < 0
+                    || source_y < 0
+                    || source_x >= self.width as i32
+                    || source_y >= self.height as i32
+                {
+                    continue;
+                }
+
+                out.pixels[(y * width + x) as usize] =
+                    self.pixels[(source_y as u32 * self.width + source_x as u32) as usize];
+            }
+        }
+
+        out
+    }
+
+    /// Rectángulos de una scanline por fila donde el alfa supera `threshold`.
+    ///
+    /// X11 no compone alfa en un visual de 24 bits, así que el modo libre recorta la ventana a
+    /// las placas con SHAPE. Es la misma idea que el recorte redondeado del panel.
+    pub fn opaque_rectangles(&self, threshold: u8) -> Vec<Rect> {
+        let mut rectangles = Vec::new();
+
+        for y in 0..self.height {
+            let mut span: Option<(u32, u32)> = None;
+
+            for x in 0..self.width {
+                let alpha = (self.pixels[(y * self.width + x) as usize] >> 24) as u8;
+                let inside = alpha >= threshold;
+
+                match (inside, span) {
+                    (true, None) => span = Some((x, x + 1)),
+                    (true, Some((start, _))) => span = Some((start, x + 1)),
+                    (false, Some((start, end))) => {
+                        rectangles.push(Rect::new(start as i32, y as i32, end - start, 1));
+                        span = None;
+                    }
+                    (false, None) => {}
+                }
+            }
+
+            if let Some((start, end)) = span {
+                rectangles.push(Rect::new(start as i32, y as i32, end - start, 1));
+            }
+        }
+
+        rectangles
     }
 
     /// Bytes en el orden que espera `PutImage` con un visual TrueColor de 24 bits en x86.
@@ -310,6 +462,53 @@ mod tests {
         assert_eq!(canvas.pixel(10, 10), Some(0xffff_0000));
         assert_eq!(canvas.pixel(10, 13), Some(0xffff_0000));
         assert_eq!(canvas.pixel(6, 6), Some(0xff00_0000));
+    }
+
+    #[test]
+    fn clearing_a_rounded_rect_leaves_only_its_border() {
+        let mut canvas = Canvas::transparent(20, 20);
+        canvas.fill_rounded(Rect::new(0, 0, 20, 20), 5.0, Color::rgb(255, 0, 0));
+        canvas.clear_rounded(Rect::new(1, 1, 18, 18), 4.0);
+
+        assert_eq!(canvas.pixel(0, 0), Some(0));
+        assert_eq!(canvas.pixel(1, 10), Some(0));
+        assert_eq!(canvas.pixel(0, 10), Some(0xffff_0000));
+    }
+
+    #[test]
+    fn a_transparent_canvas_keeps_the_alpha_of_a_translucent_fill() {
+        let mut canvas = Canvas::transparent(2, 2);
+        canvas.fill_rect(Rect::new(0, 0, 2, 2), Color::rgb(255, 0, 0).with_alpha(128));
+
+        let pixel = canvas.pixel(0, 0).unwrap();
+        assert_eq!(pixel >> 24, 0x80);
+        assert_eq!((pixel >> 16) & 0xff, 0xff);
+    }
+
+    #[test]
+    fn compositing_a_plate_keeps_the_gap_transparent() {
+        let mut screen = Canvas::transparent(8, 8);
+        let mut plate = Canvas::transparent(3, 3);
+        plate.fill_rect(Rect::new(0, 0, 3, 3), Color::rgb(0, 0, 255));
+        screen.composite(&plate, 2, 3);
+
+        assert_eq!(screen.pixel(0, 0), Some(0));
+        assert_eq!(screen.pixel(3, 4), Some(0xff00_00ff));
+        assert_eq!(screen.opaque_rectangles(1).len(), 3);
+    }
+
+    #[test]
+    fn content_bounds_and_crop_keep_only_the_plates() {
+        let mut screen = Canvas::transparent(10, 10);
+        screen.fill_rect(Rect::new(3, 2, 4, 2), Color::rgb(255, 0, 0));
+
+        let bounds = screen.content_bounds().unwrap();
+        assert_eq!(bounds, Rect::new(3, 2, 4, 2));
+
+        let cropped = screen.crop(bounds);
+        assert_eq!(cropped.width(), 4);
+        assert_eq!(cropped.height(), 2);
+        assert_eq!(cropped.pixel(0, 0), Some(0xffff_0000));
     }
 
     #[test]

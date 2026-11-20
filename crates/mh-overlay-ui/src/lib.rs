@@ -138,6 +138,22 @@ impl Panel {
         }
     }
 
+    /// Muestra un lienzo con fondo transparente: solo se ven las placas dibujadas.
+    ///
+    /// En Wayland el compositor compone el alfa; en X11 el servidor recorta la ventana a los
+    /// píxeles con alfa mediante SHAPE, porque el visual de 24 bits no tiene canal alfa.
+    pub fn present_free(
+        &mut self,
+        canvas: &Canvas,
+        origin: (i32, i32),
+        click_through: bool,
+    ) -> Result<(), OverlayError> {
+        match &mut self.backend {
+            Backend::Wayland(overlay) => overlay.present_free(canvas, origin, click_through),
+            Backend::X11(window) => window.present_free(canvas, origin, click_through),
+        }
+    }
+
     /// Oculta el panel hasta el próximo estado que merezca mostrarse.
     pub fn hide(&mut self) -> Result<(), OverlayError> {
         match &mut self.backend {

@@ -46,6 +46,8 @@ pub struct OverlayWindow {
 struct ShapeState {
     rounded: bool,
     click_through: bool,
+    /// Recortar a los píxeles con alfa: es lo que deja ver el juego entre placas.
+    alpha: bool,
 }
 
 impl OverlayWindow {
@@ -149,6 +151,7 @@ impl OverlayWindow {
             shape: ShapeState {
                 rounded: false,
                 click_through: false,
+                alpha: false,
             },
             shaped,
         })
@@ -170,6 +173,28 @@ impl OverlayWindow {
         origin: (i32, i32),
         rounded: bool,
         click_through: bool,
+    ) -> Result<(), OverlayError> {
+        self.present_with(canvas, origin, rounded, click_through, false)
+    }
+
+    /// Sube un lienzo cuyo fondo es transparente: SHAPE recorta la ventana a las placas
+    /// dibujadas, de modo que el juego se ve entre ellas.
+    pub fn present_free(
+        &mut self,
+        canvas: &Canvas,
+        origin: (i32, i32),
+        click_through: bool,
+    ) -> Result<(), OverlayError> {
+        self.present_with(canvas, origin, false, click_through, true)
+    }
+
+    fn present_with(
+        &mut self,
+        canvas: &Canvas,
+        origin: (i32, i32),
+        rounded: bool,
+        click_through: bool,
+        alpha: bool,
     ) -> Result<(), OverlayError> {
         let size = (canvas.width(), canvas.height());
         let resize = size != self.size;
@@ -199,10 +224,13 @@ impl OverlayWindow {
         let shape_state = ShapeState {
             rounded,
             click_through,
+            alpha,
         };
 
-        if resize || shape_state != self.shape {
-            self.apply_shape(canvas.width(), canvas.height(), shape_state)?;
+        // Las placas se mueven sin cambiar el tamaño del lienzo, así que el recorte por alfa
+        // se recalcula en cada fotograma.
+        if resize || shape_state != self.shape || alpha {
+            self.apply_shape(canvas, shape_state)?;
             self.shape = shape_state;
         }
 
@@ -255,12 +283,27 @@ impl OverlayWindow {
         Ok(())
     }
 
-    fn apply_shape(&self, width: u32, height: u32, state: ShapeState) -> Result<(), OverlayError> {
+    fn apply_shape(&self, canvas: &Canvas, state: ShapeState) -> Result<(), OverlayError> {
         if !self.shaped {
             return Ok(());
         }
 
-        let radius = if state.rounded { 10.0 } else { 0.0 };
+        let (width, height) = (canvas.width(), canvas.height());
+        let bounding = if state.alpha {
+            canvas
+                .opaque_rectangles(16)
+                .into_iter()
+                .map(|rect| Rectangle {
+                    x: rect.x as i16,
+                    y: rect.y as i16,
+                    width: u16::try_from(rect.width).unwrap_or(u16::MAX),
+                    height: 1,
+                })
+                .collect::<Vec<_>>()
+        } else {
+            let radius = if state.rounded { 10.0 } else { 0.0 };
+            rounded_rectangles(Rect::new(0, 0, width, height), radius)
+        };
 
         self.connection
             .shape_rectangles(
@@ -270,12 +313,15 @@ impl OverlayWindow {
                 self.window,
                 0,
                 0,
-                &rounded_rectangles(Rect::new(0, 0, width, height), radius),
+                &bounding,
             )
             .map_err(|source| OverlayError::X11 { source })?;
 
         let input = if state.click_through {
             Vec::new()
+        } else if state.alpha {
+            // Solo las placas reciben clics: el resto de la pantalla sigue siendo del juego.
+            bounding.clone()
         } else {
             vec![Rectangle {
                 x: 0,

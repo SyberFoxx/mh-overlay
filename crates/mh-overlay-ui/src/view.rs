@@ -4,7 +4,7 @@
 //! dominante con la marca del umbral de captura y, debajo, barras finas de partes y estados.
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
-use mh_overlay_config::{Color, Config, Monsters, StyleSection};
+use mh_overlay_config::{Color, Config, Direction, Monsters, StyleSection};
 use mh_overlay_games::{
     Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
     WeaponDetail, WeaponGauge,
@@ -32,6 +32,14 @@ const TITLE_VALUE_SIZE: f32 = 12.0;
 const SHARPNESS_BAR: f32 = 8.0;
 /// Alto del medidor de espíritu dibujado como espada, en unidades lógicas.
 const SPIRIT_SWORD: f32 = 24.0;
+/// Anchos de las placas del modo libre, en unidades lógicas.
+const FREE_ROW_WIDTH: f32 = 280.0;
+const FREE_MONSTER_WIDTH: f32 = 340.0;
+const FREE_WEAPON_WIDTH: f32 = 340.0;
+const FREE_BUFFS_WIDTH: f32 = 340.0;
+const FREE_HUNT_WIDTH: f32 = 240.0;
+/// Margen interior de cada placa del modo libre.
+const FREE_PADDING: f32 = 9.0;
 /// Lado del icono del arma en la cabecera del jugador.
 const WEAPON_ICON: f32 = 22.0;
 /// Fichas de datos del arma por fila; se reparten en varias filas si no caben.
@@ -181,6 +189,385 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
             y += geometry.row;
         }
     }
+
+    canvas
+}
+
+/// Dibuja el modo libre: una placa por barra sobre un lienzo transparente.
+///
+/// Las posiciones salen de `[[overlay.bars]]`; lo que no esté configurado se apila en una
+/// columna desde `margin_x`/`margin_y`. La vida del monstruo y sus partes forman un solo
+/// bloque: mover `monster.N` mueve también las partes, y `direction` decide si cuelgan hacia
+/// abajo o hacia la derecha.
+pub fn render_free(
+    config: &Config,
+    text: &Text,
+    snapshot: &Snapshot,
+    status: Option<&str>,
+    screen: (u32, u32),
+) -> Canvas {
+    let geometry = Geometry::new(config.overlay.scale);
+    let monsters = visible_monsters(config, snapshot);
+    let mut canvas = Canvas::transparent(screen.0.max(1), screen.1.max(1));
+    let gap = (4.0 * geometry.scale).round() as i32;
+    let mut cursor = (config.overlay.margin_x, config.overlay.margin_y);
+
+    if let Some(hunt) = snapshot.hunt {
+        let plate = hunt_plate(config, text, &geometry, &hunt);
+        let origin = bar_origin(config, "hunt").unwrap_or(cursor);
+        canvas.composite(&plate, origin.0, origin.1);
+        cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
+    }
+
+    if let Some(player) = &snapshot.player {
+        let health = row_plate(
+            config,
+            text,
+            &geometry,
+            Row {
+                label: "Vida",
+                fraction: (player.health.percent() / 100.0).clamp(0.0, 1.0),
+                color: if player.health.percent() <= config.style.low_health_percent {
+                    config.style.low_health
+                } else {
+                    config.style.health
+                },
+                recoverable: player
+                    .recoverable
+                    .filter(|value| *value > 0.0)
+                    .map_or(0.0, |value| (value / player.health.max).clamp(0.0, 1.0)),
+                segments: None,
+                value: None,
+            },
+        );
+        let origin = bar_origin(config, "player.health").unwrap_or(cursor);
+        canvas.composite(&health, origin.0, origin.1);
+        cursor.1 = cursor.1.max(origin.1 + health.height() as i32 + gap);
+
+        let stamina = row_plate(
+            config,
+            text,
+            &geometry,
+            Row {
+                label: "Aguante",
+                fraction: (player.stamina.percent() / 100.0).clamp(0.0, 1.0),
+                color: config.style.part,
+                recoverable: 0.0,
+                segments: None,
+                value: None,
+            },
+        );
+        let origin = bar_origin(config, "player.stamina").unwrap_or(cursor);
+        canvas.composite(&stamina, origin.0, origin.1);
+        cursor.1 = cursor.1.max(origin.1 + stamina.height() as i32 + gap);
+
+        if let Some(weapon) = &player.weapon {
+            let plate = weapon_plate(config, text, &geometry, weapon);
+            let origin = bar_origin(config, "weapon").unwrap_or(cursor);
+            canvas.composite(&plate, origin.0, origin.1);
+            cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
+        }
+
+        if !player.buffs.is_empty() {
+            let plate = buffs_plate(config, text, &geometry, &player.buffs);
+            let origin = bar_origin(config, "buffs").unwrap_or(cursor);
+            canvas.composite(&plate, origin.0, origin.1);
+            cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
+        }
+    }
+
+    for (slot, monster) in monsters.iter().enumerate() {
+        let health = monster_plate(config, text, &geometry, monster);
+        let id = format!("monster.{slot}");
+        let direction = config
+            .overlay
+            .bars
+            .iter()
+            .find(|bar| bar.id == id)
+            .map_or(Direction::Down, |bar| bar.direction);
+        let origin = bar_origin(config, &id).unwrap_or(cursor);
+        canvas.composite(&health, origin.0, origin.1);
+
+        let mut part_y = match direction {
+            Direction::Down => origin.1 + health.height() as i32 + gap,
+            // A la derecha, las partes empiezan a la altura de la vida del monstruo.
+            Direction::Right => origin.1,
+        };
+        let part_x = origin.0 + health.width() as i32 + gap;
+        let mut column_height = health.height() as i32;
+
+        let mut place_part = |plate: &Canvas| match direction {
+            Direction::Down => {
+                canvas.composite(plate, origin.0, part_y);
+                part_y += plate.height() as i32 + gap;
+                column_height = part_y - origin.1;
+            }
+            Direction::Right => {
+                canvas.composite(plate, part_x, part_y);
+                part_y += plate.height() as i32 + gap;
+                column_height = column_height.max(part_y - origin.1);
+            }
+        };
+
+        if config.overlay.show_parts {
+            for part in &visible_parts(monster) {
+                place_part(&part_plate(config, text, &geometry, part));
+            }
+        }
+
+        if config.overlay.show_ailments {
+            for ailment in monster
+                .ailments
+                .iter()
+                .filter(|ailment| ailment.is_active())
+                .take(MAX_AILMENTS)
+            {
+                place_part(&row_plate(
+                    config,
+                    text,
+                    &geometry,
+                    Row {
+                        label: ailment.name,
+                        fraction: (ailment.buildup_percent() / 100.0).clamp(0.0, 1.0),
+                        color: ailment_color(&config.style, ailment.name),
+                        recoverable: 0.0,
+                        segments: None,
+                        value: None,
+                    },
+                ));
+            }
+        }
+
+        cursor.1 = cursor.1.max(origin.1 + column_height + gap);
+    }
+
+    if monsters.is_empty() {
+        let plate = status_plate(config, text, &geometry, status);
+        let origin = bar_origin(config, "status").unwrap_or(cursor);
+        canvas.composite(&plate, origin.0, origin.1);
+    }
+
+    canvas
+}
+
+fn bar_origin(config: &Config, id: &str) -> Option<(i32, i32)> {
+    config
+        .overlay
+        .bars
+        .iter()
+        .find(|bar| bar.id == id)
+        .map(|bar| (bar.x, bar.y))
+}
+
+/// Lienzo transparente con el borde y el fondo de una placa.
+fn plate_canvas(width: f32, height: f32, geometry: &Geometry, style: &StyleSection) -> Canvas {
+    let width = width.round().max(1.0) as u32;
+    let height = height.round().max(1.0) as u32;
+    let mut canvas = Canvas::transparent(width, height);
+    let radius = 8.0 * geometry.scale;
+
+    canvas.fill_rounded(
+        Rect::new(0, 0, width, height),
+        radius,
+        lighten(style.panel, 0.18),
+    );
+    let inner = Rect::new(1, 1, width.saturating_sub(2), height.saturating_sub(2));
+    canvas.clear_rounded(inner, (radius - 1.0).max(0.0));
+    canvas.fill_rounded(inner, (radius - 1.0).max(0.0), style.panel);
+
+    canvas
+}
+
+/// Geometría de una placa: el mismo dibujo que el panel, con menos margen interior.
+fn plate_geometry(geometry: &Geometry) -> Geometry {
+    let mut local = Geometry::new(geometry.scale);
+    local.padding = FREE_PADDING * geometry.scale;
+    local
+}
+
+fn row_plate(config: &Config, text: &Text, geometry: &Geometry, row: Row<'_>) -> Canvas {
+    let local = plate_geometry(geometry);
+    let height = geometry.row + local.padding * 2.0;
+    let mut canvas = plate_canvas(
+        FREE_ROW_WIDTH * geometry.scale,
+        height,
+        geometry,
+        &config.style,
+    );
+    draw_row(&mut canvas, config, text, &local, local.padding, row);
+    canvas
+}
+
+fn part_plate(config: &Config, text: &Text, geometry: &Geometry, part: &Part) -> Canvas {
+    let fallback = format!("parte {:02}", part.index);
+    let broken = part
+        .breaks
+        .is_some_and(|breaks| breaks.total > 0 && breaks.done >= breaks.total);
+
+    row_plate(
+        config,
+        text,
+        geometry,
+        Row {
+            label: part.name.unwrap_or(&fallback),
+            fraction: part_fraction(config, part),
+            color: if broken {
+                config.style.capture
+            } else if part.severable.is_some() {
+                config.style.severable
+            } else {
+                config.style.part
+            },
+            recoverable: 0.0,
+            segments: part.breaks.map(|breaks| breaks.total),
+            value: if config.overlay.show_part_health {
+                part.health.map(|health| health.label())
+            } else {
+                part.breaks.map(|breaks| breaks.label())
+            },
+        },
+    )
+}
+
+fn hunt_plate(config: &Config, text: &Text, geometry: &Geometry, hunt: &Hunt) -> Canvas {
+    let local = plate_geometry(geometry);
+    let height = geometry.row + local.padding * 2.0;
+    let mut canvas = plate_canvas(
+        FREE_HUNT_WIDTH * geometry.scale,
+        height,
+        geometry,
+        &config.style,
+    );
+    draw_hunt(&mut canvas, config, text, &local, hunt, local.padding);
+    canvas
+}
+
+fn monster_plate(config: &Config, text: &Text, geometry: &Geometry, monster: &Monster) -> Canvas {
+    let local = plate_geometry(geometry);
+    let width = monster_plate_width(config, text, geometry, monster);
+    let height =
+        local.padding * 2.0 + geometry.header + geometry.small * 2.0 + geometry.bar.max(4.0);
+    let mut canvas = plate_canvas(width, height, geometry, &config.style);
+    let mut y = local.padding;
+    y = draw_title(&mut canvas, config, text, &local, monster, y);
+    draw_health_bar(&mut canvas, config, &local, monster, y);
+    canvas
+}
+
+/// Ancho justo para que el nombre, el porcentaje y los números no se pisen.
+fn monster_plate_width(
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    monster: &Monster,
+) -> f32 {
+    let scale = geometry.scale;
+    let name = text.width(&monster_label(monster), 17.0 * scale);
+    let percent = text.width(&percent_label(monster), 14.0 * scale);
+    let crown = if monster.crown == Crown::None {
+        0.0
+    } else {
+        CROWN_SLOT * scale
+    };
+    let numbers = if config.overlay.show_health_numbers {
+        text.width(&monster.health.label(), TITLE_VALUE_SIZE * scale) + 8.0 * scale
+    } else {
+        0.0
+    };
+    let capture = if monster.is_capturable() {
+        text.width("captura", TITLE_VALUE_SIZE * scale) + 8.0 * scale
+    } else {
+        0.0
+    };
+
+    (FREE_MONSTER_WIDTH * scale).max(name + percent + crown + numbers + capture + 40.0 * scale)
+}
+
+fn weapon_plate(config: &Config, text: &Text, geometry: &Geometry, weapon: &Weapon) -> Canvas {
+    let local = plate_geometry(geometry);
+    let chips = weapon_chips(weapon, &config.style);
+    let rows = if chips.is_empty() {
+        0
+    } else {
+        chip_rows(
+            text,
+            &chips,
+            &local,
+            FREE_WEAPON_WIDTH * geometry.scale - local.padding * 2.0,
+        )
+    };
+    let mut height = local.padding * 2.0 + geometry.weapon;
+
+    if weapon.sharpness.is_some() {
+        height += SHARPNESS_BAR * geometry.scale + geometry.small;
+    }
+
+    if matches!(weapon.gauge, Some(WeaponGauge::Spirit { .. })) {
+        height += geometry.spirit + geometry.small;
+    }
+
+    if rows > 0 {
+        height += rows as f32 * geometry.chip
+            + rows.saturating_sub(1) as f32 * geometry.chip_gap
+            + geometry.small;
+    }
+
+    let mut canvas = plate_canvas(
+        FREE_WEAPON_WIDTH * geometry.scale,
+        height,
+        geometry,
+        &config.style,
+    );
+    let mut y = draw_weapon(&mut canvas, config, text, &local, weapon, local.padding);
+
+    if matches!(weapon.gauge, Some(WeaponGauge::Spirit { .. })) {
+        y = draw_spirit_sword(&mut canvas, config, text, &local, weapon, y);
+        y += geometry.small;
+    }
+
+    if !chips.is_empty() {
+        draw_chips(&mut canvas, config, text, &local, y, &chips);
+    }
+
+    canvas
+}
+
+fn buffs_plate(config: &Config, text: &Text, geometry: &Geometry, buffs: &[Buff]) -> Canvas {
+    let local = plate_geometry(geometry);
+    let rows = buff_rows(buffs.len());
+    let height = local.padding * 2.0
+        + rows as f32 * geometry.buff
+        + rows.saturating_sub(1) as f32 * geometry.buff_gap;
+    let mut canvas = plate_canvas(
+        FREE_BUFFS_WIDTH * geometry.scale,
+        height,
+        geometry,
+        &config.style,
+    );
+    draw_buffs(&mut canvas, config, text, &local, local.padding, buffs);
+    canvas
+}
+
+fn status_plate(config: &Config, text: &Text, geometry: &Geometry, status: Option<&str>) -> Canvas {
+    let size = 14.0 * geometry.scale;
+    let label = status.unwrap_or("sin monstruos grandes en la zona");
+    let height = text.height(size) + geometry.padding * 2.0;
+    let width = (text.width(label, size) + geometry.padding * 2.0 + 12.0 * geometry.scale)
+        .max(FREE_ROW_WIDTH * geometry.scale);
+    let mut canvas = plate_canvas(width, height, geometry, &config.style);
+
+    text.draw(
+        &mut canvas,
+        label,
+        geometry.padding,
+        geometry.padding + text.ascent(size),
+        size,
+        if status.is_some() {
+            config.style.low_health
+        } else {
+            config.style.muted
+        },
+    );
 
     canvas
 }
@@ -1904,6 +2291,7 @@ fn lighten(color: Color, amount: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mh_overlay_config::Layout;
     use mh_overlay_games::{Ailment, Breaks, Buff, Health, Sharpness, WeaponGauge, WeaponKind};
 
     fn monster(percent: f32) -> Monster {
@@ -2061,6 +2449,54 @@ mod tests {
             .filter(|(left, right)| left != right)
             .count();
         assert!(changed > 0, "la vida de la parte no cambió ningún píxel");
+    }
+
+    fn alpha(canvas: &Canvas, x: i32, y: i32) -> u8 {
+        canvas.pixel(x, y).map_or(0, |pixel| (pixel >> 24) as u8)
+    }
+
+    #[test]
+    fn free_mode_leaves_the_background_transparent() {
+        let (mut config, text) = config();
+        config.overlay.layout = Layout::Free;
+        let canvas = render_free(&config, &text, &Snapshot::default(), None, (640, 480));
+
+        assert_eq!(canvas.pixel(0, 0), Some(0));
+        assert!(
+            alpha(&canvas, 40, 36) > 0,
+            "la placa de estado no se dibujó"
+        );
+    }
+
+    #[test]
+    fn a_monster_group_moves_its_parts_to_the_right() {
+        let (mut config, text) = config();
+        let mut hunted = monster(50.0);
+        hunted.parts.push(Part {
+            index: 0,
+            name: Some("Cola"),
+            flinch: None,
+            breakable: Some(Health::new(40.0, 100.0)),
+            severable: None,
+            health: Some(Health::new(40.0, 100.0)),
+            breaks: None,
+        });
+        config.overlay.bars = vec![mh_overlay_config::BarPlacement {
+            id: "monster.0".to_string(),
+            x: 100,
+            y: 100,
+            direction: Direction::Right,
+        }];
+        let canvas = render_free(
+            &config,
+            &text,
+            &Snapshot::of(vec![hunted]),
+            None,
+            (800, 400),
+        );
+
+        assert!(alpha(&canvas, 110, 110) > 0, "falta la vida del monstruo");
+        assert!(alpha(&canvas, 460, 120) > 0, "la parte no siguió a la vida");
     }
 
     #[test]

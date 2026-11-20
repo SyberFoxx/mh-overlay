@@ -45,6 +45,7 @@ pub struct WaylandOverlay {
     events: Events,
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
+    compositor: WlCompositor,
     shm: WlShm,
     /// Se conserva solo para seguir recibiendo el tamaño del monitor: si el proxy se suelta,
     /// el cliente lo destruye y deja de llegar el modo de la pantalla.
@@ -86,7 +87,7 @@ impl WaylandOverlay {
     pub fn open(title: &str) -> Result<Self, OverlayError> {
         let connection = Connection::connect_to_env()
             .map_err(|error| OverlayError::Wayland(error.to_string()))?;
-        let (globals, queue) = registry_queue_init::<Events>(&connection)
+        let (globals, mut queue) = registry_queue_init::<Events>(&connection)
             .map_err(|error| OverlayError::Wayland(error.to_string()))?;
         let handle = queue.handle();
 
@@ -130,10 +131,16 @@ impl WaylandOverlay {
         // La superficie no se confirma aquí: un panel anclado arriba a la izquierda no puede
         // medir cero, y el compositor rechaza el commit hasta que `resize` fije un tamaño. Ese
         // primer commit lo hace `present`, que es quien conoce el tamaño del lienzo.
-        let events = Events {
+        let mut events = Events {
             released: [true; BUFFERS],
             ..Events::default()
         };
+
+        // El tamaño del monitor llega por el output; sin este viaje redondo, el primer
+        // fotograma del modo libre se dibujaría sobre el tamaño de reserva.
+        queue
+            .roundtrip(&mut events)
+            .map_err(|error| OverlayError::Wayland(error.to_string()))?;
 
         Ok(Self {
             connection,
@@ -141,6 +148,7 @@ impl WaylandOverlay {
             events,
             surface,
             layer_surface,
+            compositor,
             shm,
             _output: output,
             empty_region,
@@ -169,6 +177,27 @@ impl WaylandOverlay {
         rounded: bool,
         click_through: bool,
     ) -> Result<(), OverlayError> {
+        self.present_with(canvas, origin, rounded, click_through, false)
+    }
+
+    /// Sube un lienzo transparente; las esquinas ya vienen recortadas en cada placa.
+    pub fn present_free(
+        &mut self,
+        canvas: &Canvas,
+        origin: (i32, i32),
+        click_through: bool,
+    ) -> Result<(), OverlayError> {
+        self.present_with(canvas, origin, false, click_through, true)
+    }
+
+    fn present_with(
+        &mut self,
+        canvas: &Canvas,
+        origin: (i32, i32),
+        rounded: bool,
+        click_through: bool,
+        alpha: bool,
+    ) -> Result<(), OverlayError> {
         let size = (canvas.width(), canvas.height());
 
         if size != self.size {
@@ -181,9 +210,24 @@ impl WaylandOverlay {
         self.layer_surface
             .set_margin(origin.1.max(0), 0, 0, origin.0.max(0));
 
+        let mut plate_region = None;
+
         if click_through {
             // Región de entrada vacía: los clics atraviesan el panel y llegan al juego.
             self.surface.set_input_region(Some(&self.empty_region));
+        } else if alpha {
+            // Solo las placas reciben clics; el resto de la pantalla sigue siendo del juego.
+            let region = self.compositor.create_region(&self.queue.handle(), ());
+            for rect in canvas.opaque_rectangles(16) {
+                region.add(
+                    rect.x,
+                    rect.y,
+                    i32::try_from(rect.width).unwrap_or(i32::MAX),
+                    1,
+                );
+            }
+            self.surface.set_input_region(Some(&region));
+            plate_region = Some(region);
         } else {
             self.surface.set_input_region(None);
         }
@@ -222,6 +266,10 @@ impl WaylandOverlay {
             i32::try_from(size.1).unwrap_or(i32::MAX),
         );
         self.surface.commit();
+
+        if let Some(region) = plate_region {
+            region.destroy();
+        }
 
         self.connection
             .flush()

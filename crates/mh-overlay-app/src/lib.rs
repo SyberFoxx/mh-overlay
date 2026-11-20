@@ -14,7 +14,10 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use mh_overlay_config::{Color, Config, Monsters, OverlaySection, Position, StyleSection};
+use mh_overlay_config::{
+    BarPlacement, Color, Config, Direction, Layout, Monsters, OverlaySection, Position,
+    StyleSection,
+};
 use mh_overlay_games::{
     Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
     Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
@@ -573,7 +576,23 @@ impl Hub {
         } else {
             sample()
         };
-        let canvas = view::render(&self.config, &self.text, &snapshot, None);
+        let canvas = if self.config.overlay.layout == Layout::Free {
+            // La vista previa usa una pantalla lógica de 1920×1080 y luego recorta el hueco
+            // vacío: las placas se ven al mismo tamaño que en el juego, no en miniatura.
+            let rendered =
+                view::render_free(&self.config, &self.text, &snapshot, None, (1920, 1080));
+            let cropped = rendered.content_bounds().map(|bounds| {
+                let pad = 12;
+                let x = (bounds.x - pad).max(0);
+                let y = (bounds.y - pad).max(0);
+                let width = (bounds.width as i32 + pad * 2).min(1920 - x) as u32;
+                let height = (bounds.height as i32 + pad * 2).min(1080 - y) as u32;
+                rendered.crop(mh_overlay_ui::canvas::Rect::new(x, y, width, height))
+            });
+            cropped.unwrap_or(rendered)
+        } else {
+            view::render(&self.config, &self.text, &snapshot, None)
+        };
         let width = canvas.width().max(1) as usize;
         let height = canvas.height().max(1) as usize;
 
@@ -1625,6 +1644,31 @@ impl Hub {
                 .num_columns(2)
                 .spacing([24.0, 10.0])
                 .show(ui, |ui| {
+                    ui.label(egui::RichText::new("Disposición").color(MUTED));
+                    egui::ComboBox::from_id_salt("layout")
+                        .width(220.0)
+                        .selected_text(match self.config.overlay.layout {
+                            Layout::Panel => "Panel único",
+                            Layout::Free => "Barras sueltas",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.config.overlay.layout,
+                                Layout::Panel,
+                                "Panel único",
+                            );
+                            ui.selectable_value(
+                                &mut self.config.overlay.layout,
+                                Layout::Free,
+                                "Barras sueltas",
+                            )
+                            .on_hover_text(
+                                "Una placa por barra. Las posiciones se editan en \
+                                 [[overlay.bars]] del TOML; monster.0 mueve vida y partes juntas.",
+                            );
+                        });
+                    ui.end_row();
+
                     ui.label(egui::RichText::new("Anclaje").color(MUTED));
                     egui::ComboBox::from_id_salt("posicion")
                         .width(220.0)
@@ -1715,6 +1759,87 @@ impl Hub {
                 );
             });
         });
+
+        if self.config.overlay.layout == Layout::Free {
+            card(ui, Some("BARRAS SUELTAS"), |ui| {
+                ui.label(
+                    egui::RichText::new(
+                        "Mueve la vida del monstruo y sus partes juntas. \"down\" las pone debajo; \
+                         \"right\", a la derecha.",
+                    )
+                    .small()
+                    .color(MUTED),
+                );
+                ui.add_space(6.0);
+
+                let margin_x = self.config.overlay.margin_x;
+                let margin_y = self.config.overlay.margin_y;
+                let mut remove = None;
+
+                for (index, id) in FREE_BARS.iter().enumerate() {
+                    let position = self
+                        .config
+                        .overlay
+                        .bars
+                        .iter()
+                        .position(|bar| bar.id == *id);
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(*id).monospace().color(TEXT));
+
+                        if let Some(position) = position {
+                            let bar = &mut self.config.overlay.bars[position];
+                            ui.add(
+                                egui::DragValue::new(&mut bar.x)
+                                    .range(0..=8000)
+                                    .prefix("x "),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut bar.y)
+                                    .range(0..=8000)
+                                    .prefix("y "),
+                            );
+
+                            if id.starts_with("monster.") {
+                                egui::ComboBox::from_id_salt(format!("dir-{id}"))
+                                    .width(86.0)
+                                    .selected_text(match bar.direction {
+                                        Direction::Down => "abajo",
+                                        Direction::Right => "derecha",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut bar.direction,
+                                            Direction::Down,
+                                            "abajo",
+                                        );
+                                        ui.selectable_value(
+                                            &mut bar.direction,
+                                            Direction::Right,
+                                            "derecha",
+                                        );
+                                    });
+                            }
+
+                            if ui.small_button("Quitar").clicked() {
+                                remove = Some(position);
+                            }
+                        } else if ui.small_button("Colocar").clicked() {
+                            self.config.overlay.bars.push(BarPlacement {
+                                id: (*id).to_string(),
+                                x: margin_x,
+                                y: margin_y + index as i32 * 40,
+                                direction: Direction::Down,
+                            });
+                        }
+                    });
+                }
+
+                if let Some(position) = remove {
+                    self.config.overlay.bars.remove(position);
+                }
+            });
+        }
 
         card(ui, Some("ESTILO"), |ui| {
             egui::Grid::new("estilo")
@@ -2182,6 +2307,20 @@ fn gauge_summary(gauge: &WeaponGauge) -> Vec<(&'static str, String)> {
         ],
     }
 }
+
+/// Barras fijas que el hub puede colocar sin editar el TOML a mano.
+const FREE_BARS: [&str; 10] = [
+    "hunt",
+    "player.health",
+    "player.stamina",
+    "weapon",
+    "buffs",
+    "status",
+    "monster.0",
+    "monster.1",
+    "monster.2",
+    "monster.3",
+];
 
 fn display_position(position: Position) -> &'static str {
     match position {
