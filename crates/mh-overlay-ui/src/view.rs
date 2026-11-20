@@ -231,10 +231,10 @@ pub fn render_free(
     canvas
 }
 
-/// Rectángulos que ocupan las placas en una pantalla de 1920×1080.
+/// Rectángulos que ocupan las placas en la pantalla del editor.
 ///
 /// Sirve al editor visual: cada entrada es un grupo arrastrable (`monster.0` abarca la vida
-/// y las partes), no una placa suelta.
+/// y las partes), no una placa suelta. Las coordenadas son las mismas que usa el overlay.
 pub fn free_bounds(
     config: &Config,
     text: &Text,

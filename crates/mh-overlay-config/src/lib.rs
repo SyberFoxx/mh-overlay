@@ -81,6 +81,11 @@ click_through = true
 # Ocultar el panel cuando no hay monstruos grandes en la zona.
 hide_on_empty = true
 
+[hub]
+# El hub enseña una guía la primera vez. Se pone en true al terminarla o saltarla;
+# vuelve a false si quieres verla de nuevo.
+onboarding_done = false
+
 [style]
 panel = "#0b0d12e6"
 text = "#f2f4f8"
@@ -241,6 +246,14 @@ impl Default for StyleSection {
     }
 }
 
+/// Sección `[hub]`: estado de la ventana de escritorio, no del panel.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HubSection {
+    /// La guía de primera ejecución ya se terminó o se saltó.
+    pub onboarding_done: bool,
+}
+
 /// Configuración completa del overlay.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -248,6 +261,7 @@ pub struct Config {
     pub game: GameSection,
     pub overlay: OverlaySection,
     pub style: StyleSection,
+    pub hub: HubSection,
 }
 
 /// De dónde salió la configuración aplicada.
@@ -635,6 +649,13 @@ mod tests {
         let error = Config::from_toml("[style]\npanel = \"azul\"\n", "prueba").unwrap_err();
 
         assert!(error.to_string().contains("panel"), "{error}");
+    }
+
+    #[test]
+    fn an_old_file_opens_the_onboarding_once() {
+        let config = Config::from_toml("[game]\nkind = \"world\"\n", "prueba").unwrap();
+
+        assert!(!config.hub.onboarding_done);
     }
 
     #[test]

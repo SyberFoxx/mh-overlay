@@ -248,6 +248,8 @@ struct Hub {
     attachment: Option<Attachment>,
     /// `.map` elegido a mano; `None` es “el más nuevo que verifique”.
     map_override: Option<PathBuf>,
+    /// Paso de la guía inicial; `None` cuando ya no se muestra.
+    onboarding: Option<usize>,
     /// Juego forzado por `--game`: no se guarda y la detección no lo pisa.
     force_game: Option<GameKind>,
     maps: Vec<PathBuf>,
@@ -299,6 +301,22 @@ struct Hub {
     drag_offset: egui::Vec2,
     /// Guías del imán que se dibujan mientras se arrastra.
     snap_guide: Option<(i32, i32)>,
+    /// Resolución física del monitor del hub, detectada en cada fotograma.
+    detected_screen: Option<(u32, u32)>,
+    /// Resolución elegida a mano para el editor; `None` usa la detectada.
+    editor_screen: Option<(u32, u32)>,
+    /// Fuerza la página al principio al cambiar de pestaña.
+    scroll_to_top: bool,
+    /// Últimos rectángulos del editor, reutilizados mientras se arrastra una placa.
+    editor_bounds: Vec<view::PlacedBar>,
+    /// Configuración con la que se calcularon esos rectángulos.
+    editor_bounds_config: Config,
+    /// Lectura con la que se calcularon esos rectángulos.
+    editor_bounds_at: Option<Instant>,
+    /// Lienzo con el que se calcularon esos rectángulos.
+    editor_bounds_screen: Option<(u32, u32)>,
+    /// Última vez que se subió una vista previa a la GPU.
+    preview_built_at: Option<Instant>,
 }
 
 impl Hub {
@@ -310,6 +328,7 @@ impl Hub {
         map_override: Option<PathBuf>,
         force_game: Option<GameKind>,
     ) -> Self {
+        let onboarding = (!config.hub.onboarding_done).then_some(0);
         let mut hub = Self {
             config_path,
             config,
@@ -319,6 +338,7 @@ impl Hub {
             status: Status::default(),
             attachment: None,
             map_override,
+            onboarding,
             force_game,
             maps: Vec::new(),
             last_refresh: None,
@@ -349,6 +369,14 @@ impl Hub {
             drag_bar: None,
             drag_offset: egui::Vec2::ZERO,
             snap_guide: None,
+            detected_screen: None,
+            editor_screen: None,
+            scroll_to_top: true,
+            editor_bounds: Vec::new(),
+            editor_bounds_config: Config::default(),
+            editor_bounds_at: None,
+            editor_bounds_screen: None,
+            preview_built_at: None,
         };
 
         hub.tray = Tray::spawn();
@@ -644,6 +672,7 @@ impl Hub {
         self.preview_size = egui::vec2(width as f32, height as f32);
         self.preview = Some(ctx.load_texture("panel", image, egui::TextureOptions::NEAREST));
         self.preview_stale = false;
+        self.preview_built_at = Some(Instant::now());
         self.preview_live = live;
     }
 
@@ -714,6 +743,7 @@ impl Hub {
 
         if response.clicked() {
             self.tab = tab;
+            self.scroll_to_top = true;
         }
         ui.add_space(2.0);
     }
@@ -861,6 +891,261 @@ impl Hub {
         ui.label(egui::RichText::new(title).size(28.0).strong().color(TEXT));
         ui.label(egui::RichText::new(subtitle).size(13.5).color(MUTED));
         ui.add_space(14.0);
+    }
+
+    /// Guía de primera ejecución: juego, permiso de memoria y primer panel.
+    fn onboarding(&mut self, ctx: &egui::Context) {
+        let Some(step) = self.onboarding else {
+            return;
+        };
+
+        let mut done = false;
+        let mut next = None;
+        let mut open_overlay = false;
+
+        egui::Window::new("Primeros pasos")
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .default_width(520.0)
+            .min_width(440.0)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new(format!("PASO {} DE 3", step + 1))
+                        .size(11.0)
+                        .strong()
+                        .color(ACCENT),
+                );
+                ui.add_space(4.0);
+
+                match step {
+                    0 => self.onboarding_game(ui),
+                    1 => self.onboarding_permission(ui),
+                    _ => open_overlay = self.onboarding_ready(ui),
+                }
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if step > 0 && ui.button("Atrás").clicked() {
+                        next = Some(step - 1);
+                    }
+
+                    if ui.button("Saltar guía").clicked() {
+                        done = true;
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if step < 2 {
+                            if ui.button("Siguiente").clicked() {
+                                next = Some(step + 1);
+                            }
+                        } else if ui.button("Empezar").clicked() {
+                            done = true;
+                        }
+                    });
+                });
+            });
+
+        if open_overlay {
+            self.toggle_overlay();
+            done = true;
+        }
+
+        if done {
+            self.finish_onboarding();
+        } else if let Some(step) = next {
+            self.onboarding = Some(step);
+        }
+    }
+
+    fn onboarding_game(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            egui::RichText::new(
+                "mh-overlay lee la memoria del juego mientras corre bajo \
+                                 Proton y dibuja el estado de la cacería encima.",
+            )
+            .size(15.0),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(
+                "Puede detectar Rise o World solo, o quedarse con el título que elijas.",
+            )
+            .color(MUTED),
+        );
+        ui.add_space(6.0);
+
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .selectable_label(self.config.game.auto_detect, "Detectar automáticamente")
+                .on_hover_text(
+                    "Mira si MonsterHunterRise.exe o MonsterHunterWorld.exe están corriendo",
+                )
+                .clicked()
+            {
+                self.config.game.auto_detect = true;
+                self.force_game = None;
+                self.dirty = true;
+                self.last_refresh = None;
+            }
+
+            for kind in [GameKind::Rise, GameKind::World] {
+                let selected = !self.config.game.auto_detect && self.game() == kind;
+
+                if ui.selectable_label(selected, display_game(kind)).clicked() {
+                    self.set_game(kind);
+                }
+            }
+        });
+
+        ui.add_space(8.0);
+        let (title, detail, color) = self.connection_state();
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 9.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 4.0, color);
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(title).small().color(color).strong());
+                ui.label(egui::RichText::new(detail).size(11.0).color(MUTED));
+            });
+        });
+    }
+
+    fn onboarding_permission(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            egui::RichText::new("Leer la memoria necesita permiso de ptrace")
+                .size(17.0)
+                .strong(),
+        );
+        ui.add_space(2.0);
+        ui.label(
+            "En un Arch normal, kernel.yama.ptrace_scope=1 bloquea process_vm_readv. El overlay \
+             necesita CAP_SYS_PTRACE o bajar ese valor. No escribe nada en el juego.",
+        );
+
+        if self.permission_denied() {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("La última lectura falló por permisos.")
+                    .color(BAD)
+                    .strong(),
+            );
+        }
+
+        ui.add_space(6.0);
+        if command_exists("pkexec") {
+            if ui
+                .add_enabled(
+                    self.access.is_none(),
+                    egui::Button::new("Conceder acceso con polkit"),
+                )
+                .clicked()
+            {
+                self.grant_memory_access();
+            }
+            ui.label(
+                egui::RichText::new(
+                    "Se pedirá tu contraseña y se pondrá el valor en 0 hasta el próximo reinicio.",
+                )
+                .small()
+                .color(MUTED),
+            );
+        } else {
+            if ui.button("Copiar orden").clicked() {
+                ui.ctx()
+                    .copy_text("sudo sysctl -w kernel.yama.ptrace_scope=0".to_string());
+            }
+            ui.label(
+                egui::RichText::new("sudo sysctl -w kernel.yama.ptrace_scope=0")
+                    .monospace()
+                    .small()
+                    .color(MUTED),
+            );
+        }
+
+        if self.access.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    egui::RichText::new("esperando permisos…")
+                        .small()
+                        .color(MUTED),
+                );
+            });
+        }
+
+        if let Some(note) = &self.access_note {
+            ui.label(
+                egui::RichText::new(note)
+                    .small()
+                    .color(if note.contains("concedido") {
+                        GOOD
+                    } else {
+                        BAD
+                    }),
+            );
+        }
+
+        if ui.button("Comprobar el juego").clicked() {
+            self.attachment = None;
+            self.last_refresh = None;
+        }
+    }
+
+    fn onboarding_ready(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.label(
+            egui::RichText::new("Ya está todo listo")
+                .size(17.0)
+                .strong(),
+        );
+        ui.add_space(2.0);
+        ui.label(
+            "El panel se abre como una ventana aparte y se puede cerrar desde aquí. La \
+             configuración se guarda sola.",
+        );
+        ui.add_space(6.0);
+
+        egui::Grid::new("onboarding-resumen")
+            .num_columns(2)
+            .spacing([20.0, 6.0])
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Juego").color(MUTED));
+                ui.label(display_game(self.game()));
+                ui.end_row();
+
+                ui.label(egui::RichText::new("Conexión").color(MUTED));
+                ui.label(self.connection_state().0);
+                ui.end_row();
+            });
+
+        ui.add_space(8.0);
+        if self.overlay_running() {
+            ui.label(
+                egui::RichText::new("El panel ya está abierto.")
+                    .small()
+                    .color(GOOD),
+            );
+        } else if ui.button("Abrir el panel ahora").clicked() {
+            return true;
+        }
+
+        false
+    }
+
+    fn finish_onboarding(&mut self) {
+        self.config.hub.onboarding_done = true;
+        self.onboarding = None;
+        self.dirty = true;
+        self.tab = Tab::Diagnostics;
+        // Se guarda en el acto: cerrar justo después de la guía no debe volver a mostrarla.
+        self.save();
+    }
+
+    fn replay_onboarding(&mut self) {
+        self.config.hub.onboarding_done = false;
+        self.onboarding = Some(0);
+        self.dirty = true;
     }
 
     /// Lanza `--update` en otro hilo: la descarga y el reemplazo no deben congelar la ventana.
@@ -1972,26 +2257,47 @@ impl Hub {
                 });
 
             ui.add_space(4.0);
-            ui.columns(2, |columns| {
-                columns[0].checkbox(&mut self.config.overlay.show_parts, "Mostrar partes");
-                columns[0].checkbox(
+            if ui.available_width() < 520.0 {
+                ui.checkbox(&mut self.config.overlay.show_parts, "Mostrar partes");
+                ui.checkbox(
                     &mut self.config.overlay.show_part_health,
                     "Vida de las partes en números",
                 );
-                columns[0].checkbox(&mut self.config.overlay.show_ailments, "Mostrar estados");
-                columns[1].checkbox(
+                ui.checkbox(&mut self.config.overlay.show_ailments, "Mostrar estados");
+                ui.checkbox(
                     &mut self.config.overlay.show_health_numbers,
                     "Vida del monstruo en números",
                 );
-                columns[1].checkbox(
+                ui.checkbox(
                     &mut self.config.overlay.click_through,
                     "Los clics atraviesan el panel",
                 );
-                columns[1].checkbox(
+                ui.checkbox(
                     &mut self.config.overlay.hide_on_empty,
                     "Ocultar el panel sin monstruos",
                 );
-            });
+            } else {
+                ui.columns(2, |columns| {
+                    columns[0].checkbox(&mut self.config.overlay.show_parts, "Mostrar partes");
+                    columns[0].checkbox(
+                        &mut self.config.overlay.show_part_health,
+                        "Vida de las partes en números",
+                    );
+                    columns[0].checkbox(&mut self.config.overlay.show_ailments, "Mostrar estados");
+                    columns[1].checkbox(
+                        &mut self.config.overlay.show_health_numbers,
+                        "Vida del monstruo en números",
+                    );
+                    columns[1].checkbox(
+                        &mut self.config.overlay.click_through,
+                        "Los clics atraviesan el panel",
+                    );
+                    columns[1].checkbox(
+                        &mut self.config.overlay.hide_on_empty,
+                        "Ocultar el panel sin monstruos",
+                    );
+                });
+            }
         });
 
         if self.config.overlay.layout == Layout::Free {
@@ -2005,7 +2311,51 @@ impl Hub {
                     .color(MUTED),
                 );
                 ui.add_space(6.0);
-                self.visual_editor(ui, &snapshot);
+
+                let detected = self.detected_screen.unwrap_or((1920, 1080));
+                let screen = self.editor_screen.unwrap_or(detected);
+                let mut width = screen.0;
+                let mut height = screen.1;
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(egui::RichText::new("Lienzo").color(MUTED));
+                    ui.add(
+                        egui::DragValue::new(&mut width)
+                            .range(640..=16_384)
+                            .speed(4)
+                            .prefix("x "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut height)
+                            .range(360..=16_384)
+                            .speed(4)
+                            .prefix("y "),
+                    );
+
+                    if self.editor_screen.is_some() && ui.small_button("Detectada").clicked() {
+                        self.editor_screen = None;
+                    }
+                });
+
+                ui.label(
+                    egui::RichText::new(match self.detected_screen {
+                        Some((width, height)) => format!(
+                            "Monitor detectado: {width}×{height}. Si no coincide, ajusta el lienzo."
+                        ),
+                        None => {
+                            "No se pudo detectar el monitor; ajusta el lienzo a mano.".to_string()
+                        }
+                    })
+                    .small()
+                    .color(MUTED),
+                );
+                ui.add_space(6.0);
+
+                if (width, height) != screen {
+                    self.editor_screen = Some((width, height));
+                }
+
+                self.visual_editor(ui, &snapshot, (width, height));
             });
 
             card(ui, Some("BARRAS SUELTAS"), |ui| {
@@ -2031,7 +2381,7 @@ impl Hub {
                         .iter()
                         .position(|bar| bar.id == *id);
 
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new(*id).monospace().color(TEXT));
 
                         if let Some(position) = position {
@@ -2096,7 +2446,7 @@ impl Hub {
                     .unwrap_or(0)
                     .min(presets.len().saturating_sub(1));
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     egui::ComboBox::from_id_salt("preset")
                         .width(220.0)
                         .selected_text(presets[selected].name.as_str())
@@ -2117,7 +2467,7 @@ impl Hub {
                     }
                 });
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.preset_name)
                             .hint_text("nombre del preset")
@@ -2187,6 +2537,21 @@ impl Hub {
             }
         });
 
+        card(ui, Some("GUÍA"), |ui| {
+            ui.label(
+                egui::RichText::new(
+                    "La guía inicial explica el juego, el permiso de memoria y cómo abrir el \
+                     panel. Puedes volver a verla cuando quieras.",
+                )
+                .small()
+                .color(MUTED),
+            );
+            ui.add_space(4.0);
+            if ui.button("Ver la guía otra vez").clicked() {
+                self.replay_onboarding();
+            }
+        });
+
         if self.config != before {
             self.dirty = true;
             self.preview_stale = true;
@@ -2218,14 +2583,13 @@ impl Hub {
         });
     }
 
-    fn visual_editor(&mut self, ui: &mut egui::Ui, snapshot: &Snapshot) {
-        const SCREEN_W: i32 = 1920;
-        const SCREEN_H: i32 = 1080;
-
+    fn visual_editor(&mut self, ui: &mut egui::Ui, snapshot: &Snapshot, screen: (u32, u32)) {
+        let screen_w = screen.0.max(320) as i32;
+        let screen_h = screen.1.max(200) as i32;
         let width = ui.available_width().clamp(280.0, 920.0);
-        let scale = width / SCREEN_W as f32;
+        let scale = width / screen_w as f32;
         let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(SCREEN_W as f32 * scale, SCREEN_H as f32 * scale),
+            egui::vec2(screen_w as f32 * scale, screen_h as f32 * scale),
             egui::Sense::click_and_drag(),
         );
         let painter = ui.painter_at(rect);
@@ -2239,19 +2603,37 @@ impl Hub {
             egui::StrokeKind::Inside,
         );
 
-        for x in (0..=SCREEN_W).step_by(120) {
+        let step = (screen_w / 16).max(80) as usize;
+
+        for x in (0..=screen_w).step_by(step) {
             let top = to_screen(x, 0);
-            let bottom = to_screen(x, SCREEN_H);
+            let bottom = to_screen(x, screen_h);
             painter.line_segment([top, bottom], egui::Stroke::new(1.0, SURFACE));
         }
 
-        for y in (0..=SCREEN_H).step_by(120) {
+        for y in (0..=screen_h).step_by(step) {
             let left = to_screen(0, y);
-            let right = to_screen(SCREEN_W, y);
+            let right = to_screen(screen_w, y);
             painter.line_segment([left, right], egui::Stroke::new(1.0, SURFACE));
         }
 
-        let bars = view::free_bounds(&self.config, &self.text, snapshot, None);
+        // Mientras se arrastra, los rectángulos solo cambian de posición. Reutilizarlos evita
+        // volver a maquetar todas las placas en cada frame; al soltar se recalculan. Cuando no
+        // se arrastra, la caché solo se invalida si cambia la configuración o la lectura.
+        let cache_matches = !self.editor_bounds.is_empty()
+            && self.editor_bounds_config == self.config
+            && self.editor_bounds_at == self.status.checked_at
+            && self.editor_bounds_screen == Some(screen);
+        let bars = if (self.drag_bar.is_some() || cache_matches) && !self.editor_bounds.is_empty() {
+            self.editor_bounds.clone()
+        } else {
+            let bars = view::free_bounds(&self.config, &self.text, snapshot, None);
+            self.editor_bounds = bars.clone();
+            self.editor_bounds_config = self.config.clone();
+            self.editor_bounds_at = self.status.checked_at;
+            self.editor_bounds_screen = Some(screen);
+            bars
+        };
 
         for bar in &bars {
             let min = to_screen(bar.bounds.x, bar.bounds.y);
@@ -2314,8 +2696,8 @@ impl Hub {
             if let Some(bounds) = bounds {
                 let raw_x = (position.x - rect.min.x) / scale - self.drag_offset.x;
                 let raw_y = (position.y - rect.min.y) / scale - self.drag_offset.y;
-                let x = snap_axis(raw_x, bounds.width, SCREEN_W);
-                let y = snap_axis(raw_y, bounds.height, SCREEN_H);
+                let x = snap_axis(raw_x, bounds.width, screen_w);
+                let y = snap_axis(raw_y, bounds.height, screen_h);
 
                 if let Some(bar) = self
                     .config
@@ -2336,6 +2718,11 @@ impl Hub {
                 }
 
                 self.snap_guide = Some((x, y));
+
+                if let Some(cached) = self.editor_bounds.iter_mut().find(|bar| &bar.id == id) {
+                    cached.bounds.x = x;
+                    cached.bounds.y = y;
+                }
             }
         }
 
@@ -2346,12 +2733,16 @@ impl Hub {
 
         if let Some((x, y)) = self.snap_guide {
             let top = to_screen(x, 0);
-            let bottom = to_screen(x, SCREEN_H);
+            let bottom = to_screen(x, screen_h);
             let left = to_screen(0, y);
-            let right = to_screen(SCREEN_W, y);
+            let right = to_screen(screen_w, y);
 
             painter.line_segment([top, bottom], egui::Stroke::new(1.0, ACCENT));
             painter.line_segment([left, right], egui::Stroke::new(1.0, ACCENT));
+        }
+
+        if self.drag_bar.is_some() {
+            ui.ctx().request_repaint();
         }
     }
 
@@ -2366,6 +2757,13 @@ impl Hub {
             .small()
             .color(MUTED),
         );
+        if self.drag_bar.is_some() {
+            ui.label(
+                egui::RichText::new("Suelta para actualizar la vista previa")
+                    .small()
+                    .color(ACCENT),
+            );
+        }
         ui.add_space(10.0);
 
         let Some(texture) = &self.preview else {
@@ -2427,6 +2825,23 @@ impl eframe::App for Hub {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
+        // El overlay cuenta píxeles físicos; egui da el monitor en puntos lógicos.
+        let monitor = ctx.input(|input| {
+            let viewport = input.viewport();
+            viewport
+                .monitor_size
+                .map(|size| (size, viewport.native_pixels_per_point.unwrap_or(1.0)))
+        });
+
+        if let Some((size, native)) = monitor {
+            let width = (size.x * native).round() as u32;
+            let height = (size.y * native).round() as u32;
+
+            if (640..=16_384).contains(&width) && (360..=16_384).contains(&height) {
+                self.detected_screen = Some((width, height));
+            }
+        }
+
         self.poll_update();
         self.poll_check();
         self.poll_notes();
@@ -2444,7 +2859,15 @@ impl eframe::App for Hub {
             self.save();
         }
 
-        if self.preview_stale {
+        // Arrastrar una placa o un control no debe rehacer el lienzo completo en cada frame:
+        // la vista previa se actualiza al soltar, y los cambios continuos de un control se
+        // agrupan para no competir con el editor.
+        let pointer_down = ctx.input(|input| input.pointer.any_down());
+        let preview_due = self
+            .preview_built_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_millis(120));
+
+        if self.preview_stale && !pointer_down && preview_due {
             self.rebuild_preview(&ctx);
         }
 
@@ -2462,8 +2885,8 @@ impl eframe::App for Hub {
         if self.tab == Tab::Settings {
             egui::Panel::right("preview")
                 .resizable(true)
-                .default_size(400.0)
-                .min_size(280.0)
+                .default_size(360.0)
+                .min_size(240.0)
                 .show_separator_line(false)
                 .frame(
                     egui::Frame::new()
@@ -2482,16 +2905,29 @@ impl eframe::App for Hub {
                     .inner_margin(egui::Margin::same(26)),
             )
             .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| match self.tab {
-                        Tab::News => self.news(ui),
-                        Tab::Diagnostics => self.diagnostics(ui),
-                        Tab::Weapon => self.weapon(ui),
-                        Tab::Settings => self.settings(ui),
-                    });
+                let tab = match self.tab {
+                    Tab::News => "novedades",
+                    Tab::Diagnostics => "diagnostico",
+                    Tab::Weapon => "arma",
+                    Tab::Settings => "ajustes",
+                };
+                let mut scroll = egui::ScrollArea::vertical()
+                    .id_salt(tab)
+                    .auto_shrink([false, false]);
+
+                if std::mem::take(&mut self.scroll_to_top) {
+                    scroll = scroll.vertical_scroll_offset(0.0);
+                }
+
+                scroll.show(ui, |ui| match self.tab {
+                    Tab::News => self.news(ui),
+                    Tab::Diagnostics => self.diagnostics(ui),
+                    Tab::Weapon => self.weapon(ui),
+                    Tab::Settings => self.settings(ui),
+                });
             });
 
+        self.onboarding(&ctx);
         ctx.request_repaint_after(Duration::from_millis(250));
     }
 }
@@ -2638,6 +3074,24 @@ fn release_date(published: &str) -> String {
     date.to_string()
 }
 
+/// Quita el énfasis y el código en línea de una línea de markdown.
+fn clean_inline_markdown(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        match character {
+            '*' if chars.peek() == Some(&'*') => {
+                chars.next();
+            }
+            '*' | '`' => {}
+            other => out.push(other),
+        }
+    }
+
+    out
+}
+
 /// Cuerpo de la release con un markdown mínimo: títulos, viñetas y líneas normales.
 fn release_body(ui: &mut egui::Ui, body: &str) {
     if body.trim().is_empty() {
@@ -2660,11 +3114,16 @@ fn release_body(ui: &mut egui::Ui, body: &str) {
             );
         } else if let Some(title) = line.strip_prefix("## ").or_else(|| line.strip_prefix("# ")) {
             ui.add_space(4.0);
-            ui.label(egui::RichText::new(title).size(15.0).strong().color(TEXT));
+            ui.label(
+                egui::RichText::new(clean_inline_markdown(title))
+                    .size(15.0)
+                    .strong()
+                    .color(TEXT),
+            );
         } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
-            ui.label(format!("  •  {item}"));
+            ui.label(format!("  •  {}", clean_inline_markdown(item)));
         } else {
-            ui.label(line);
+            ui.label(clean_inline_markdown(line));
         }
     }
 }
@@ -3066,6 +3525,10 @@ mod tests {
         assert_eq!(notes.published, "2026-11-20T14:39:43Z");
         assert_eq!(notes.body, "## Cambios\n- Vida");
         assert!(parse_release_notes("sin cabecera").is_none());
+        assert_eq!(
+            clean_inline_markdown("**Novedades** y `--flag`"),
+            "Novedades y --flag"
+        );
     }
 
     #[test]
