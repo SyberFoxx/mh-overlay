@@ -132,6 +132,7 @@ fn monsters() -> Vec<Monster> {
             flinch: None,
             breakable: None,
             severable: Some(Health::new(180.0, 240.0)),
+            health: Some(Health::new(180.0, 240.0)),
             breaks: None,
         },
     ];
@@ -162,6 +163,7 @@ fn part(monster: i32, index: usize, percent: f32) -> Part {
         flinch: None,
         breakable: Some(Health::new(percent, 100.0)),
         severable: None,
+        health: Some(Health::new(percent, 100.0)),
         breaks: Some((1, 2)),
     }
 }

@@ -1696,7 +1696,15 @@ impl Hub {
             ui.add_space(4.0);
             ui.columns(2, |columns| {
                 columns[0].checkbox(&mut self.config.overlay.show_parts, "Mostrar partes");
+                columns[0].checkbox(
+                    &mut self.config.overlay.show_part_health,
+                    "Vida de las partes en números",
+                );
                 columns[0].checkbox(&mut self.config.overlay.show_ailments, "Mostrar estados");
+                columns[1].checkbox(
+                    &mut self.config.overlay.show_health_numbers,
+                    "Vida del monstruo en números",
+                );
                 columns[1].checkbox(
                     &mut self.config.overlay.click_through,
                     "Los clics atraviesan el panel",
@@ -2312,6 +2320,7 @@ fn part(index: usize, name: &'static str, damaged: f32, breakable: bool, severab
         flinch: Some(Health::new(100.0 - damaged, 100.0)),
         breakable: breakable.then(|| Health::new(100.0 - damaged, 100.0)),
         severable: severable.then(|| Health::new(100.0 - damaged, 100.0)),
+        health: Some(Health::new(100.0 - damaged, 100.0)),
         breaks: None,
     }
 }

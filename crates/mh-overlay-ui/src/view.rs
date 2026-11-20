@@ -6,7 +6,7 @@
 
 use mh_overlay_config::{Color, Config, Monsters, StyleSection};
 use mh_overlay_games::{
-    Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
+    Buff, Crown, Health, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
     WeaponDetail, WeaponGauge,
 };
 
@@ -24,8 +24,10 @@ const BASE_WIDTH: f32 = 320.0;
 const RADIUS: f32 = 10.0;
 /// Ancho de la columna de etiquetas dentro de una fila.
 const LABEL_WIDTH: f32 = 86.0;
-/// Ancho reservado a la derecha de cada barra para su valor ("62 %", "2/3", "18 s").
+/// Ancho mínimo reservado a la derecha de cada barra para su valor ("62 %", "2/3", "18 s").
 const VALUE_WIDTH: f32 = 46.0;
+/// Tamaño del texto numérico del título (vida real y aviso de captura).
+const TITLE_VALUE_SIZE: f32 = 12.0;
 /// Alto de la barra de filo, en unidades lógicas.
 const SHARPNESS_BAR: f32 = 8.0;
 /// Lado del icono del arma en la cabecera del jugador.
@@ -48,7 +50,7 @@ const CROWN_GOLD: Color = Color::rgb(0xe6, 0xb4, 0x5e);
 pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<&str>) -> Canvas {
     let geometry = Geometry::new(config.overlay.scale);
     let monsters = visible_monsters(config, snapshot);
-    let width = geometry.width(text, snapshot, &monsters);
+    let width = geometry.width(config, text, snapshot, &monsters);
     let mut canvas = Canvas::new(width, geometry.height(config, text, snapshot, &monsters));
 
     // Borde de un píxel: sobre un juego claro o oscuro, es lo que separa el panel del fondo.
@@ -141,7 +143,11 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                     },
                     recoverable: 0.0,
                     segments: part.breaks.map(|(_, total)| total),
-                    value: part.breaks.map(|(done, total)| format!("{done}/{total}")),
+                    value: if config.overlay.show_part_health {
+                        part.health.map(health_label)
+                    } else {
+                        part.breaks.map(|(done, total)| format!("{done}/{total}"))
+                    },
                 },
             );
 
@@ -228,7 +234,13 @@ impl Geometry {
             + rows as f32 * geometry.row
     }
 
-    fn width(&self, text: &Text, snapshot: &Snapshot, monsters: &[&Monster]) -> u32 {
+    fn width(
+        &self,
+        config: &Config,
+        text: &Text,
+        snapshot: &Snapshot,
+        monsters: &[&Monster],
+    ) -> u32 {
         let name_size = 17.0 * self.scale;
         let percent_size = 14.0 * self.scale;
         let mut logical = BASE_WIDTH;
@@ -241,7 +253,17 @@ impl Geometry {
             } else {
                 CROWN_SLOT
             };
-            logical = logical.max(name + percent + crown + 40.0);
+            let numbers = if config.overlay.show_health_numbers {
+                text.width(&health_label(monster.health), TITLE_VALUE_SIZE * self.scale) + 8.0
+            } else {
+                0.0
+            };
+            let capture = if monster.is_capturable() {
+                text.width("captura", TITLE_VALUE_SIZE * self.scale) + 8.0
+            } else {
+                0.0
+            };
+            logical = logical.max(name + percent + crown + numbers + capture + 40.0);
         }
 
         if let Some(hunt) = snapshot.hunt {
@@ -261,7 +283,7 @@ impl Geometry {
         snapshot: &Snapshot,
         monsters: &[&Monster],
     ) -> u32 {
-        let inner = self.width(text, snapshot, monsters) as f32 - self.padding * 2.0;
+        let inner = self.width(config, text, snapshot, monsters) as f32 - self.padding * 2.0;
         let session = session_height(text, snapshot, self, inner, &config.style);
 
         if monsters.is_empty() {
@@ -362,6 +384,12 @@ fn percent_label(monster: &Monster) -> String {
     format!("{:.1}%", monster.health.percent())
 }
 
+/// Vida real en enteros, sin decimales: el juego guarda floats, pero la pantalla no necesita
+/// su parte fraccionaria.
+fn health_label(health: Health) -> String {
+    format!("{:.0}/{:.0}", health.current, health.max)
+}
+
 /// Nombre a la izquierda, porcentaje (y aviso de captura) a la derecha.
 fn draw_title(
     canvas: &mut Canvas,
@@ -403,11 +431,15 @@ fn draw_title(
     let percent = percent_label(monster);
     let percent_width = text.width(&percent, percent_size);
     let right = canvas.width() as f32 - geometry.padding;
+    let percent_left = right - percent_width;
+    let value_size = TITLE_VALUE_SIZE * geometry.scale;
+    let gap = 8.0 * geometry.scale;
+    let mut column = percent_left;
 
     text.draw(
         canvas,
         &percent,
-        right - percent_width,
+        percent_left,
         y + text.ascent(percent_size),
         percent_size,
         if monster.health.percent() <= style.low_health_percent {
@@ -419,14 +451,27 @@ fn draw_title(
 
     if monster.is_capturable() {
         let label = "captura";
-        let label_size = 12.0 * geometry.scale;
+        column -= gap + text.width(label, value_size);
         text.draw(
             canvas,
             label,
-            right - percent_width - 8.0 * geometry.scale - text.width(label, label_size),
-            y + text.ascent(label_size),
-            label_size,
+            column,
+            y + text.ascent(value_size),
+            value_size,
             style.capture,
+        );
+    }
+
+    if config.overlay.show_health_numbers {
+        let numbers = health_label(monster.health);
+        column -= gap + text.width(&numbers, value_size);
+        text.draw(
+            canvas,
+            &numbers,
+            column,
+            y + text.ascent(value_size),
+            value_size,
+            style.muted,
         );
     }
 
@@ -1587,11 +1632,15 @@ fn draw_row(
         style.muted,
     );
 
+    let value = row
+        .value
+        .unwrap_or_else(|| format!("{:.0}%", fraction * 100.0));
+    let value_width = text.width(&value, size).max(VALUE_WIDTH * geometry.scale);
     let bar_height = geometry.track.max(3.0);
     let bar = Rect::new(
         geometry.padding as i32 + (LABEL_WIDTH * geometry.scale) as i32,
         (y + geometry.row * 0.5 - bar_height * 0.5).round() as i32,
-        (inner - LABEL_WIDTH * geometry.scale - VALUE_WIDTH * geometry.scale).max(1.0) as u32,
+        (inner - LABEL_WIDTH * geometry.scale - value_width).max(1.0) as u32,
         bar_height as u32,
     );
     let radius = bar.height as f32 / 2.0;
@@ -1637,9 +1686,6 @@ fn draw_row(
         }
     }
 
-    let value = row
-        .value
-        .unwrap_or_else(|| format!("{:.0}%", fraction * 100.0));
     text.draw(
         canvas,
         &value,
@@ -1803,6 +1849,49 @@ mod tests {
     }
 
     #[test]
+    fn the_title_grows_to_fit_the_raw_health() {
+        let (mut config, text) = config();
+        let mut named = Monster::new(101, Health::new(12_345.0, 23_456.0));
+        named.name = Some("Un nombre de monstruo bastante largo para forzar el ancho".to_string());
+        let snapshot = Snapshot::of(vec![named]);
+        let plain = render(&config, &text, &snapshot, None);
+
+        config.overlay.show_health_numbers = true;
+        let numbered = render(&config, &text, &snapshot, None);
+
+        assert!(numbered.width() > plain.width());
+    }
+
+    #[test]
+    fn raw_part_health_replaces_the_break_counter() {
+        let (mut config, text) = config();
+        let mut detailed = monster(60.0);
+        detailed.parts.push(Part {
+            index: 1,
+            name: Some("cola"),
+            flinch: None,
+            breakable: Some(Health::new(75.0, 100.0)),
+            severable: None,
+            health: Some(Health::new(1_500.0, 2_000.0)),
+            breaks: Some((1, 2)),
+        });
+        let snapshot = Snapshot::of(vec![detailed]);
+        let counter = render(&config, &text, &snapshot, None);
+
+        config.overlay.show_part_health = true;
+        let numbers = render(&config, &text, &snapshot, None);
+
+        assert_eq!(counter.width(), numbers.width());
+        let changed = counter
+            .pixels()
+            .iter()
+            .zip(numbers.pixels())
+            .filter(|(left, right)| left != right)
+            .count();
+        assert!(changed > 0, "la vida de la parte no cambió ningún píxel");
+    }
+
+    #[test]
     fn the_content_fits_inside_the_panel() {
         let (config, text) = config();
         let mut detailed = monster(60.0);
@@ -1814,6 +1903,7 @@ mod tests {
                 flinch: None,
                 breakable: Some(Health::new(40.0, 100.0)),
                 severable: None,
+                health: Some(Health::new(40.0, 100.0)),
                 breaks: Some((1, 2)),
             });
         }
@@ -2108,6 +2198,7 @@ mod tests {
             flinch: None,
             breakable: Some(Health::new(40.0, 100.0)),
             severable: None,
+            health: Some(Health::new(40.0, 100.0)),
             breaks: Some((1, 2)),
         });
         detailed.ailments.push(Ailment {

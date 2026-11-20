@@ -800,12 +800,21 @@ impl<'map> Rise<'map> {
                 continue;
             }
 
+            let flinch_health = self.current_component(flinch[index], encoded, max_flinch);
+            let breakable_health = self.current_component(breakable[index], encoded, max_breakable);
+            let severable_health = self.current_component(severable[index], encoded, max_severable);
+
+            // La vida de la parte es la del componente que rompe (el que enseña HunterPie);
+            // si esa parte no se rompe, vale la de corte y, en último caso, la de flinch.
+            let health = breakable_health.or(severable_health).or(flinch_health);
+
             parts.push(Part {
                 index,
                 name: crate::tables::rise_part_name(id, index),
-                flinch: self.current_component(flinch[index], encoded, max_flinch),
-                breakable: self.current_component(breakable[index], encoded, max_breakable),
-                severable: self.current_component(severable[index], encoded, max_severable),
+                flinch: flinch_health,
+                breakable: breakable_health,
+                severable: severable_health,
+                health,
                 breaks: None,
             });
         }

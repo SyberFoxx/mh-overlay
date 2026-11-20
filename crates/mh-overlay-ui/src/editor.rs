@@ -30,13 +30,15 @@ pub enum Field {
     MaxMonsters,
     Interval,
     ShowParts,
+    ShowPartHealth,
     ShowAilments,
+    ShowHealthNumbers,
     ClickThrough,
     HideOnEmpty,
 }
 
 impl Field {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 13] = [
         Self::Position,
         Self::MarginX,
         Self::MarginY,
@@ -45,7 +47,9 @@ impl Field {
         Self::MaxMonsters,
         Self::Interval,
         Self::ShowParts,
+        Self::ShowPartHealth,
         Self::ShowAilments,
+        Self::ShowHealthNumbers,
         Self::ClickThrough,
         Self::HideOnEmpty,
     ];
@@ -60,7 +64,9 @@ impl Field {
             Self::MaxMonsters => "monstruos a la vez",
             Self::Interval => "refresco",
             Self::ShowParts => "mostrar partes",
+            Self::ShowPartHealth => "vida de partes en números",
             Self::ShowAilments => "mostrar estados",
+            Self::ShowHealthNumbers => "vida del monstruo en números",
             Self::ClickThrough => "clics atraviesan",
             Self::HideOnEmpty => "ocultar sin monstruos",
         }
@@ -69,7 +75,12 @@ impl Field {
     fn is_toggle(self) -> bool {
         matches!(
             self,
-            Self::ShowParts | Self::ShowAilments | Self::ClickThrough | Self::HideOnEmpty
+            Self::ShowParts
+                | Self::ShowPartHealth
+                | Self::ShowAilments
+                | Self::ShowHealthNumbers
+                | Self::ClickThrough
+                | Self::HideOnEmpty
         )
     }
 }
@@ -251,16 +262,21 @@ impl Editor {
             Field::Monsters => self.config.overlay.monsters.label().to_string(),
             Field::MaxMonsters => format!("{}", self.config.overlay.max_monsters),
             Field::Interval => format!("{} ms", self.config.game.interval_ms),
-            Field::ShowParts | Field::ShowAilments | Field::ClickThrough | Field::HideOnEmpty => {
-                String::new()
-            }
+            Field::ShowParts
+            | Field::ShowPartHealth
+            | Field::ShowAilments
+            | Field::ShowHealthNumbers
+            | Field::ClickThrough
+            | Field::HideOnEmpty => String::new(),
         }
     }
 
     fn toggle_value(&self, field: Field) -> bool {
         match field {
             Field::ShowParts => self.config.overlay.show_parts,
+            Field::ShowPartHealth => self.config.overlay.show_part_health,
             Field::ShowAilments => self.config.overlay.show_ailments,
+            Field::ShowHealthNumbers => self.config.overlay.show_health_numbers,
             Field::ClickThrough => self.config.overlay.click_through,
             Field::HideOnEmpty => self.config.overlay.hide_on_empty,
             _ => false,
@@ -374,7 +390,9 @@ impl Editor {
             }
             Field::Interval => unreachable!("el refresco se atiende antes"),
             Field::ShowParts => overlay.show_parts = !overlay.show_parts,
+            Field::ShowPartHealth => overlay.show_part_health = !overlay.show_part_health,
             Field::ShowAilments => overlay.show_ailments = !overlay.show_ailments,
+            Field::ShowHealthNumbers => overlay.show_health_numbers = !overlay.show_health_numbers,
             Field::ClickThrough => overlay.click_through = !overlay.click_through,
             Field::HideOnEmpty => overlay.hide_on_empty = !overlay.hide_on_empty,
         }

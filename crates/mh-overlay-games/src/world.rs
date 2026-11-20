@@ -1197,6 +1197,7 @@ impl<'map> World<'map> {
                     flinch: Some(health),
                     breakable: Some(breakable),
                     severable: None,
+                    health: Some(health),
                     breaks: Some(breaks),
                 });
             }
@@ -1227,6 +1228,7 @@ impl<'map> World<'map> {
                         flinch: None,
                         breakable: None,
                         severable: Some(health),
+                        health: Some(health),
                         breaks: None,
                     });
 

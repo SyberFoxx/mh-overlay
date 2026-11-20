@@ -48,7 +48,11 @@ monsters = "zone"
 # Monstruos que se muestran a la vez: 1 a 8.
 max_monsters = 4
 show_parts = true
+# Vida real de cada parte (actual/máximo) en vez del contador de rompimientos.
+show_part_health = false
 show_ailments = true
+# Vida real del monstruo (actual/máximo) junto al porcentaje.
+show_health_numbers = false
 # Los clics atraviesan el panel en vez de quedarse en él.
 click_through = true
 # Ocultar el panel cuando no hay monstruos grandes en la zona.
@@ -100,7 +104,11 @@ pub struct OverlaySection {
     pub monsters: Monsters,
     pub max_monsters: usize,
     pub show_parts: bool,
+    /// Mostrar la vida de cada parte en números en vez del contador de rompimientos.
+    pub show_part_health: bool,
     pub show_ailments: bool,
+    /// Mostrar la vida del monstruo en números junto al porcentaje.
+    pub show_health_numbers: bool,
     pub click_through: bool,
     pub hide_on_empty: bool,
 }
@@ -115,7 +123,9 @@ impl Default for OverlaySection {
             monsters: Monsters::Zone,
             max_monsters: 4,
             show_parts: true,
+            show_part_health: false,
             show_ailments: true,
+            show_health_numbers: false,
             click_through: true,
             hide_on_empty: true,
         }

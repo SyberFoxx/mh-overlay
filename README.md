@@ -88,6 +88,8 @@ o [compila desde el código](#compilar-y-usar).
 | Cacería: reloj y vidas del equipo | ✅ escrito | ✅ escrito |
 | Umbral de captura | ✅ escrito | ✅ escrito |
 | Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
+| Vida de las partes en números (opcional) | ✅ escrito | ✅ escrito |
+| Vida del monstruo en números (opcional) | ✅ escrito | ✅ escrito |
 | Nombres de parte | ✅ escrito | ✅ escrito |
 | Estados alterados | ✅ escrito | ✅ escrito |
 | Nombres de monstruo | ✅ escrito | ✅ escrito |
@@ -227,8 +229,11 @@ plateada o dorada, con la misma forma que usa el juego en las notas del cazador.
 `overlay.monsters = "target"` el panel enseña solo el monstruo que el juego marca como
 objetivo —el fijado en el mapa o el de la cacería— en vez de la zona entera. Las partes rompibles llevan
 un hueco por cada rompimiento que aguantan y el contador `1/2` a la derecha (hechos de
-posibles), para saber cuánto falta sin adivinar por el porcentaje de vida; las que el juego no rompe ni corta (cuello,
-brazos, patas) no se muestran, porque solo son barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
+posibles), para saber cuánto falta sin adivinar por el porcentaje de vida. Con
+`overlay.show_part_health` ese contador se cambia por la vida real de la parte (`1500/2000`), y
+con `overlay.show_health_numbers` la vida real del monstruo (`1600/2350`) se suma al porcentaje.
+Las que el juego no rompe ni corta (cuello, brazos, patas) no se muestran, porque solo son
+barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
 si el servidor no la tiene, el panel sale rectangular y sigue funcionando.
 
 El tamaño se deriva del contenido y de `overlay.scale`; la posición, de `overlay.position` y
@@ -400,7 +405,11 @@ scale = 1.0
 monsters = "zone"
 max_monsters = 4
 show_parts = true
+# Vida real de cada parte (actual/máximo) en vez del contador de rompimientos.
+show_part_health = false
 show_ailments = true
+# Vida real del monstruo (actual/máximo) junto al porcentaje.
+show_health_numbers = false
 click_through = true
 hide_on_empty = true
 
@@ -453,8 +462,8 @@ pestaña **Arma** enseña la clase equipada, el detalle del filo, el medidor com
 de combate disponibles: munición y reserva de las ballestas, proyectiles de la lanza pistola,
 notas y melodías de la cornamusa, carga del arco y, en Rise, ataque, afinidad y elemento. La
 pestaña **Ajustes** edita juego, refresco, anclaje, márgenes, escala, qué monstruos se
-enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores y todos los
-colores con un selector de color real, con el panel de ejemplo al
+enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores —incluidos los
+números de vida de partes y monstruo— y todos los colores con un selector de color real, con el panel de ejemplo al
 lado: lo que ves es lo que se dibuja. Los cambios se guardan solos en el TOML en cuanto sueltas
 el control, así que un overlay abierto los aplica en el siguiente refresco.
 
@@ -576,6 +585,13 @@ los huecos; World las identifica por el índice que reporta el juego.
 - **Las partes de World que no se rompen ni se cortan no se muestran**: el juego las deja con la
   vida al máximo y sin contador, y una barra siempre llena solo estorba. Si un monstruo no tiene
   ninguna parte rompible en la tabla, el panel omite la lista de partes.
+- **Algunas colas traen dos entradas en la tabla de World**: una cortable (barra de corte, sin
+  contador) y otra rompible (barra de rompimiento, con `0/1` → `1/1`). Son dos mecánicas del
+  mismo sitio; el panel dibuja una fila por cada una porque el juego las guarda por separado.
+- **El contador de rompimientos cuenta tramos, no vida**: una parte con un solo tramo pasa de
+  `0/1` a `1/1` justo al romperse, y otra con dos tramos pasa por `1/2` antes de `2/2`. Las
+  partes cortables no llevan contador: manda la barra de corte. Lo que se ve como vida en esos
+  números es la vida real de la parte, disponible con `overlay.show_part_health`.
 - **El objetivo del panel depende de lo que exponga el mapa**: Rise solo trae el monstruo
   marcado por la cacería desde el mapa 16.0.1.1 y World solo trae el fijado en el mapa desde la
   build 421652. En los anteriores, `overlay.monsters = "target"` no tiene nada que leer y el
