@@ -107,6 +107,10 @@ struct Arguments {
     /// Comprobar si hay una versión nueva y salir, sin descargar nada
     #[arg(long)]
     check_update: bool,
+
+    /// Imprimir la etiqueta, la fecha y las notas de la última release y salir
+    #[arg(long)]
+    release_notes: bool,
 }
 
 /// Backend pedido en la línea de órdenes.
@@ -167,6 +171,16 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
                 Ok(())
             }
         };
+    }
+
+    if arguments.release_notes {
+        let notes = update::notes()?;
+        println!("tag: {}", notes.tag);
+        println!("version: {}", notes.version);
+        println!("published: {}", notes.published);
+        println!("---");
+        println!("{}", notes.body);
+        return Ok(());
     }
 
     let maps_directory = maps_directory()?;

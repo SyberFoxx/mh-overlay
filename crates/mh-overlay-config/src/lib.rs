@@ -37,6 +37,16 @@ pub const TEMPLATE: &str = r##"# mh-overlay · configuración
 # "monster.0" mueve la vida del monstruo y sus partes juntas. Con direction = "down" las
 # partes van debajo; con "right", a la derecha. Las barras sin entrada usan la columna por
 # defecto, así que se puede empezar sin escribir todas.
+#
+# Para guardar una disposición y reaplicarla desde el hub:
+#
+#   [[overlay.presets]]
+#   name = "Monstruo a la derecha"
+#   [[overlay.presets.bars]]
+#   id = "monster.0"
+#   x = 24
+#   y = 24
+#   direction = "right"
 
 [game]
 # rise o world; se usa si no hay ningún juego abierto o si auto_detect = false.
@@ -141,6 +151,15 @@ pub struct BarPlacement {
     pub direction: Direction,
 }
 
+/// Disposición guardada para volver a aplicarla desde el hub.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutPreset {
+    pub name: String,
+    #[serde(default)]
+    pub bars: Vec<BarPlacement>,
+}
+
 /// Sección `[overlay]`: dónde y cómo se dibuja el panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -164,6 +183,8 @@ pub struct OverlaySection {
     pub layout: Layout,
     /// Posiciones del modo libre; las que falten usan la columna por defecto.
     pub bars: Vec<BarPlacement>,
+    /// Disposiciones guardadas, aplicables desde el hub.
+    pub presets: Vec<LayoutPreset>,
 }
 
 impl Default for OverlaySection {
@@ -183,6 +204,7 @@ impl Default for OverlaySection {
             hide_on_empty: true,
             layout: Layout::Panel,
             bars: Vec::new(),
+            presets: Vec::new(),
         }
     }
 }
@@ -448,6 +470,59 @@ impl Config {
             ));
         }
 
+        let mut preset_names: Vec<&str> = self
+            .overlay
+            .presets
+            .iter()
+            .map(|preset| preset.name.as_str())
+            .collect();
+        preset_names.sort_unstable();
+
+        for preset in &self.overlay.presets {
+            if preset.name.trim().is_empty() {
+                return Err(invalid(
+                    "overlay.presets.name",
+                    "un preset no puede tener el nombre vacío".to_string(),
+                ));
+            }
+
+            for bar in &preset.bars {
+                if bar.id.trim().is_empty() {
+                    return Err(invalid(
+                        "overlay.presets.bars.id",
+                        format!("el preset {} tiene una barra sin id", preset.name),
+                    ));
+                }
+
+                if !(0..=16_384).contains(&bar.x) || !(0..=16_384).contains(&bar.y) {
+                    return Err(invalid(
+                        "overlay.presets.bars.x/y",
+                        format!(
+                            "{} está en ({}, {}), fuera de 0..16384",
+                            bar.id, bar.x, bar.y
+                        ),
+                    ));
+                }
+            }
+
+            let mut ids: Vec<&str> = preset.bars.iter().map(|bar| bar.id.as_str()).collect();
+            ids.sort_unstable();
+
+            if let Some(pair) = ids.windows(2).find(|pair| pair[0] == pair[1]) {
+                return Err(invalid(
+                    "overlay.presets.bars.id",
+                    format!("el preset {} repite la barra {}", preset.name, pair[0]),
+                ));
+            }
+        }
+
+        if let Some(pair) = preset_names.windows(2).find(|pair| pair[0] == pair[1]) {
+            return Err(invalid(
+                "overlay.presets.name",
+                format!("el preset {} está repetido", pair[0]),
+            ));
+        }
+
         if !self.style.low_health_percent.is_finite()
             || !(0.0..=100.0).contains(&self.style.low_health_percent)
         {
@@ -502,6 +577,32 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("player.health"), "{error}");
+    }
+
+    #[test]
+    fn presets_keep_their_bars_and_names() {
+        let config = Config::from_toml(
+            "[overlay]\n[[overlay.presets]]\nname = \"Juego\"\n[[overlay.presets.bars]]\nid = \"monster.0\"\nx = 12\ny = 34\n",
+            "prueba",
+        )
+        .unwrap();
+
+        assert_eq!(config.overlay.presets[0].name, "Juego");
+        assert_eq!(config.overlay.presets[0].bars[0].x, 12);
+    }
+
+    #[test]
+    fn a_repeated_preset_name_is_an_error() {
+        let error = Config::from_toml(
+            "[overlay]\n[[overlay.presets]]\nname = \"Juego\"\nbars = []\n[[overlay.presets]]\nname = \"Juego\"\nbars = []\n",
+            "prueba",
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("overlay.presets.name"),
+            "{error}"
+        );
     }
 
     #[test]

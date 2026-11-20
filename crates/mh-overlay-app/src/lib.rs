@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use mh_overlay_config::{
-    BarPlacement, Color, Config, Direction, Layout, Monsters, OverlaySection, Position,
-    StyleSection,
+    BarPlacement, Color, Config, Direction, Layout, LayoutPreset, Monsters, OverlaySection,
+    Position, StyleSection,
 };
 use mh_overlay_games::{
     Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
@@ -198,9 +198,19 @@ pub fn run(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
+    News,
     Diagnostics,
     Weapon,
     Settings,
+}
+
+/// Notas de la última release, tal como las imprime `--release-notes`.
+#[derive(Debug, Clone, Default)]
+struct ReleaseInfo {
+    tag: String,
+    version: String,
+    published: String,
+    body: String,
 }
 
 /// Último resultado de intentar leer el juego. Se reemplaza entero en cada refresco para no
@@ -275,6 +285,20 @@ struct Hub {
     available: Option<String>,
     /// La actualización ya está instalada y toca reiniciar.
     restart_ready: bool,
+    /// Notas de la última release, para la pestaña Novedades.
+    notes: Option<ReleaseInfo>,
+    notes_error: Option<String>,
+    notes_check: Option<Receiver<Result<ReleaseInfo, String>>>,
+    /// Nombre que se está escribiendo para guardar la disposición actual.
+    preset_name: String,
+    /// Preset elegido en el hub; los primeros son los integrados.
+    preset_selected: Option<usize>,
+    /// Grupo que se está arrastrando en el editor visual.
+    drag_bar: Option<String>,
+    /// Distancia entre el puntero y la esquina de la placa, en píxeles lógicos.
+    drag_offset: egui::Vec2,
+    /// Guías del imán que se dibujan mientras se arrastra.
+    snap_guide: Option<(i32, i32)>,
 }
 
 impl Hub {
@@ -317,11 +341,20 @@ impl Hub {
             check_manual: false,
             available: None,
             restart_ready: false,
+            notes: None,
+            notes_error: None,
+            notes_check: None,
+            preset_name: String::new(),
+            preset_selected: None,
+            drag_bar: None,
+            drag_offset: egui::Vec2::ZERO,
+            snap_guide: None,
         };
 
         hub.tray = Tray::spawn();
         hub.refresh_maps();
         hub.start_check(false);
+        hub.start_notes();
         hub
     }
 
@@ -706,6 +739,7 @@ impl Hub {
         });
 
         ui.add_space(20.0);
+        self.nav_item(ui, Tab::News, "Novedades", "Qué trae la última versión");
         self.nav_item(ui, Tab::Diagnostics, "Diagnóstico", "Conexión y lectura");
         self.nav_item(ui, Tab::Weapon, "Arma", "Filo, medidores y datos");
         self.nav_item(ui, Tab::Settings, "Ajustes", "Panel y colores");
@@ -871,6 +905,74 @@ impl Hub {
 
         self.update = Some(receiver);
         self.update_note = None;
+    }
+
+    /// Pide las notas de la última release para la pestaña Novedades.
+    fn start_notes(&mut self) {
+        if self.notes.is_some() || self.notes_check.is_some() {
+            return;
+        }
+
+        let executable = match std::env::current_exe() {
+            Ok(executable) => executable,
+            Err(error) => {
+                self.notes_error = Some(format!("no se pudo localizar el binario: {error}"));
+                return;
+            }
+        };
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = match Command::new(&executable).arg("--release-notes").output() {
+                Ok(output) if output.status.success() => {
+                    parse_release_notes(&String::from_utf8_lossy(&output.stdout))
+                        .ok_or_else(|| "la release no trae notas legibles".to_string())
+                }
+                Ok(output) => {
+                    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    Err(if error.is_empty() {
+                        "no se pudieron leer las notas de la release".to_string()
+                    } else {
+                        error
+                    })
+                }
+                Err(error) => Err(format!("no se pudo consultar la release: {error}")),
+            };
+            let _ = sender.send(result);
+        });
+
+        self.notes_error = None;
+        self.notes_check = Some(receiver);
+    }
+
+    fn retry_notes(&mut self) {
+        self.notes = None;
+        self.notes_error = None;
+        self.start_notes();
+    }
+
+    fn poll_notes(&mut self) {
+        let Some(receiver) = &self.notes_check else {
+            return;
+        };
+
+        match receiver.try_recv() {
+            Ok(Ok(info)) => {
+                self.notes = Some(info);
+                self.notes_error = None;
+                self.notes_check = None;
+            }
+            Ok(Err(error)) => {
+                self.notes_error = Some(error);
+                self.notes_check = None;
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                self.notes_error =
+                    Some("la consulta de novedades terminó sin respuesta".to_string());
+                self.notes_check = None;
+            }
+        }
     }
 
     /// Pregunta a la última release si hay versión nueva. No descarga nada.
@@ -1081,6 +1183,130 @@ impl Hub {
             self.map_override = choice;
             self.attachment = None;
             self.last_refresh = None;
+        }
+    }
+
+    fn news(&mut self, ui: &mut egui::Ui) {
+        Self::page_header(
+            ui,
+            "Novedades",
+            "Qué cambió en la última release y qué versión tienes instalada.",
+        );
+
+        if self.notes.is_none() && self.notes_error.is_none() && self.notes_check.is_none() {
+            self.start_notes();
+        }
+
+        let installed = VERSION.to_string();
+        let available = self.available.clone();
+        let notes_version = self.notes.as_ref().map(|notes| notes.version.clone());
+
+        card(ui, Some("VERSIÓN"), |ui| {
+            egui::Grid::new("novedades-version")
+                .num_columns(2)
+                .spacing([24.0, 7.0])
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new("Instalada").color(MUTED));
+                    ui.label(egui::RichText::new(format!("v{installed}")).strong());
+                    ui.end_row();
+
+                    ui.label(egui::RichText::new("Última publicada").color(MUTED));
+                    ui.label(
+                        egui::RichText::new(match &notes_version {
+                            Some(version) => format!("v{version}"),
+                            None => "consultando…".to_string(),
+                        })
+                        .strong(),
+                    );
+                    ui.end_row();
+                });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if let Some(version) = &available
+                    && ui
+                        .button(format!("Instalar v{version}"))
+                        .on_hover_text("Descarga y reemplaza esta instalación")
+                        .clicked()
+                {
+                    self.start_update();
+                }
+
+                if ui
+                    .button("Buscar actualización")
+                    .on_hover_text("Consulta la última release sin descargar nada")
+                    .clicked()
+                {
+                    self.start_check(true);
+                }
+            });
+
+            if let Some((ok, message)) = &self.update_note {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(message)
+                        .small()
+                        .color(if *ok { GOOD } else { BAD }),
+                );
+            }
+        });
+
+        if self.notes_check.is_some() {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(egui::RichText::new("leyendo las notas…").color(MUTED));
+            });
+        }
+
+        if let Some(error) = &self.notes_error {
+            alert(
+                ui,
+                BAD,
+                "No se pudieron leer las novedades",
+                &format!("{error}. ¿Hay conexión con GitHub?"),
+            );
+            if ui.button("Reintentar").clicked() {
+                self.retry_notes();
+            }
+        }
+
+        if let Some(notes) = self.notes.clone() {
+            card(ui, Some("ÚLTIMA RELEASE"), |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(&notes.tag)
+                            .size(20.0)
+                            .strong()
+                            .color(ACCENT),
+                    );
+                    if !notes.published.is_empty() {
+                        ui.label(
+                            egui::RichText::new(release_date(&notes.published))
+                                .small()
+                                .color(MUTED),
+                        );
+                    }
+                    ui.hyperlink_to(
+                        "Ver en GitHub",
+                        format!(
+                            "https://github.com/SyberFoxx/mh-overlay/releases/tag/{}",
+                            notes.tag
+                        ),
+                    );
+                });
+                ui.add_space(10.0);
+                release_body(ui, &notes.body);
+            });
+        }
+
+        if let Some(version) = &available {
+            alert(
+                ui,
+                ACCENT,
+                &format!("La versión v{version} está disponible"),
+                "Ábrela desde el botón de arriba o desde la barra lateral; la configuración se conserva.",
+            );
         }
     }
 
@@ -1595,6 +1821,14 @@ impl Hub {
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         let before = self.config.clone();
+        let snapshot = if self.status.snapshot.player.is_some()
+            || self.status.snapshot.hunt.is_some()
+            || !self.status.snapshot.monsters.is_empty()
+        {
+            self.status.snapshot.clone()
+        } else {
+            sample()
+        };
 
         Self::page_header(
             ui,
@@ -1761,6 +1995,19 @@ impl Hub {
         });
 
         if self.config.overlay.layout == Layout::Free {
+            card(ui, Some("EDITOR VISUAL"), |ui| {
+                ui.label(
+                    egui::RichText::new(
+                        "Arrastra una placa. Se imanta a la rejilla de 10 px, al centro y a los \
+                         bordes de la pantalla; monster.N mueve vida, partes y estados juntos.",
+                    )
+                    .small()
+                    .color(MUTED),
+                );
+                ui.add_space(6.0);
+                self.visual_editor(ui, &snapshot);
+            });
+
             card(ui, Some("BARRAS SUELTAS"), |ui| {
                 ui.label(
                     egui::RichText::new(
@@ -1839,6 +2086,72 @@ impl Hub {
                     self.config.overlay.bars.remove(position);
                 }
             });
+
+            card(ui, Some("PRESETS"), |ui| {
+                let mut presets = builtin_presets();
+                let builtin = presets.len();
+                presets.extend(self.config.overlay.presets.clone());
+                let mut selected = self
+                    .preset_selected
+                    .unwrap_or(0)
+                    .min(presets.len().saturating_sub(1));
+
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("preset")
+                        .width(220.0)
+                        .selected_text(presets[selected].name.as_str())
+                        .show_ui(ui, |ui| {
+                            for (index, preset) in presets.iter().enumerate() {
+                                ui.selectable_value(&mut selected, index, preset.name.as_str());
+                            }
+                        });
+
+                    if ui.button("Aplicar").clicked() {
+                        self.config.overlay.layout = Layout::Free;
+                        self.config.overlay.bars = presets[selected].bars.clone();
+                    }
+
+                    if selected >= builtin && ui.button("Eliminar").clicked() {
+                        self.config.overlay.presets.remove(selected - builtin);
+                        selected = 0;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.preset_name)
+                            .hint_text("nombre del preset")
+                            .desired_width(180.0),
+                    );
+
+                    if ui.button("Guardar actual").clicked() {
+                        let name = self.preset_name.trim().to_string();
+
+                        if !name.is_empty() {
+                            let preset = LayoutPreset {
+                                name: name.clone(),
+                                bars: self.config.overlay.bars.clone(),
+                            };
+
+                            if let Some(existing) = self
+                                .config
+                                .overlay
+                                .presets
+                                .iter_mut()
+                                .find(|preset| preset.name == name)
+                            {
+                                *existing = preset;
+                            } else {
+                                self.config.overlay.presets.push(preset);
+                            }
+
+                            self.preset_name.clear();
+                        }
+                    }
+                });
+
+                self.preset_selected = Some(selected);
+            });
         }
 
         card(ui, Some("ESTILO"), |ui| {
@@ -1903,6 +2216,143 @@ impl Hub {
                 );
             }
         });
+    }
+
+    fn visual_editor(&mut self, ui: &mut egui::Ui, snapshot: &Snapshot) {
+        const SCREEN_W: i32 = 1920;
+        const SCREEN_H: i32 = 1080;
+
+        let width = ui.available_width().clamp(280.0, 920.0);
+        let scale = width / SCREEN_W as f32;
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(SCREEN_W as f32 * scale, SCREEN_H as f32 * scale),
+            egui::Sense::click_and_drag(),
+        );
+        let painter = ui.painter_at(rect);
+        let to_screen = |x: i32, y: i32| rect.min + egui::vec2(x as f32 * scale, y as f32 * scale);
+
+        painter.rect_filled(rect, 6.0, BG);
+        painter.rect_stroke(
+            rect,
+            6.0,
+            egui::Stroke::new(1.0, SURFACE),
+            egui::StrokeKind::Inside,
+        );
+
+        for x in (0..=SCREEN_W).step_by(120) {
+            let top = to_screen(x, 0);
+            let bottom = to_screen(x, SCREEN_H);
+            painter.line_segment([top, bottom], egui::Stroke::new(1.0, SURFACE));
+        }
+
+        for y in (0..=SCREEN_H).step_by(120) {
+            let left = to_screen(0, y);
+            let right = to_screen(SCREEN_W, y);
+            painter.line_segment([left, right], egui::Stroke::new(1.0, SURFACE));
+        }
+
+        let bars = view::free_bounds(&self.config, &self.text, snapshot, None);
+
+        for bar in &bars {
+            let min = to_screen(bar.bounds.x, bar.bounds.y);
+            let max = to_screen(
+                bar.bounds.x + bar.bounds.width as i32,
+                bar.bounds.y + bar.bounds.height as i32,
+            );
+            let plate = egui::Rect::from_min_max(min, max);
+            let selected = self.drag_bar.as_deref() == Some(bar.id.as_str());
+            let color = if selected { ACCENT } else { TEXT };
+
+            painter.rect_filled(plate, 4.0, color.gamma_multiply(0.18));
+            painter.rect_stroke(
+                plate,
+                4.0,
+                egui::Stroke::new(if selected { 1.5 } else { 1.0 }, color),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                plate.min + egui::vec2(4.0, 3.0),
+                egui::Align2::LEFT_TOP,
+                &bar.id,
+                egui::FontId::proportional(10.0),
+                color,
+            );
+        }
+
+        let pointer = response.interact_pointer_pos();
+
+        if response.drag_started()
+            && let Some(position) = pointer
+        {
+            self.drag_bar = bars
+                .iter()
+                .rev()
+                .find(|bar| {
+                    let min = to_screen(bar.bounds.x, bar.bounds.y);
+                    let max = to_screen(
+                        bar.bounds.x + bar.bounds.width as i32,
+                        bar.bounds.y + bar.bounds.height as i32,
+                    );
+                    egui::Rect::from_min_max(min, max).contains(position)
+                })
+                .map(|bar| bar.id.clone());
+
+            self.drag_offset = self
+                .drag_bar
+                .as_ref()
+                .and_then(|id| {
+                    bars.iter()
+                        .find(|bar| &bar.id == id)
+                        .map(|bar| (position - to_screen(bar.bounds.x, bar.bounds.y)) / scale)
+                })
+                .unwrap_or_default();
+        }
+
+        if let (Some(id), Some(position), true) = (&self.drag_bar, pointer, response.dragged()) {
+            let bounds = bars.iter().find(|bar| &bar.id == id).map(|bar| bar.bounds);
+
+            if let Some(bounds) = bounds {
+                let raw_x = (position.x - rect.min.x) / scale - self.drag_offset.x;
+                let raw_y = (position.y - rect.min.y) / scale - self.drag_offset.y;
+                let x = snap_axis(raw_x, bounds.width, SCREEN_W);
+                let y = snap_axis(raw_y, bounds.height, SCREEN_H);
+
+                if let Some(bar) = self
+                    .config
+                    .overlay
+                    .bars
+                    .iter_mut()
+                    .find(|bar| &bar.id == id)
+                {
+                    bar.x = x;
+                    bar.y = y;
+                } else {
+                    self.config.overlay.bars.push(BarPlacement {
+                        id: id.clone(),
+                        x,
+                        y,
+                        direction: Direction::Down,
+                    });
+                }
+
+                self.snap_guide = Some((x, y));
+            }
+        }
+
+        if response.drag_stopped() {
+            self.drag_bar = None;
+            self.snap_guide = None;
+        }
+
+        if let Some((x, y)) = self.snap_guide {
+            let top = to_screen(x, 0);
+            let bottom = to_screen(x, SCREEN_H);
+            let left = to_screen(0, y);
+            let right = to_screen(SCREEN_W, y);
+
+            painter.line_segment([top, bottom], egui::Stroke::new(1.0, ACCENT));
+            painter.line_segment([left, right], egui::Stroke::new(1.0, ACCENT));
+        }
     }
 
     fn preview(&mut self, ui: &mut egui::Ui) {
@@ -1979,6 +2429,7 @@ impl eframe::App for Hub {
 
         self.poll_update();
         self.poll_check();
+        self.poll_notes();
         self.poll_access();
 
         if self.last_refresh.is_none_or(|last| {
@@ -2034,6 +2485,7 @@ impl eframe::App for Hub {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| match self.tab {
+                        Tab::News => self.news(ui),
                         Tab::Diagnostics => self.diagnostics(ui),
                         Tab::Weapon => self.weapon(ui),
                         Tab::Settings => self.settings(ui),
@@ -2179,6 +2631,60 @@ fn close_hides_window(has_tray: bool, overlay_running: bool) -> bool {
     has_tray && overlay_running
 }
 
+/// Convierte `2026-11-20T14:39:43Z` en algo legible sin añadir una dependencia de fechas.
+fn release_date(published: &str) -> String {
+    let date = published.get(..10).unwrap_or(published);
+
+    date.to_string()
+}
+
+/// Cuerpo de la release con un markdown mínimo: títulos, viñetas y líneas normales.
+fn release_body(ui: &mut egui::Ui, body: &str) {
+    if body.trim().is_empty() {
+        ui.label(egui::RichText::new("La release no trae notas.").color(MUTED));
+        return;
+    }
+
+    for line in body.lines() {
+        let line = line.trim();
+
+        if line.is_empty() {
+            ui.add_space(5.0);
+        } else if let Some(title) = line.strip_prefix("### ") {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(title.to_uppercase())
+                    .size(12.0)
+                    .strong()
+                    .color(ACCENT),
+            );
+        } else if let Some(title) = line.strip_prefix("## ").or_else(|| line.strip_prefix("# ")) {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(title).size(15.0).strong().color(TEXT));
+        } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            ui.label(format!("  •  {item}"));
+        } else {
+            ui.label(line);
+        }
+    }
+}
+
+fn parse_release_notes(output: &str) -> Option<ReleaseInfo> {
+    let (head, body) = output.split_once("\n---\n")?;
+    let field = |name: &str| {
+        head.lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(|value| value.trim().to_string())
+    };
+
+    Some(ReleaseInfo {
+        tag: field("tag:")?,
+        version: field("version:")?,
+        published: field("published:").unwrap_or_default(),
+        body: body.trim_end().to_string(),
+    })
+}
+
 /// Extrae la versión de la salida de `--check-update`; `None` si ya es la última.
 fn parse_available(output: &str) -> Option<String> {
     output
@@ -2306,6 +2812,59 @@ fn gauge_summary(gauge: &WeaponGauge) -> Vec<(&'static str, String)> {
             ("Kinsecto", format!("{stamina:.0}/{max_stamina:.0}")),
         ],
     }
+}
+
+/// Ajusta una coordenada a la rejilla de 10 px, al centro o a los bordes si está cerca.
+fn snap_axis(value: f32, extent: u32, screen: i32) -> i32 {
+    let max = (screen - extent as i32).max(0);
+    let grid = (value / 10.0).round() * 10.0;
+    let candidates = [0.0, max as f32 / 2.0, max as f32, grid];
+    let snapped = candidates
+        .into_iter()
+        .min_by(|a, b| (value - a).abs().total_cmp(&(value - b).abs()))
+        .unwrap_or(grid);
+    let result = if (value - snapped).abs() <= 12.0 {
+        snapped
+    } else {
+        grid
+    };
+
+    result.round().clamp(0.0, max as f32) as i32
+}
+
+/// Disposiciones que vienen con el hub; no se guardan en el TOML hasta que se aplican.
+fn builtin_presets() -> Vec<LayoutPreset> {
+    let bar = |id: &str, x: i32, y: i32, direction| BarPlacement {
+        id: id.to_string(),
+        x,
+        y,
+        direction,
+    };
+
+    vec![
+        LayoutPreset {
+            name: "Compacto".to_string(),
+            bars: vec![
+                bar("hunt", 24, 24, Direction::Down),
+                bar("monster.0", 360, 24, Direction::Down),
+                bar("weapon", 24, 610, Direction::Down),
+                bar("player.health", 24, 770, Direction::Down),
+                bar("player.stamina", 24, 810, Direction::Down),
+                bar("buffs", 24, 860, Direction::Down),
+            ],
+        },
+        LayoutPreset {
+            name: "Monstruo a la derecha".to_string(),
+            bars: vec![
+                bar("hunt", 700, 24, Direction::Down),
+                bar("monster.0", 24, 24, Direction::Right),
+                bar("weapon", 24, 610, Direction::Down),
+                bar("player.health", 24, 770, Direction::Down),
+                bar("player.stamina", 24, 810, Direction::Down),
+                bar("buffs", 24, 860, Direction::Down),
+            ],
+        },
+    ]
 }
 
 /// Barras fijas que el hub puede colocar sin editar el TOML a mano.
@@ -2493,6 +3052,20 @@ mod tests {
         );
         assert_eq!(parse_available("sin actualizaciones: 0.1.0\n"), None);
         assert_eq!(parse_available(""), None);
+    }
+
+    #[test]
+    fn release_notes_are_split_from_their_header() {
+        let notes = parse_release_notes(
+            "tag: v0.3.0\nversion: 0.3.0\npublished: 2026-11-20T14:39:43Z\n---\n## Cambios\n- Vida\n",
+        )
+        .unwrap();
+
+        assert_eq!(notes.tag, "v0.3.0");
+        assert_eq!(notes.version, "0.3.0");
+        assert_eq!(notes.published, "2026-11-20T14:39:43Z");
+        assert_eq!(notes.body, "## Cambios\n- Vida");
+        assert!(parse_release_notes("sin cabecera").is_none());
     }
 
     #[test]

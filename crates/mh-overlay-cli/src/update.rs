@@ -91,6 +91,15 @@ impl Install {
     }
 }
 
+/// Datos de la última release que el hub enseña en Novedades.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseNotes {
+    pub tag: String,
+    pub version: String,
+    pub published: String,
+    pub body: String,
+}
+
 /// Etiqueta y versión de la última release publicada.
 fn latest() -> Result<(String, String), UpdateError> {
     let metadata = curl_text(&endpoint(API_OVERRIDE, API))?;
@@ -98,6 +107,20 @@ fn latest() -> Result<(String, String), UpdateError> {
     let version = tag.trim_start_matches('v').to_string();
 
     Ok((tag, version))
+}
+
+/// Lee la etiqueta, la fecha y el cuerpo de la última release.
+pub fn notes() -> Result<ReleaseNotes, UpdateError> {
+    let metadata = curl_text(&endpoint(API_OVERRIDE, API))?;
+    let tag = json_string(&metadata, "tag_name").ok_or(UpdateError::NoReleases)?;
+    let version = tag.trim_start_matches('v').to_string();
+
+    Ok(ReleaseNotes {
+        tag,
+        version,
+        published: json_string(&metadata, "published_at").unwrap_or_default(),
+        body: json_string(&metadata, "body").unwrap_or_default(),
+    })
 }
 
 /// Versión publicada más nueva que esta, sin descargar nada.
@@ -194,13 +217,45 @@ fn endpoint(variable: &str, default: &str) -> String {
 
 /// Extrae `"tag_name": "v1.2.3"` del JSON de la API sin añadir un analizador.
 fn parse_tag(json: &str) -> Option<String> {
-    let key = "\"tag_name\"";
-    let rest = &json[json.find(key)? + key.len()..];
-    let rest = rest.strip_prefix(':')?.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
+    json_string(json, "tag_name")
+}
 
-    Some(rest[..end].to_string())
+/// Campo de texto de un objeto JSON; deshace los escapes que usa la API en el cuerpo.
+fn json_string(json: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let rest = &json[json.find(&needle)? + needle.len()..];
+    let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let mut chars = rest.chars();
+    let mut out = String::new();
+
+    while let Some(character) = chars.next() {
+        match character {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                '/' => out.push('/'),
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'b' => out.push('\u{0008}'),
+                'f' => out.push('\u{000c}'),
+                'u' => {
+                    let mut hex = String::new();
+                    for _ in 0..4 {
+                        hex.push(chars.next()?);
+                    }
+                    let code = u32::from_str_radix(&hex, 16).ok()?;
+                    out.push(char::from_u32(code)?);
+                }
+                _ => return None,
+            },
+            other => out.push(other),
+        }
+    }
+
+    None
 }
 
 /// Compara versiones `x.y.z` numéricamente; el sufijo de una etiqueta no cuenta.
@@ -411,6 +466,18 @@ mod tests {
             Some("v0.2.0".to_string())
         );
         assert_eq!(parse_tag(r#"{"message": "Not Found"}"#), None);
+    }
+
+    #[test]
+    fn release_notes_unescape_the_json_body() {
+        let json = r#"{"tag_name":"v0.2.0","published_at":"2026-11-20T14:39:43Z","body":"Cambios\n- Vida\n- Cola"}"#;
+        let notes = json_string(json, "body").unwrap();
+
+        assert_eq!(notes, "Cambios\n- Vida\n- Cola");
+        assert_eq!(
+            json_string(json, "published_at").unwrap(),
+            "2026-11-20T14:39:43Z"
+        );
     }
 
     #[test]

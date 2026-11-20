@@ -193,6 +193,22 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
     canvas
 }
 
+/// Rectángulo de una placa dentro de la pantalla lógica del editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BarBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Placa del modo libre y el grupo al que pertenece (`monster.0` incluye sus partes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlacedBar {
+    pub id: String,
+    pub bounds: BarBounds,
+}
+
 /// Dibuja el modo libre: una placa por barra sobre un lienzo transparente.
 ///
 /// Las posiciones salen de `[[overlay.bars]]`; lo que no esté configurado se apila en una
@@ -206,16 +222,74 @@ pub fn render_free(
     status: Option<&str>,
     screen: (u32, u32),
 ) -> Canvas {
+    let mut canvas = Canvas::transparent(screen.0.max(1), screen.1.max(1));
+
+    free_plates(config, text, snapshot, status, |_, plate, x, y| {
+        canvas.composite(plate, x, y);
+    });
+
+    canvas
+}
+
+/// Rectángulos que ocupan las placas en una pantalla de 1920×1080.
+///
+/// Sirve al editor visual: cada entrada es un grupo arrastrable (`monster.0` abarca la vida
+/// y las partes), no una placa suelta.
+pub fn free_bounds(
+    config: &Config,
+    text: &Text,
+    snapshot: &Snapshot,
+    status: Option<&str>,
+) -> Vec<PlacedBar> {
+    let mut bars: Vec<PlacedBar> = Vec::new();
+
+    free_plates(config, text, snapshot, status, |id, plate, x, y| {
+        let right = x + plate.width() as i32;
+        let bottom = y + plate.height() as i32;
+
+        if let Some(existing) = bars.iter_mut().find(|bar| bar.id == id) {
+            let left = existing.bounds.x.min(x);
+            let top = existing.bounds.y.min(y);
+            existing.bounds = BarBounds {
+                x: left,
+                y: top,
+                width: (existing.bounds.x + existing.bounds.width as i32).max(right) as u32
+                    - left as u32,
+                height: (existing.bounds.y + existing.bounds.height as i32).max(bottom) as u32
+                    - top as u32,
+            };
+        } else {
+            bars.push(PlacedBar {
+                id: id.to_string(),
+                bounds: BarBounds {
+                    x,
+                    y,
+                    width: plate.width(),
+                    height: plate.height(),
+                },
+            });
+        }
+    });
+
+    bars
+}
+
+fn free_plates(
+    config: &Config,
+    text: &Text,
+    snapshot: &Snapshot,
+    status: Option<&str>,
+    mut place: impl FnMut(&str, &Canvas, i32, i32),
+) {
     let geometry = Geometry::new(config.overlay.scale);
     let monsters = visible_monsters(config, snapshot);
-    let mut canvas = Canvas::transparent(screen.0.max(1), screen.1.max(1));
     let gap = (4.0 * geometry.scale).round() as i32;
     let mut cursor = (config.overlay.margin_x, config.overlay.margin_y);
 
     if let Some(hunt) = snapshot.hunt {
         let plate = hunt_plate(config, text, &geometry, &hunt);
         let origin = bar_origin(config, "hunt").unwrap_or(cursor);
-        canvas.composite(&plate, origin.0, origin.1);
+        place("hunt", &plate, origin.0, origin.1);
         cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
     }
 
@@ -241,7 +315,7 @@ pub fn render_free(
             },
         );
         let origin = bar_origin(config, "player.health").unwrap_or(cursor);
-        canvas.composite(&health, origin.0, origin.1);
+        place("player.health", &health, origin.0, origin.1);
         cursor.1 = cursor.1.max(origin.1 + health.height() as i32 + gap);
 
         let stamina = row_plate(
@@ -258,20 +332,20 @@ pub fn render_free(
             },
         );
         let origin = bar_origin(config, "player.stamina").unwrap_or(cursor);
-        canvas.composite(&stamina, origin.0, origin.1);
+        place("player.stamina", &stamina, origin.0, origin.1);
         cursor.1 = cursor.1.max(origin.1 + stamina.height() as i32 + gap);
 
         if let Some(weapon) = &player.weapon {
             let plate = weapon_plate(config, text, &geometry, weapon);
             let origin = bar_origin(config, "weapon").unwrap_or(cursor);
-            canvas.composite(&plate, origin.0, origin.1);
+            place("weapon", &plate, origin.0, origin.1);
             cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
         }
 
         if !player.buffs.is_empty() {
             let plate = buffs_plate(config, text, &geometry, &player.buffs);
             let origin = bar_origin(config, "buffs").unwrap_or(cursor);
-            canvas.composite(&plate, origin.0, origin.1);
+            place("buffs", &plate, origin.0, origin.1);
             cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
         }
     }
@@ -286,7 +360,7 @@ pub fn render_free(
             .find(|bar| bar.id == id)
             .map_or(Direction::Down, |bar| bar.direction);
         let origin = bar_origin(config, &id).unwrap_or(cursor);
-        canvas.composite(&health, origin.0, origin.1);
+        place(&id, &health, origin.0, origin.1);
 
         let mut part_y = match direction {
             Direction::Down => origin.1 + health.height() as i32 + gap,
@@ -298,12 +372,12 @@ pub fn render_free(
 
         let mut place_part = |plate: &Canvas| match direction {
             Direction::Down => {
-                canvas.composite(plate, origin.0, part_y);
+                place(&id, plate, origin.0, part_y);
                 part_y += plate.height() as i32 + gap;
                 column_height = part_y - origin.1;
             }
             Direction::Right => {
-                canvas.composite(plate, part_x, part_y);
+                place(&id, plate, part_x, part_y);
                 part_y += plate.height() as i32 + gap;
                 column_height = column_height.max(part_y - origin.1);
             }
@@ -344,10 +418,8 @@ pub fn render_free(
     if monsters.is_empty() {
         let plate = status_plate(config, text, &geometry, status);
         let origin = bar_origin(config, "status").unwrap_or(cursor);
-        canvas.composite(&plate, origin.0, origin.1);
+        place("status", &plate, origin.0, origin.1);
     }
-
-    canvas
 }
 
 fn bar_origin(config: &Config, id: &str) -> Option<(i32, i32)> {
