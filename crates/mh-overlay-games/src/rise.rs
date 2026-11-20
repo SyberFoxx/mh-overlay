@@ -10,12 +10,17 @@ use std::sync::Mutex;
 
 use crate::buffs::{RISE_BUFFS, RiseGroup};
 use crate::model::{
-    Ailment, Buff, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
+    Ailment, Buff, Crown, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
     Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 
 /// Monstruos grandes que pueden coexistir en una zona.
 const MAX_MONSTERS: usize = 5;
+
+/// `MHRSizeStructure` dentro del bloque de `MONSTER_CROWN_OFFSETS`: multiplicador de tamaño
+/// sorteado y la corrección que el juego aplica en algunas misiones.
+const MONSTER_SIZE_MULTIPLIER: u64 = 0x24;
+const MONSTER_SIZE_CORRECTION: u64 = 0x28;
 
 /// Estados alterados de Rise, en el orden exacto del array en memoria.
 const AILMENTS: [&str; 17] = [
@@ -654,6 +659,7 @@ impl<'map> Rise<'map> {
         )?;
 
         let pointers = self.memory.read_pointers(list, MAX_MONSTERS)?;
+        let target = self.target();
         let mut monsters = Vec::new();
 
         for pointer in pointers {
@@ -663,7 +669,10 @@ impl<'map> Rise<'map> {
 
             match self.monster(pointer) {
                 // Una vida imposible viene de un desplazamiento desfasado, no de un monstruo.
-                Ok(monster) if monster.health.is_plausible() => monsters.push(monster),
+                Ok(mut monster) if monster.health.is_plausible() => {
+                    monster.target = Some(pointer) == target;
+                    monsters.push(monster);
+                }
                 Ok(_) => continue,
                 // Un monstruo despawnando deja punteros a medio limpiar.
                 Err(MemoryError::NullPointer { .. }) => continue,
@@ -672,6 +681,20 @@ impl<'map> Rise<'map> {
         }
 
         Ok(monsters)
+    }
+
+    /// Dirección del monstruo que el juego marca como objetivo de la cacería.
+    ///
+    /// `QUEST_AUTOMATIC_TARGET` solo está definido en los mapas de 16.0.1.1 en adelante; con
+    /// uno anterior no hay objetivo que leer y el panel enseña la zona entera.
+    fn target(&self) -> Option<u64> {
+        let base = self.map.absolute("QUEST_GUI_ADDRESS").ok()?;
+        let offsets = self.map.offsets("QUEST_AUTOMATIC_TARGET").ok()?;
+
+        self.memory
+            .deref_chain(base, offsets)
+            .ok()
+            .filter(|address| *address != 0)
     }
 
     fn monster(&self, address: u64) -> Result<Monster, MemoryError> {
@@ -683,8 +706,31 @@ impl<'map> Rise<'map> {
         monster.parts = self.parts(address, id).unwrap_or_default();
         monster.ailments = self.ailments(address).unwrap_or_default();
         monster.capture_percent = self.capture_percent(address, health);
+        monster.crown = self.crown(address, id);
 
         Ok(monster)
+    }
+
+    /// Corona según el tamaño sorteado para esta instancia. Los monstruos de talla fija no
+    /// tienen umbrales en la tabla y nunca llevan corona.
+    fn crown(&self, monster: u64, id: i32) -> Crown {
+        let Some(thresholds) = crate::tables::rise_crown_thresholds(id) else {
+            return Crown::None;
+        };
+        let Ok(offsets) = self.map.offsets("MONSTER_CROWN_OFFSETS") else {
+            return Crown::None;
+        };
+        let Ok(size) = self.memory.follow_ptr_chain(monster, offsets) else {
+            return Crown::None;
+        };
+        let (Ok(multiplier), Ok(correction)) = (
+            self.memory.read_f32(size + MONSTER_SIZE_MULTIPLIER),
+            self.memory.read_f32(size + MONSTER_SIZE_CORRECTION),
+        ) else {
+            return Crown::None;
+        };
+
+        Crown::of(multiplier * correction, thresholds)
     }
 
     fn health(&self, monster: u64) -> Result<Health, MemoryError> {

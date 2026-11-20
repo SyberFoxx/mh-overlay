@@ -4,10 +4,10 @@
 //! dominante con la marca del umbral de captura y, debajo, barras finas de partes y estados.
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
-use mh_overlay_config::{Color, Config, StyleSection};
+use mh_overlay_config::{Color, Config, Monsters, StyleSection};
 use mh_overlay_games::{
-    Buff, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon, WeaponDetail,
-    WeaponGauge,
+    Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
+    WeaponDetail, WeaponGauge,
 };
 
 use crate::canvas::{Canvas, Rect};
@@ -38,13 +38,18 @@ const BUFF_COLUMNS: usize = 8;
 const BUFF_TILE: f32 = 32.0;
 /// Baldosas de buff como máximo; el resto se resume en una baldosa "+N".
 const MAX_BUFFS: usize = BUFF_COLUMNS * 2;
+/// Ancho que ocupa la corona en el título, ya con su separación del nombre.
+const CROWN_SLOT: f32 = 20.0;
+/// Plateada y dorada, los dos metales que usa el juego para las coronas grandes.
+const CROWN_SILVER: Color = Color::rgb(0xc9, 0xd3, 0xe0);
+const CROWN_GOLD: Color = Color::rgb(0xe6, 0xb4, 0x5e);
 
 /// Dibuja el panel completo; el tamaño depende de la configuración y del contenido.
 pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<&str>) -> Canvas {
     let geometry = Geometry::new(config.overlay.scale);
-    let monsters = &snapshot.monsters[..snapshot.monsters.len().min(config.overlay.max_monsters)];
-    let width = geometry.width(text, snapshot, monsters);
-    let mut canvas = Canvas::new(width, geometry.height(config, text, snapshot, monsters));
+    let monsters = visible_monsters(config, snapshot);
+    let width = geometry.width(text, snapshot, &monsters);
+    let mut canvas = Canvas::new(width, geometry.height(config, text, snapshot, &monsters));
 
     // Borde de un píxel: sobre un juego claro o oscuro, es lo que separa el panel del fondo.
     canvas.fill_rounded(
@@ -223,7 +228,7 @@ impl Geometry {
             + rows as f32 * geometry.row
     }
 
-    fn width(&self, text: &Text, snapshot: &Snapshot, monsters: &[Monster]) -> u32 {
+    fn width(&self, text: &Text, snapshot: &Snapshot, monsters: &[&Monster]) -> u32 {
         let name_size = 17.0 * self.scale;
         let percent_size = 14.0 * self.scale;
         let mut logical = BASE_WIDTH;
@@ -231,7 +236,12 @@ impl Geometry {
         for monster in monsters {
             let name = text.width(&monster_label(monster), name_size);
             let percent = text.width(&percent_label(monster), percent_size);
-            logical = logical.max(name + percent + 40.0);
+            let crown = if monster.crown == Crown::None {
+                0.0
+            } else {
+                CROWN_SLOT
+            };
+            logical = logical.max(name + percent + crown + 40.0);
         }
 
         if let Some(hunt) = snapshot.hunt {
@@ -249,7 +259,7 @@ impl Geometry {
         config: &Config,
         text: &Text,
         snapshot: &Snapshot,
-        monsters: &[Monster],
+        monsters: &[&Monster],
     ) -> u32 {
         let inner = self.width(text, snapshot, monsters) as f32 - self.padding * 2.0;
         let session = session_height(text, snapshot, self, inner, &config.style);
@@ -277,6 +287,30 @@ impl Geometry {
     fn inner_width(&self, canvas: &Canvas) -> f32 {
         canvas.width() as f32 - self.padding * 2.0
     }
+}
+
+/// Monstruos que entran al panel según el modo de selección.
+///
+/// En modo objetivo, si el juego (o un mapa viejo) no marca ninguno, se cae a la zona entera:
+/// un panel vacío a mitad de cacería es peor que uno lleno.
+fn visible_monsters<'a>(config: &Config, snapshot: &'a Snapshot) -> Vec<&'a Monster> {
+    let all = || snapshot.monsters.iter();
+    let selected = match config.overlay.monsters {
+        Monsters::Zone => all().collect::<Vec<_>>(),
+        Monsters::Target => {
+            let targeted: Vec<_> = all().filter(|monster| monster.target).collect();
+            if targeted.is_empty() {
+                all().collect()
+            } else {
+                targeted
+            }
+        }
+    };
+
+    selected
+        .into_iter()
+        .take(config.overlay.max_monsters)
+        .collect()
 }
 
 fn rows(config: &Config, monster: &Monster) -> usize {
@@ -307,6 +341,16 @@ fn visible_parts(monster: &Monster) -> Vec<&Part> {
         .collect()
 }
 
+/// Lado en unidades lógicas y color de la corona, o `None` si no hay ninguna.
+fn crown_mark(crown: Crown) -> Option<(f32, Color)> {
+    match crown {
+        Crown::None => None,
+        Crown::Mini => Some((11.0, CROWN_SILVER)),
+        Crown::Silver => Some((14.0, CROWN_SILVER)),
+        Crown::Gold => Some((14.0, CROWN_GOLD)),
+    }
+}
+
 fn monster_label(monster: &Monster) -> String {
     match monster.name.as_deref() {
         Some(name) if !name.is_empty() => name.to_string(),
@@ -330,15 +374,31 @@ fn draw_title(
     let style = &config.style;
     let name_size = 17.0 * geometry.scale;
     let percent_size = 14.0 * geometry.scale;
+    let label = monster_label(monster);
 
+    let name_width = text.width(&label, name_size);
     text.draw(
         canvas,
-        &monster_label(monster),
+        &label,
         geometry.padding,
         y + text.ascent(name_size),
         name_size,
         style.text,
     );
+
+    // La corona va pegada al nombre: es un dato de la instancia, no del monstruo en general.
+    if let Some((size, color)) = crown_mark(monster.crown) {
+        let badge = size * geometry.scale;
+        let left = geometry.padding + name_width + 6.0 * geometry.scale;
+        icons::crown(
+            canvas,
+            left,
+            y + (geometry.header - badge) / 2.0,
+            badge,
+            monster.crown == Crown::Mini,
+            color,
+        );
+    }
 
     let percent = percent_label(monster);
     let percent_width = text.width(&percent, percent_size);
@@ -1691,6 +1751,55 @@ mod tests {
         );
 
         assert!(two.height() > one.height());
+    }
+
+    #[test]
+    fn the_target_mode_only_draws_the_monster_the_game_marks() {
+        let (mut config, text) = config();
+        config.overlay.monsters = Monsters::Target;
+
+        let mut marked = monster(60.0);
+        marked.target = true;
+        let selected = render(
+            &config,
+            &text,
+            &Snapshot::of(vec![monster(90.0), marked]),
+            None,
+        );
+        let alone = render(&config, &text, &Snapshot::of(vec![monster(90.0)]), None);
+
+        assert_eq!(selected.height(), alone.height());
+    }
+
+    #[test]
+    fn the_target_mode_falls_back_to_the_zone_without_a_target() {
+        let (mut config, text) = config();
+        config.overlay.monsters = Monsters::Target;
+        let both = vec![monster(80.0), monster(40.0)];
+
+        let fallback = render(&config, &text, &Snapshot::of(both), None);
+        let one = render(&config, &text, &Snapshot::of(vec![monster(80.0)]), None);
+
+        assert!(fallback.height() > one.height());
+    }
+
+    #[test]
+    fn a_crown_draws_a_badge_next_to_the_name() {
+        let (config, text) = config();
+        let plain = render(&config, &text, &Snapshot::of(vec![monster(80.0)]), None);
+        let mut crowned = monster(80.0);
+        crowned.crown = Crown::Gold;
+        let gold = render(&config, &text, &Snapshot::of(vec![crowned]), None);
+
+        assert_eq!(plain.height(), gold.height());
+        assert_eq!(plain.width(), gold.width());
+        let changed = plain
+            .pixels()
+            .iter()
+            .zip(gold.pixels())
+            .filter(|(left, right)| left != right)
+            .count();
+        assert!(changed > 0, "la corona no cambió ningún píxel");
     }
 
     #[test]

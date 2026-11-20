@@ -91,6 +91,8 @@ o [compila desde el código](#compilar-y-usar).
 | Nombres de parte | ✅ escrito | ✅ escrito |
 | Estados alterados | ✅ escrito | ✅ escrito |
 | Nombres de monstruo | ✅ escrito | ✅ escrito |
+| Corona de tamaño (miniatura, plateada, dorada) | ✅ escrito | ✅ escrito |
+| Mostrar solo el monstruo fijado en el mapa | ✅ escrito (16.0.1.1+) | ✅ escrito (421652+) |
 | Overlay gráfico (X11 y Wayland) | ✅ escrito | ✅ escrito |
 | Iconos de las 14 armas y fichas de datos de clase | ✅ escrito | ✅ escrito |
 | Buffs como iconos con temporizador | ✅ escrito | ✅ escrito |
@@ -219,7 +221,11 @@ rojo y las familias (ataque, defensa, vida, aguante, elemento, filo, comida, can
 dibujo y color propios. Por
 monstruo muestra el nombre, la vida en porcentaje, una barra de vida con bisel, marcas cada
 10 % y la marca del umbral de captura, y debajo las barras finas de partes (azul, rompible;
-ámbar, cortable; dorada cuando ya se rompió) y de estados activos. Las partes rompibles llevan
+ámbar, cortable; dorada cuando ya se rompió) y de estados activos. Junto al nombre va la
+corona de talla cuando el ejemplar es excepcional: miniatura (plateada y más pequeña),
+plateada o dorada, con la misma forma que usa el juego en las notas del cazador. Con
+`overlay.monsters = "target"` el panel enseña solo el monstruo que el juego marca como
+objetivo —el fijado en el mapa o el de la cacería— en vez de la zona entera. Las partes rompibles llevan
 un hueco por cada rompimiento que aguantan y el contador `1/2` a la derecha (hechos de
 posibles), para saber cuánto falta sin adivinar por el porcentaje de vida; las que el juego no rompe ni corta (cuello,
 brazos, patas) no se muestran, porque solo son barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
@@ -391,6 +397,7 @@ position = "top-left"
 margin_x = 24
 margin_y = 24
 scale = 1.0
+monsters = "zone"
 max_monsters = 4
 show_parts = true
 show_ailments = true
@@ -445,8 +452,9 @@ con polkit**, sin abrir una terminal. La
 pestaña **Arma** enseña la clase equipada, el detalle del filo, el medidor completo y los datos
 de combate disponibles: munición y reserva de las ballestas, proyectiles de la lanza pistola,
 notas y melodías de la cornamusa, carga del arco y, en Rise, ataque, afinidad y elemento. La
-pestaña **Ajustes** edita juego, refresco, anclaje, márgenes, escala, monstruos a la vez, los
-interruptores y todos los colores con un selector de color real, con el panel de ejemplo al
+pestaña **Ajustes** edita juego, refresco, anclaje, márgenes, escala, qué monstruos se
+enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores y todos los
+colores con un selector de color real, con el panel de ejemplo al
 lado: lo que ves es lo que se dibuja. Los cambios se guardan solos en el TOML en cuanto sueltas
 el control, así que un overlay abierto los aplica en el siguiente refresco.
 
@@ -568,6 +576,15 @@ los huecos; World las identifica por el índice que reporta el juego.
 - **Las partes de World que no se rompen ni se cortan no se muestran**: el juego las deja con la
   vida al máximo y sin contador, y una barra siempre llena solo estorba. Si un monstruo no tiene
   ninguna parte rompible en la tabla, el panel omite la lista de partes.
+- **El objetivo del panel depende de lo que exponga el mapa**: Rise solo trae el monstruo
+  marcado por la cacería desde el mapa 16.0.1.1 y World solo trae el fijado en el mapa desde la
+  build 421652. En los anteriores, `overlay.monsters = "target"` no tiene nada que leer y el
+  panel enseña la zona entera; sin objetivo marcado hace lo mismo, para no quedarse vacío a
+  mitad de cacería.
+- **La corona se calcula con el tamaño de la instancia**: se compara la talla que sorteó el
+  juego con los umbrales de `MonsterData.xml` (los mismos que usa HunterPie), no con las notas
+  del cazador. Un ejemplar con corona no aparece todavía registrado en el juego hasta que
+  completes la cacería, y los monstruos de talla fija nunca llevan corona.
 - **Rise distingue algunos estados solo por un flag**: veneno severo frente a veneno y burbujas
   grandes frente a pequeñas comparten offset, y el panel muestra un único nombre por offset en
   vez de arriesgar la fila equivocada. Las habilidades de armadura que solo se anuncian por

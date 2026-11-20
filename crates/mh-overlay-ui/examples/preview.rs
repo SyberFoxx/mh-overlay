@@ -10,7 +10,7 @@ use std::error::Error;
 
 use mh_overlay_config::Config;
 use mh_overlay_games::{
-    Ailment, Buff, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot,
+    Ailment, Buff, Crown, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel, Snapshot,
     Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 use mh_overlay_ui::editor::Editor;
@@ -118,6 +118,8 @@ fn monsters() -> Vec<Monster> {
     // Los ids son los de World: 1 es Rathalos y 0 Anjanath. Nombres, partes y umbral de
     // captura salen de la tabla, así que la vista previa enseña lo mismo que el juego.
     let mut rathalos = Monster::new(1, Health::new(11_912.0, 17_440.0));
+    rathalos.crown = Crown::Gold;
+    rathalos.target = true;
     rathalos.name = mh_overlay_games::tables::world_monster_name(1).map(str::to_owned);
     rathalos.capture_percent = mh_overlay_games::tables::world_capture_percent(1);
     rathalos.parts = vec![

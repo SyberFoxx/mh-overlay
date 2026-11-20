@@ -15,9 +15,9 @@ use std::str::FromStr;
 use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process};
 
 pub use model::{
-    Ailment, AmmoSlot, BowState, Buff, Extracts, GunlanceState, Health, HornNote, HornSong,
-    HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel, Snapshot,
-    Weapon, WeaponDetail, WeaponGauge, WeaponKind,
+    Ailment, AmmoSlot, BowState, Buff, Crown, CrownThresholds, Extracts, GunlanceState, Health,
+    HornNote, HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness,
+    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 
 /// Juegos con lector implementado.

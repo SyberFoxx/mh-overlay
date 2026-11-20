@@ -14,9 +14,9 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use mh_overlay_config::{Color, Config, OverlaySection, Position, StyleSection};
+use mh_overlay_config::{Color, Config, Monsters, OverlaySection, Position, StyleSection};
 use mh_overlay_games::{
-    Ailment, Buff, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
+    Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
     Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 use mh_overlay_memory::{
@@ -1669,6 +1669,22 @@ impl Hub {
                     );
                     ui.end_row();
 
+                    ui.label(egui::RichText::new("Monstruos").color(MUTED));
+                    egui::ComboBox::from_id_salt("monstruos")
+                        .width(220.0)
+                        .selected_text(self.config.overlay.monsters.label())
+                        .show_ui(ui, |ui| {
+                            for mode in Monsters::ALL {
+                                ui.selectable_value(
+                                    &mut self.config.overlay.monsters,
+                                    mode,
+                                    mode.label(),
+                                )
+                                .on_hover_text(mode.detail());
+                            }
+                        });
+                    ui.end_row();
+
                     ui.label(egui::RichText::new("Monstruos a la vez").color(MUTED));
                     ui.add(egui::Slider::new(
                         &mut self.config.overlay.max_monsters,
@@ -2182,6 +2198,8 @@ fn sample() -> Snapshot {
     let mut rathalos = Monster::new(12, Health::new(1600.0, 2350.0));
     rathalos.name = Some("Rathalos".to_string());
     rathalos.capture_percent = Some(20.0);
+    rathalos.crown = Crown::Gold;
+    rathalos.target = true;
     rathalos.parts = vec![
         part(0, "Cabeza", 0.0, true, true),
         part(1, "Cuello", 0.0, false, false),

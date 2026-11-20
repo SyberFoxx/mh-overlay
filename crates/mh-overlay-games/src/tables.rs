@@ -5,6 +5,8 @@
 //! partes por su posición en el array (igual que `MHRMonster.Parts[i]`); World las
 //! identifica por el índice que reporta el juego (`MHWMonsterPart`).
 
+use crate::model::CrownThresholds;
+
 /// Parte de World: índice del juego, nombre en castellano y cómo se rompe.
 pub struct WorldPart {
     pub index: usize,
@@ -5377,6 +5379,854 @@ const RISE_MONSTERS: &[(i32, &str)] = &[
     (115, "Amatsu"),
 ];
 
+/// Umbrales de corona de World por el id que reporta el juego.
+const WORLD_CROWNS: &[(i32, CrownThresholds)] = &[
+    (
+        0,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        1,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        4,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        7,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        9,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        10,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        11,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        12,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        13,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        14,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        15,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        16,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        17,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        18,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        19,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        20,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        21,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        22,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        23,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        24,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        25,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        26,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        27,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        28,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        29,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        30,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        31,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        32,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        33,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        34,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        35,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        36,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        37,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        38,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        39,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        51,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        61,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        62,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        63,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        64,
+        CrownThresholds {
+            mini: Some(0.99),
+            silver: 1.14,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        65,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        66,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        67,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        68,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        69,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        70,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        71,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        },
+    ),
+    (
+        72,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        73,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        74,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        75,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        76,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        77,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        78,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        79,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        80,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        81,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        87,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        88,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        89,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        90,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        91,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.11,
+            gold: Some(1.18),
+        },
+    ),
+    (
+        92,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.11,
+            gold: Some(1.18),
+        },
+    ),
+    (
+        93,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        94,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        95,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        96,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        97,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        98,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        99,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        100,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+    (
+        101,
+        CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.15,
+            gold: Some(1.23),
+        },
+    ),
+];
+
+/// Umbrales de corona de Rise por `MHRMonster.Id`.
+const RISE_CROWNS: &[(i32, CrownThresholds)] = &[
+    (
+        1,
+        CrownThresholds {
+            mini: Some(0.96),
+            silver: 1.1,
+            gold: Some(1.14),
+        },
+    ),
+    (
+        3,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        4,
+        CrownThresholds {
+            mini: None,
+            silver: 1.09,
+            gold: Some(1.14),
+        },
+    ),
+    (
+        7,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        8,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        9,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        10,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        11,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        19,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        22,
+        CrownThresholds {
+            mini: Some(0.96),
+            silver: 1.03,
+            gold: Some(1.05),
+        },
+    ),
+    (
+        26,
+        CrownThresholds {
+            mini: Some(0.96),
+            silver: 1.1,
+            gold: Some(1.14),
+        },
+    ),
+    (
+        27,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        29,
+        CrownThresholds {
+            mini: None,
+            silver: 1.09,
+            gold: Some(1.14),
+        },
+    ),
+    (
+        30,
+        CrownThresholds {
+            mini: Some(0.765),
+            silver: 0.9775,
+            gold: Some(1.0455),
+        },
+    ),
+    (
+        76,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        77,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        80,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        81,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        82,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        83,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        86,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        87,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        88,
+        CrownThresholds {
+            mini: None,
+            silver: 1.09,
+            gold: Some(1.14),
+        },
+    ),
+    (
+        93,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        95,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        107,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        108,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        109,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.17,
+            gold: None,
+        },
+    ),
+    (
+        110,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        111,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        112,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        113,
+        CrownThresholds {
+            mini: None,
+            silver: 1.11,
+            gold: Some(1.17),
+        },
+    ),
+    (
+        114,
+        CrownThresholds {
+            mini: Some(0.97),
+            silver: 1.15,
+            gold: None,
+        },
+    ),
+];
+
 /// Estados alterados de World por `MHWMonsterAilmentStructure.Id`.
 const WORLD_AILMENTS: &[(i32, &str)] = &[
     (1, "Veneno"),
@@ -5458,6 +6308,22 @@ pub fn world_ailment_name(ailment: i32) -> Option<&'static str> {
     lookup(WORLD_AILMENTS, ailment)
 }
 
+/// Umbrales de corona de World, o `None` si el monstruo no tiene tamaño variable.
+pub fn world_crown_thresholds(monster: i32) -> Option<CrownThresholds> {
+    WORLD_CROWNS
+        .binary_search_by_key(&monster, |entry| entry.0)
+        .ok()
+        .map(|index| WORLD_CROWNS[index].1)
+}
+
+/// Lo mismo para Rise.
+pub fn rise_crown_thresholds(monster: i32) -> Option<CrownThresholds> {
+    RISE_CROWNS
+        .binary_search_by_key(&monster, |entry| entry.0)
+        .ok()
+        .map(|index| RISE_CROWNS[index].1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5514,5 +6380,22 @@ mod tests {
     fn rise_part_names_keep_their_positions() {
         let parts = RISE_PARTS[0].1;
         assert!(parts.iter().flatten().count() > 0);
+    }
+
+    #[test]
+    fn every_crown_table_is_sorted_and_bounded() {
+        assert!(WORLD_CROWNS.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(RISE_CROWNS.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(RISE_CROWNS.iter().all(|(_, crown)| {
+            crown.mini.is_none_or(|mini| mini < crown.silver)
+                && crown.gold.is_none_or(|gold| gold > crown.silver)
+        }));
+    }
+
+    #[test]
+    fn monsters_without_crowns_have_no_thresholds() {
+        assert!(rise_crown_thresholds(0).is_none());
+        assert!(world_crown_thresholds(0).is_some());
+        assert!(rise_crown_thresholds(-1).is_none());
     }
 }

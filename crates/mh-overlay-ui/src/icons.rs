@@ -269,6 +269,26 @@ pub fn weapon(canvas: &mut Canvas, kind: WeaponKind, x: f32, y: f32, size: f32, 
     }
 }
 
+/// Dibuja una corona en un cuadrado de `size` píxeles con origen en `(x, y)`.
+///
+/// `mini` la achica y le baja los picos: la talla mínima se distingue de la grande por la
+/// forma, no solo por el color.
+pub fn crown(canvas: &mut Canvas, x: f32, y: f32, size: f32, mini: bool, color: Color) {
+    let mut pen = Pen::new(canvas, x, y, size, color);
+    let (base, top, middle) = if mini {
+        (19.0, 11.0, 6.0)
+    } else {
+        (18.0, 7.0, 3.0)
+    };
+    let width = if mini { 1.8 } else { 1.6 };
+
+    pen.line(4.0, base, 20.0, base, width + 0.8);
+    for (spike, peak) in [(5.0, top), (12.0, middle), (19.0, top)] {
+        pen.line(spike, base - 1.0, spike, peak, width);
+        pen.diamond(spike, peak - 1.5, if mini { 1.4 } else { 1.8 });
+    }
+}
+
 /// Dibuja el icono de un buff en un cuadrado de `size` píxeles.
 pub fn buff(canvas: &mut Canvas, glyph: BuffGlyph, x: f32, y: f32, size: f32, color: Color) {
     let mut pen = Pen::new(canvas, x, y, size, color);

@@ -4,7 +4,7 @@
 //! puede probar sin servidor gráfico. Cada cambio se escribe en el TOML, que el overlay relee
 //! mientras corre.
 
-use mh_overlay_config::{Color, Config, Position};
+use mh_overlay_config::{Color, Config, Monsters, Position};
 
 use crate::canvas::{Canvas, Rect};
 use crate::text::Text;
@@ -26,6 +26,7 @@ pub enum Field {
     MarginX,
     MarginY,
     Scale,
+    Monsters,
     MaxMonsters,
     Interval,
     ShowParts,
@@ -35,11 +36,12 @@ pub enum Field {
 }
 
 impl Field {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Position,
         Self::MarginX,
         Self::MarginY,
         Self::Scale,
+        Self::Monsters,
         Self::MaxMonsters,
         Self::Interval,
         Self::ShowParts,
@@ -54,6 +56,7 @@ impl Field {
             Self::MarginX => "margen horizontal",
             Self::MarginY => "margen vertical",
             Self::Scale => "escala",
+            Self::Monsters => "monstruos",
             Self::MaxMonsters => "monstruos a la vez",
             Self::Interval => "refresco",
             Self::ShowParts => "mostrar partes",
@@ -245,6 +248,7 @@ impl Editor {
             Field::MarginX => format!("{} px", self.config.overlay.margin_x),
             Field::MarginY => format!("{} px", self.config.overlay.margin_y),
             Field::Scale => format!("{:.2}×", self.config.overlay.scale),
+            Field::Monsters => self.config.overlay.monsters.label().to_string(),
             Field::MaxMonsters => format!("{}", self.config.overlay.max_monsters),
             Field::Interval => format!("{} ms", self.config.game.interval_ms),
             Field::ShowParts | Field::ShowAilments | Field::ClickThrough | Field::HideOnEmpty => {
@@ -353,6 +357,17 @@ impl Editor {
                 let steps = (overlay.scale * 20.0).round() as i32 + delta;
                 overlay.scale = steps.clamp(10, 60) as f32 / 20.0;
             }
+            Field::Monsters => {
+                let order = Monsters::ALL;
+                let current = order
+                    .iter()
+                    .position(|mode| *mode == overlay.monsters)
+                    .unwrap_or(0);
+                let next = (current as i32 + if delta < 0 { order.len() as i32 - 1 } else { 1 })
+                    as usize
+                    % order.len();
+                overlay.monsters = order[next];
+            }
             Field::MaxMonsters => {
                 let value = overlay.max_monsters as i32 + delta;
                 overlay.max_monsters = value.clamp(1, 8) as usize;
@@ -432,6 +447,21 @@ mod tests {
 
         assert!(height > HEADER + Field::ALL.len() as f32 * ROW);
         assert!(height >= HEADER + Field::ALL.len() as f32 * ROW + FOOTER);
+    }
+
+    #[test]
+    fn the_monsters_row_cycles_the_selection_mode() {
+        let mut editor = editor();
+        let index = Field::ALL
+            .iter()
+            .position(|field| *field == Field::Monsters)
+            .unwrap();
+
+        assert!(click_plus(&mut editor, index));
+        assert_eq!(editor.config().overlay.monsters, Monsters::Target);
+
+        assert!(click_plus(&mut editor, index));
+        assert_eq!(editor.config().overlay.monsters, Monsters::Zone);
     }
 
     #[test]

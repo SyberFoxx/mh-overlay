@@ -6,6 +6,7 @@
 //! medias esconde la errata que el usuario acaba de escribir.
 
 mod color;
+mod monsters;
 mod position;
 
 use std::env;
@@ -17,6 +18,7 @@ use mh_overlay_games::{GameKind, GameKindError};
 use serde::{Deserialize, Serialize};
 
 pub use color::Color;
+pub use monsters::Monsters;
 pub use position::Position;
 
 /// Archivo de configuración documentado que se escribe la primera vez.
@@ -40,6 +42,9 @@ margin_x = 24
 margin_y = 24
 # Escala del panel: 0.5 a 3.0.
 scale = 1.0
+# zone: todos los monstruos grandes de la zona; target: solo el que el juego marca como
+# objetivo (fijado en el mapa o de la cacería). Sin objetivo marcado se enseña la zona.
+monsters = "zone"
 # Monstruos que se muestran a la vez: 1 a 8.
 max_monsters = 4
 show_parts = true
@@ -91,6 +96,8 @@ pub struct OverlaySection {
     pub margin_x: i32,
     pub margin_y: i32,
     pub scale: f32,
+    /// Modo de selección: la zona entera o solo el objetivo del juego.
+    pub monsters: Monsters,
     pub max_monsters: usize,
     pub show_parts: bool,
     pub show_ailments: bool,
@@ -105,6 +112,7 @@ impl Default for OverlaySection {
             margin_x: 24,
             margin_y: 24,
             scale: 1.0,
+            monsters: Monsters::Zone,
             max_monsters: 4,
             show_parts: true,
             show_ailments: true,

@@ -11,7 +11,7 @@ use mh_overlay_memory::{AddressMap, Memory, MemoryError};
 
 use crate::buffs::WORLD_BUFFS;
 use crate::model::{
-    Ailment, AmmoSlot, BowState, Buff, Extracts, GunlanceState, Health, HornNote, HornSong,
+    Ailment, AmmoSlot, BowState, Buff, Crown, Extracts, GunlanceState, Health, HornNote, HornSong,
     HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel, Snapshot,
     Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
@@ -33,6 +33,14 @@ const MONSTER_ID: u64 = 0x12280;
 /// desplazamiento devuelve basura y el filtro `em\em` descartaba hasta los Anjanath.
 const MONSTER_MODEL: u64 = 0x7749;
 const MONSTER_MODEL_LENGTH: usize = 64;
+/// Talla de la instancia y modificador de la misión (`MHWMonster.GetMonsterCrownData`).
+const MONSTER_SIZE_MODIFIER: u64 = 0x7730;
+const MONSTER_SIZE_MULTIPLIER: u64 = 0x184;
+/// `MHWMapMonsterSelectionStructure`: referencias que validan la selección del mapa y el
+/// monstruo fijado en ella.
+const MAP_SELECTION_INSECTS: u64 = 0x128;
+const MAP_SELECTION_MONSTER: u64 = 0x148;
+const MAP_SELECTION_RADAR: u64 = 0x160;
 /// Puntero al bloque de partes.
 const MONSTER_PARTS: u64 = 0x1D058;
 /// Puntero a la estructura de vida del monstruo.
@@ -970,6 +978,7 @@ impl<'map> World<'map> {
         )?;
 
         let components = self.memory.read_pointers(list, MAX_COMPONENTS)?;
+        let target = self.target();
         let mut monsters: Vec<Monster> = Vec::new();
         let mut seen: HashSet<u64> = HashSet::new();
 
@@ -1007,12 +1016,53 @@ impl<'map> World<'map> {
                 continue;
             }
 
-            if let Some(monster_state) = self.monster(monster, model) {
+            if let Some(mut monster_state) = self.monster(monster, model) {
+                monster_state.target = Some(monster) == target;
                 monsters.push(monster_state);
             }
         }
 
         Ok(monsters)
+    }
+
+    /// Monstruo fijado en el mapa, o el objetivo que marca la cacería si ya hay uno.
+    ///
+    /// Los mapas anteriores a la build 421652 no traen estas claves; entonces no hay objetivo
+    /// que leer y el panel enseña la zona entera.
+    fn target(&self) -> Option<u64> {
+        self.quest_target().or_else(|| self.map_target())
+    }
+
+    fn quest_target(&self) -> Option<u64> {
+        let base = self.map.absolute("MONSTER_QUEST_TARGET_ADDRESS").ok()?;
+        let offsets = self.map.offsets("MONSTER_QUEST_TARGET_OFFSETS").ok()?;
+
+        self.memory
+            .deref_chain(base, offsets)
+            .ok()
+            .filter(|address| *address != 0)
+    }
+
+    /// El mapa solo cuenta como fijado cuando el juego dibuja el radar y el insecto guía: con
+    /// esas referencias vacías, el monstruo seleccionado es el último recordado, no uno activo.
+    fn map_target(&self) -> Option<u64> {
+        let base = self.map.absolute("MONSTER_MANUAL_TARGET_ADDRESS").ok()?;
+        let offsets = self.map.offsets("MONSTER_MANUAL_TARGET_OFFSETS").ok()?;
+        let selection = self.memory.deref_chain(base, offsets).ok()?;
+
+        let insects = self
+            .memory
+            .read_u64(selection + MAP_SELECTION_INSECTS)
+            .ok()?;
+        let radar = self.memory.read_u64(selection + MAP_SELECTION_RADAR).ok()?;
+        if insects == 0 || radar == 0 {
+            return None;
+        }
+
+        self.memory
+            .read_u64(selection + MAP_SELECTION_MONSTER)
+            .ok()
+            .filter(|address| *address != 0)
     }
 
     fn monster(&self, address: u64, model: String) -> Option<Monster> {
@@ -1034,8 +1084,28 @@ impl<'map> World<'map> {
         monster.capture_percent = crate::tables::world_capture_percent(id);
         monster.parts = self.parts(address, id).unwrap_or_default();
         monster.ailments = self.ailments(address).unwrap_or_default();
+        monster.crown = self.crown(address, id);
 
         Some(monster)
+    }
+
+    /// Corona de tamaño. El juego guarda la talla de la instancia y un modificador que la
+    /// normaliza; se redondea a dos decimales antes de comparar, igual que HunterPie.
+    fn crown(&self, monster: u64, id: i32) -> Crown {
+        let Some(thresholds) = crate::tables::world_crown_thresholds(id) else {
+            return Crown::None;
+        };
+        let Ok(mut modifier) = self.memory.read_f32(monster + MONSTER_SIZE_MODIFIER) else {
+            return Crown::None;
+        };
+        let Ok(multiplier) = self.memory.read_f32(monster + MONSTER_SIZE_MULTIPLIER) else {
+            return Crown::None;
+        };
+        if modifier <= 0.0 || modifier >= 2.0 {
+            modifier = 1.0;
+        }
+
+        Crown::of((multiplier / modifier * 100.0).round() / 100.0, thresholds)
     }
 
     fn health(&self, monster: u64) -> Result<Health, MemoryError> {

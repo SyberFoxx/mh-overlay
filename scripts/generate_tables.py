@@ -59,6 +59,15 @@ def ailment_names(root):
     return strings(root, "./Ailments/Rise/Ailment")
 
 
+def _optional_float(value):
+    """Rise omite el umbral de la corona que ese monstruo no puede alcanzar."""
+    return None if value is None else float(value)
+
+
+def _threshold(value):
+    return "None" if value is None else f"Some({value})"
+
+
 def parse_monsters(path):
     root = ET.parse(path).getroot()
     ailments = [
@@ -77,7 +86,19 @@ def parse_monsters(path):
             )
             for part in monster.findall("./Parts/Part")
         ]
-        monsters.append((int(monster.get("Id")), monster.get("Capture"), parts))
+        crowns = monster.find("./Crowns")
+        size = (
+            None
+            if crowns is None
+            else (
+                _optional_float(crowns.get("Mini")),
+                float(crowns.get("Silver")),
+                _optional_float(crowns.get("Gold")),
+            )
+        )
+        monsters.append(
+            (int(monster.get("Id")), monster.get("Capture"), parts, size)
+        )
 
     return monsters, ailments
 
@@ -115,6 +136,8 @@ def main():
         "//! partes por su posición en el array (igual que `MHRMonster.Parts[i]`); World las",
         "//! identifica por el índice que reporta el juego (`MHWMonsterPart`).",
         "",
+        "use crate::model::CrownThresholds;",
+        "",
         "/// Parte de World: índice del juego, nombre en castellano y cómo se rompe.",
         "pub struct WorldPart {",
         "    pub index: usize,",
@@ -129,14 +152,14 @@ def main():
         "const WORLD_CAPTURE: &[(i32, u8)] = &[",
     ]
 
-    for monster_id, capture, _ in sorted(world, key=lambda entry: entry[0]):
+    for monster_id, capture, _, _ in sorted(world, key=lambda entry: entry[0]):
         if capture is None:
             raise SystemExit(f"World {monster_id} sin atributo Capture")
         lines.append(f"    ({monster_id}, {capture}),")
 
     lines += ["];", "", "const WORLD_PARTS: &[(i32, &[WorldPart])] = &["]
 
-    for monster_id, _, parts_list in sorted(world, key=lambda entry: entry[0]):
+    for monster_id, _, parts_list, _ in sorted(world, key=lambda entry: entry[0]):
         named = [
             (part_id, name, severable, breaks)
             for part_id, key, severable, breaks in sorted(parts_list)
@@ -155,7 +178,7 @@ def main():
 
     lines += ["];", "", "const RISE_PARTS: &[(i32, &[Option<&'static str>])] = &["]
 
-    for monster_id, _, parts_list in sorted(rise, key=lambda entry: entry[0]):
+    for monster_id, _, parts_list, _ in sorted(rise, key=lambda entry: entry[0]):
         lines.append(f"    ({monster_id}, &[")
         for _, key, _, _ in parts_list:
             name = name_of(key, f"Rise {monster_id}")
@@ -179,6 +202,34 @@ def main():
     ]
     for monster_id, name in sorted(rise_names.items()):
         lines.append(f"    ({monster_id}, {rust_str(name)}),")
+
+    lines += [
+        "];",
+        "",
+        "/// Umbrales de corona de World por el id que reporta el juego.",
+        "const WORLD_CROWNS: &[(i32, CrownThresholds)] = &[",
+    ]
+    for monster_id, _, _, size in sorted(world, key=lambda entry: entry[0]):
+        if size is None:
+            continue
+        lines.append(
+            f"    ({monster_id}, CrownThresholds {{ mini: {_threshold(size[0])}, "
+            f"silver: {size[1]}, gold: {_threshold(size[2])} }}),"
+        )
+
+    lines += [
+        "];",
+        "",
+        "/// Umbrales de corona de Rise por `MHRMonster.Id`.",
+        "const RISE_CROWNS: &[(i32, CrownThresholds)] = &[",
+    ]
+    for monster_id, _, _, size in sorted(rise, key=lambda entry: entry[0]):
+        if size is None:
+            continue
+        lines.append(
+            f"    ({monster_id}, CrownThresholds {{ mini: {_threshold(size[0])}, "
+            f"silver: {size[1]}, gold: {_threshold(size[2])} }}),"
+        )
 
     lines += [
         "];",
@@ -253,6 +304,22 @@ def main():
         "    lookup(WORLD_AILMENTS, ailment)",
         "}",
         "",
+        "/// Umbrales de corona de World, o `None` si el monstruo no tiene tamaño variable.",
+        "pub fn world_crown_thresholds(monster: i32) -> Option<CrownThresholds> {",
+        "    WORLD_CROWNS",
+        "        .binary_search_by_key(&monster, |entry| entry.0)",
+        "        .ok()",
+        "        .map(|index| WORLD_CROWNS[index].1)",
+        "}",
+        "",
+        "/// Lo mismo para Rise.",
+        "pub fn rise_crown_thresholds(monster: i32) -> Option<CrownThresholds> {",
+        "    RISE_CROWNS",
+        "        .binary_search_by_key(&monster, |entry| entry.0)",
+        "        .ok()",
+        "        .map(|index| RISE_CROWNS[index].1)",
+        "}",
+        "",
         "#[cfg(test)]",
         "mod tests {",
         "    use super::*;",
@@ -284,7 +351,8 @@ def main():
         "            .collect();",
         "",
         "        assert_eq!(broken, [\"Cabeza\", \"Pecho\", \"Ala izquierda\", \"Ala derecha\"]);",
-        "        assert_eq!(world_parts(101)[1].breaks, [3, 6]);",
+        "        // La cabeza es la primera parte de la tabla y aguanta tres rompimientos.",
+        "        assert_eq!(world_parts(101)[0].breaks, [3, 6]);",
         "        assert!(world_parts(101).iter().all(|part| !part.severable));",
         "    }",
         "",
@@ -308,6 +376,23 @@ def main():
         "    fn rise_part_names_keep_their_positions() {",
         "        let parts = RISE_PARTS[0].1;",
         "        assert!(parts.iter().flatten().count() > 0);",
+        "    }",
+        "",
+        "    #[test]",
+        "    fn every_crown_table_is_sorted_and_bounded() {",
+        "        assert!(WORLD_CROWNS.windows(2).all(|pair| pair[0].0 < pair[1].0));",
+        "        assert!(RISE_CROWNS.windows(2).all(|pair| pair[0].0 < pair[1].0));",
+        "        assert!(RISE_CROWNS.iter().all(|(_, crown)| {",
+        "            crown.mini.is_none_or(|mini| mini < crown.silver)",
+        "                && crown.gold.is_none_or(|gold| gold > crown.silver)",
+        "        }));",
+        "    }",
+        "",
+        "    #[test]",
+        "    fn monsters_without_crowns_have_no_thresholds() {",
+        "        assert!(rise_crown_thresholds(0).is_none());",
+        "        assert!(world_crown_thresholds(0).is_some());",
+        "        assert!(rise_crown_thresholds(-1).is_none());",
         "    }",
         "}",
         "",

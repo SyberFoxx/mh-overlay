@@ -615,9 +615,15 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
             .capture_percent
             .map(|percent| format!("   captura ≤ {percent:.0}%"))
             .unwrap_or_default();
+        let crown = monster
+            .crown
+            .label()
+            .map(|label| format!("   {label}"))
+            .unwrap_or_default();
+        let target = if monster.target { "   objetivo" } else { "" };
 
         output.push_str(&format!(
-            "id {:<4}{name}  HP {:>5.1}%  ({:.0} / {:.0}){capture}\n",
+            "id {:<4}{name}  HP {:>5.1}%  ({:.0} / {:.0}){capture}{crown}{target}\n",
             monster.id,
             monster.health.percent(),
             monster.health.current,

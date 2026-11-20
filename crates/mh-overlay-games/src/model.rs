@@ -74,6 +74,63 @@ impl Ailment {
     }
 }
 
+/// Corona de tamaño que el juego registra para un monstruo.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Crown {
+    /// Tamaño normal: sin corona.
+    #[default]
+    None,
+    /// Corona miniatura.
+    Mini,
+    /// Corona plateada.
+    Silver,
+    /// Corona dorada.
+    Gold,
+}
+
+impl Crown {
+    /// Clasifica un multiplicador de tamaño con los umbrales del monstruo.
+    ///
+    /// Un tamaño justo en el umbral ya cuenta, igual que en HunterPie: `>=` para las coronas
+    /// grandes y `<=` para la miniatura.
+    pub fn of(multiplier: f32, thresholds: CrownThresholds) -> Self {
+        if !multiplier.is_finite() {
+            return Self::None;
+        }
+
+        if thresholds.gold.is_some_and(|gold| multiplier >= gold) {
+            Self::Gold
+        } else if multiplier >= thresholds.silver {
+            Self::Silver
+        } else if thresholds.mini.is_some_and(|mini| multiplier <= mini) {
+            Self::Mini
+        } else {
+            Self::None
+        }
+    }
+
+    /// Etiqueta legible de la corona; `None` cuando no hay ninguna.
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::Mini => Some("corona miniatura"),
+            Self::Silver => Some("corona plateada"),
+            Self::Gold => Some("corona dorada"),
+        }
+    }
+}
+
+/// Umbrales de corona de un monstruo, como multiplicador del tamaño base.
+///
+/// Rise deja sin umbral la corona que ese monstruo no puede alcanzar (por ejemplo, Elder
+/// Dragons sin talla miniatura), así que `mini` y `gold` son opcionales.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrownThresholds {
+    pub mini: Option<f32>,
+    pub silver: f32,
+    pub gold: Option<f32>,
+}
+
 /// Arma equipada, en el orden en que el juego numera los tipos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WeaponKind {
@@ -591,6 +648,10 @@ pub struct Monster {
     pub health: Health,
     /// Porcentaje de vida por debajo del cual se puede capturar.
     pub capture_percent: Option<f32>,
+    /// Corona de tamaño, si el monstruo tiene tamaños variables y este es excepcional.
+    pub crown: Crown,
+    /// El juego marca este monstruo como objetivo (fijado en el mapa o de la cacería).
+    pub target: bool,
     pub parts: Vec<Part>,
     pub ailments: Vec<Ailment>,
 }
@@ -602,6 +663,8 @@ impl Monster {
             name: None,
             health,
             capture_percent: None,
+            crown: Crown::None,
+            target: false,
             parts: Vec::new(),
             ailments: Vec::new(),
         }
@@ -616,6 +679,33 @@ impl Monster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crowns_follow_the_monster_thresholds() {
+        let thresholds = CrownThresholds {
+            mini: Some(0.9),
+            silver: 1.1,
+            gold: Some(1.2),
+        };
+
+        assert_eq!(Crown::of(1.05, thresholds), Crown::None);
+        assert_eq!(Crown::of(1.2, thresholds), Crown::Gold);
+        assert_eq!(Crown::of(1.1, thresholds), Crown::Silver);
+        assert_eq!(Crown::of(0.9, thresholds), Crown::Mini);
+    }
+
+    #[test]
+    fn a_monster_without_a_gold_threshold_never_shows_one() {
+        let thresholds = CrownThresholds {
+            mini: None,
+            silver: 1.17,
+            gold: None,
+        };
+
+        assert_eq!(Crown::of(2.0, thresholds), Crown::Silver);
+        assert_eq!(Crown::of(0.5, thresholds), Crown::None);
+        assert_eq!(Crown::of(f32::NAN, thresholds), Crown::None);
+    }
 
     #[test]
     fn percent_is_zero_without_max_health() {
