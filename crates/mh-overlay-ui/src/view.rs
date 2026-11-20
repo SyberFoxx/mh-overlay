@@ -30,6 +30,8 @@ const VALUE_WIDTH: f32 = 46.0;
 const TITLE_VALUE_SIZE: f32 = 12.0;
 /// Alto de la barra de filo, en unidades lógicas.
 const SHARPNESS_BAR: f32 = 8.0;
+/// Alto del medidor de espíritu dibujado como espada, en unidades lógicas.
+const SPIRIT_SWORD: f32 = 24.0;
 /// Lado del icono del arma en la cabecera del jugador.
 const WEAPON_ICON: f32 = 22.0;
 /// Fichas de datos del arma por fila; se reparten en varias filas si no caben.
@@ -196,6 +198,7 @@ struct Geometry {
     small: f32,
     divider: f32,
     weapon: f32,
+    spirit: f32,
     icon: f32,
     chip: f32,
     chip_gap: f32,
@@ -216,6 +219,7 @@ impl Geometry {
             small: 5.0 * scale,
             divider: 1.0 * scale,
             weapon: 27.0 * scale,
+            spirit: SPIRIT_SWORD * scale,
             icon: WEAPON_ICON * scale,
             chip: CHIP_HEIGHT * scale,
             chip_gap: 4.0 * scale,
@@ -623,6 +627,10 @@ fn player_height(
             height += SHARPNESS_BAR * geometry.scale + geometry.small;
         }
 
+        if matches!(weapon.gauge, Some(WeaponGauge::Spirit { .. })) {
+            height += geometry.spirit + geometry.small;
+        }
+
         let chips = weapon_chips(weapon, style);
 
         if !chips.is_empty() {
@@ -725,6 +733,11 @@ fn draw_player(
 
     if let Some(weapon) = &player.weapon {
         y = draw_weapon(canvas, config, text, geometry, weapon, y);
+
+        if matches!(weapon.gauge, Some(WeaponGauge::Spirit { .. })) {
+            y = draw_spirit_sword(canvas, config, text, geometry, weapon, y);
+            y += geometry.small;
+        }
 
         let chips = weapon_chips(weapon, style);
 
@@ -864,6 +877,132 @@ fn draw_weapon(
     }
 
     y
+}
+
+/// Medidor de espíritu de la espada larga: una espada horizontal cuya hoja se llena con la
+/// carga y toma el color del nivel (blanco, amarillo o rojo).
+///
+/// La forma importa: un número o una barra genérica obliga a pensar; el color de la hoja se lee
+/// de un vistazo, como el medidor del juego.
+fn draw_spirit_sword(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    weapon: &Weapon,
+    y: f32,
+) -> f32 {
+    let Some(WeaponGauge::Spirit {
+        buildup,
+        level,
+        timer,
+        max_timer,
+        regen,
+    }) = weapon.gauge
+    else {
+        return y;
+    };
+
+    let style = &config.style;
+    let scale = geometry.scale;
+    let size = 11.0 * scale;
+    let color = spirit_color(level);
+    let mut info = format!("Nv {level}");
+
+    if max_timer > 0.0 {
+        info.push_str(&format!(" · {:.0}s", timer.max(0.0)));
+    }
+
+    if regen > 0.0 {
+        info.push_str(&format!(" · +{:.0}s", regen));
+    }
+
+    let right = canvas.width() as f32 - geometry.padding;
+    let info_width = text.width(&info, size);
+    let gap = 10.0 * scale;
+    let x = geometry.padding;
+    let sword_width = (right - info_width - gap - x).clamp(90.0 * scale, 280.0 * scale);
+    let center = y + geometry.spirit * 0.5;
+    let half = 4.0 * scale;
+    let handle_start = x + 3.0 * scale;
+    let guard_x = x + 13.0 * scale;
+    let blade_start = guard_x + 3.0 * scale;
+    let blade_end = x + sword_width;
+    let tip = blade_end - 15.0 * scale;
+
+    // Empuñadura y pomo; el guardia separa la mano de la hoja.
+    canvas.fill_line(
+        (handle_start, center),
+        (guard_x - 2.0 * scale, center),
+        4.0 * scale,
+        style.muted,
+    );
+    canvas.fill_diamond((x + 2.0 * scale, center), 2.6 * scale, style.muted);
+    canvas.fill_line(
+        (guard_x, center - 7.0 * scale),
+        (guard_x, center + 7.0 * scale),
+        2.2 * scale,
+        lighten(color, 0.35),
+    );
+
+    // Hoja apagada primero: la parte sin cargar también tiene forma de espada.
+    canvas.fill_line(
+        (blade_start, center),
+        (tip, center),
+        half * 1.5,
+        lighten(style.panel, 0.12),
+    );
+
+    let fraction = (buildup / 100.0).clamp(0.0, 1.0);
+    let filled_end = blade_start + (blade_end - blade_start) * fraction;
+    let body_end = filled_end.min(tip);
+
+    if fraction > 0.0 {
+        canvas.fill_line((blade_start, center), (body_end, center), half * 1.5, color);
+        canvas.fill_line(
+            (blade_start, center - half * 0.45),
+            (body_end, center - half * 0.45),
+            1.0 * scale,
+            lighten(color, 0.5),
+        );
+    }
+
+    // La punta solo se rellena cuando la carga llega al final de la hoja.
+    if filled_end >= tip {
+        canvas.fill_line(
+            (tip, center - half),
+            (blade_end, center),
+            half * 0.75,
+            color,
+        );
+        canvas.fill_line(
+            (tip, center + half),
+            (blade_end, center),
+            half * 0.75,
+            color,
+        );
+    }
+
+    // Contorno al final: mantiene legible la silueta sobre cualquier relleno.
+    for (from, to) in [
+        ((blade_start, center - half), (tip, center - half)),
+        ((tip, center - half), (blade_end, center)),
+        ((blade_end, center), (tip, center + half)),
+        ((tip, center + half), (blade_start, center + half)),
+    ] {
+        canvas.fill_line(from, to, 1.15 * scale, style.muted);
+    }
+
+    text.draw(
+        canvas,
+        &info,
+        right - info_width,
+        center - text.height(size) * 0.5 + text.ascent(size),
+        size,
+        if level == 0 { style.muted } else { color },
+    );
+
+    y + geometry.spirit
 }
 
 /// Barra de filo con un hueco entre colores y la posición actual marcada.
@@ -1121,52 +1260,8 @@ fn weapon_gauge_chips(weapon: &Weapon, style: &StyleSection) -> Vec<Chip> {
     let timer = style.capture;
 
     match gauge {
-        WeaponGauge::Spirit {
-            buildup,
-            level,
-            timer: time,
-            max_timer,
-            regen,
-        } => {
-            let mut chips = vec![
-                Chip {
-                    glyph: BuffGlyph::Attack,
-                    label: "Espíritu",
-                    value: format!("{buildup:.0}%"),
-                    fraction: Some(buildup / 100.0),
-                    color: spirit_color(*level),
-                },
-                Chip {
-                    glyph: BuffGlyph::Stun,
-                    label: "Nivel",
-                    value: format!("{level}/3"),
-                    fraction: None,
-                    color: spirit_color(*level),
-                },
-            ];
-
-            if *max_timer > 0.0 {
-                chips.push(Chip {
-                    glyph: BuffGlyph::Misc,
-                    label: "Duración",
-                    value: format!("{time:.0}s"),
-                    fraction: None,
-                    color: timer,
-                });
-            }
-
-            if *regen > 0.0 {
-                chips.push(Chip {
-                    glyph: BuffGlyph::Health,
-                    label: "Regen",
-                    value: format!("{regen:.0}s"),
-                    fraction: None,
-                    color: timer,
-                });
-            }
-
-            chips
-        }
+        // La espada se dibuja aparte: no es una ficha, es el medidor entero.
+        WeaponGauge::Spirit { .. } => Vec::new(),
         WeaponGauge::ChargeBlade {
             phials,
             max_phials,
@@ -1587,13 +1682,14 @@ fn buff_time_label(timer: f32) -> String {
     }
 }
 
-/// Color del medidor de espíritu según el nivel cargado.
+/// Color del medidor de espíritu según el nivel cargado: blanco, amarillo y rojo, como el
+/// juego. Sin nivel, la hoja queda apagada.
 fn spirit_color(level: u8) -> Color {
     match level {
         0 => Color::rgb(0x5c, 0x68, 0x7a),
         1 => Color::rgb(0xe8, 0xf0, 0xf8),
-        2 => Color::rgb(0x63, 0xb4, 0xf0),
-        _ => Color::rgb(0xf0, 0xc4, 0x5a),
+        2 => Color::rgb(0xf0, 0xd0, 0x4a),
+        _ => Color::rgb(0xe8, 0x55, 0x4a),
     }
 }
 
@@ -2079,6 +2175,49 @@ mod tests {
         let gauge = render(&config, &text, &preview(&with_gauge), None);
 
         assert!(gauge.height() > plain.height());
+    }
+
+    #[test]
+    fn the_spirit_gauge_draws_the_blade_in_the_level_color() {
+        let (config, text) = config();
+        let player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: Some(Weapon {
+                kind: WeaponKind::Longsword,
+                sharpness: None,
+                gauge: Some(WeaponGauge::Spirit {
+                    buildup: 80.0,
+                    level: 3,
+                    timer: 98.0,
+                    max_timer: 140.0,
+                    regen: 0.0,
+                }),
+                detail: WeaponDetail::default(),
+            }),
+            buffs: Vec::new(),
+        };
+        let canvas = render(&config, &text, &preview(&player), None);
+        let red = canvas
+            .pixels()
+            .iter()
+            .filter(|pixel| {
+                let r = (**pixel >> 16) & 0xff;
+                let g = (**pixel >> 8) & 0xff;
+                let b = **pixel & 0xff;
+                r > 180 && g < 120 && b < 120
+            })
+            .count();
+
+        assert!(red > 20, "la espada de nivel 3 no pintó la hoja de rojo");
+    }
+
+    #[test]
+    fn spirit_levels_use_white_yellow_and_red() {
+        assert_eq!(spirit_color(1), Color::rgb(0xe8, 0xf0, 0xf8));
+        assert_eq!(spirit_color(2), Color::rgb(0xf0, 0xd0, 0x4a));
+        assert_eq!(spirit_color(3), Color::rgb(0xe8, 0x55, 0x4a));
     }
 
     #[test]

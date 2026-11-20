@@ -78,6 +78,7 @@ o [compila desde el código](#compilar-y-usar).
 | Jugador: vida y aguante | ✅ escrito | ✅ escrito |
 | Jugador: arma y filo | ✅ escrito | ✅ escrito |
 | Medidores de clase (espíritu, frascos, hacha, demonio, kinsecto) | ✅ escrito | ✅ escrito |
+| Espíritu como espada, con color por nivel | ✅ escrito | ✅ escrito |
 | Ataque, afinidad y elemento calculados | ✅ escrito | — |
 | Munición de ballestas y reserva | — | ✅ escrito |
 | Proyectiles de la lanza pistola | — | ✅ escrito |
@@ -213,9 +214,10 @@ qué está pasando sin adivinar; la CLI imprime el backend que usa al arrancar. 
 queda de la cacería con las vidas del equipo. Debajo va el jugador: el icono de la clase de arma
 (las 14: espadón, espada y escudo, espadas dobles, espada larga, martillo, cornamusa, lanza,
 lanza pistola, hacha espada, espada cargada, glaive insecto, ballesta ligera, ballesta pesada y
-arco), el nombre, el filo con sus colores y la posición actual, y una fila de **fichas** con los
-datos de la clase (espíritu y nivel, frascos y carga, hojas del hacha, modo demonio, esencias y
-kinsecto). En World las fichas añaden munición cargada y reserva, proyectiles normales y
+arco), el nombre, el filo con sus colores y la posición actual, el **medidor de espíritu** de la
+espada larga dibujado como una espada que se llena y pasa de blanco a amarillo y rojo según el
+nivel, y una fila de **fichas** con los datos de la clase (frascos y carga, hojas del hacha,
+modo demonio, esencias y kinsecto). En World las fichas añaden munición cargada y reserva, proyectiles normales y
 cargados de la lanza pistola, dragón de fuego y estaca, notas en cola de la cornamusa y carga
 del arco. En Rise se añaden ataque, afinidad y elemento calculados por el juego. Cada ficha
 lleva su icono, su valor y una línea fina cuando el dato es una carga. La
