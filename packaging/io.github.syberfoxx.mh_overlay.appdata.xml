@@ -41,6 +41,11 @@
   </screenshots>
 
   <releases>
+    <release version="0.2.0" date="2026-11-20">
+      <description>
+        <p>Barras sueltas con posición propia, medidor de espíritu como espada y vida de partes con umbrales.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-11-19">
       <description>
         <p>Arregla el cierre con Super+Q en Wayland y pule la integración de escritorio.</p>
