@@ -41,6 +41,11 @@
   </screenshots>
 
   <releases>
+    <release version="0.4.0" date="2026-11-20">
+      <description>
+        <p>Guía de primera ejecución, editor visual a la resolución real y arrastre de barras más fluido.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-20">
       <description>
         <p>Pestaña Novedades con las notas de GitHub, editor visual de barras con imán y presets de disposición.</p>

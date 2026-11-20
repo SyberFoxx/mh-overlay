@@ -3,6 +3,25 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.4.0] - 2026-11-20
+
+### Añadido
+
+- Guía de primera ejecución en el hub: elegir o detectar el juego, explicar y conceder el
+  permiso de memoria con polkit, comprobar la conexión y abrir el panel. Se puede saltar y
+  repetir desde **Ajustes → Guía**.
+- El editor visual usa la resolución real del monitor, con ancho y alto manuales cuando la
+  detección de Wayland o de varias pantallas no coincide.
+
+### Cambiado
+
+- Arrastrar una placa ya no reconstruye la vista previa en cada frame: se aplaza hasta soltar
+  el ratón y se reutilizan los rectángulos del editor mientras dura el arrastre.
+- Cada pestaña conserva su propio scroll y vuelve arriba al abrirse; las filas de controles se
+  envuelven en ventanas estrechas y la vista previa ocupa menos.
+- Las notas de **Novedades** ya no muestran los asteriscos ni las comillas invertidas del
+  markdown.
+
 ## [0.3.0] - 2026-11-20
 
 ### Añadido

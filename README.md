@@ -109,6 +109,8 @@ o [compila desde el código](#compilar-y-usar).
 | Editor de ajustes | ✅ probado | ✅ probado |
 | Barras sueltas con posición propia y placas | ✅ escrito | ✅ escrito |
 | Editor visual de barras con imán | ✅ escrito | ✅ escrito |
+| Editor a la resolución real del monitor, con ajuste manual | ✅ escrito | ✅ escrito |
+| Guía de primera ejecución: juego, permiso y panel | ✅ escrito | ✅ escrito |
 | Presets de disposición guardados en el TOML | ✅ escrito | ✅ escrito |
 | Pestaña **Novedades** con notas de la release | ✅ escrito | ✅ escrito |
 | Hub rediseñado con barra lateral y tarjetas | ✅ probado | ✅ probado |
@@ -261,8 +263,8 @@ cargo run -p mh-overlay-ui --example preview
 ### AppImage (recomendado)
 
 ```bash
-chmod +x mh-overlay-0.3.0-linux-x86_64.AppImage
-./mh-overlay-0.3.0-linux-x86_64.AppImage
+chmod +x mh-overlay-0.4.0-linux-x86_64.AppImage
+./mh-overlay-0.4.0-linux-x86_64.AppImage
 ```
 
 Los nombres de archivo de los ejemplos llevan la versión de esta release; si descargas otra,
@@ -277,7 +279,7 @@ lateral con el botón **Instalar actualización**. Al terminar ofrece **Reinicia
 vuelve a abrir el AppImage ya reemplazado. También se puede actualizar a mano con:
 
 ```bash
-./mh-overlay-0.3.0-linux-x86_64.AppImage --update
+./mh-overlay-0.4.0-linux-x86_64.AppImage --update
 ```
 
 Baja la última release, comprueba su SHA-256 y reemplaza **ese mismo archivo** de forma atómica.
@@ -308,13 +310,13 @@ AppStream, el lanzador de menú y un `install.sh` que funciona en cualquier dist
 otra máquina:
 
 ```bash
-tar xzf mh-overlay-0.3.0-linux-x86_64.tar.gz
-cd mh-overlay-0.3.0-linux-x86_64
+tar xzf mh-overlay-0.4.0-linux-x86_64.tar.gz
+cd mh-overlay-0.4.0-linux-x86_64
 ./install.sh --check     # qué hay en el sistema antes de tocar nada
 ./install.sh             # instalación de usuario, sin sudo
 ```
 
-Sustituye `0.3.0` por la versión del tarball que hayas descargado.
+Sustituye `0.4.0` por la versión del tarball que hayas descargado.
 
 La instalación de usuario deja el programa en `$XDG_DATA_HOME/mh-overlay` (por defecto
 `~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador
@@ -359,8 +361,8 @@ El flujo `.github/workflows/release.yml` repite el empaquetado en Ubuntu, ejecut
 como artefacto. Al empujar una etiqueta `v*` también los adjunta a la release de GitHub:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 Sin etiqueta, `workflow_dispatch` sirve para comprobar el empaquetado desde la pestaña Actions.
@@ -450,6 +452,10 @@ hide_on_empty = true
 # y = 24
 # direction = "right"
 
+[hub]
+# El hub enseña la guía de primera ejecución; se marca al terminarla o saltarla.
+onboarding_done = false
+
 [style]
 panel = "#0b0d12e6"
 health = "#7fd47f"
@@ -482,10 +488,11 @@ Los colores no están en el editor: son cinco selectores hexadecimales que se to
 olvidan, y meterlos en la misma ventana sin un selector de color de verdad habría sido peor que
 editarlos en el TOML.
 
-Con **Barras sueltas** el hub añade un editor visual sobre una pantalla esquemática de
-1920×1080: arrastra una placa y se imanta a la rejilla de 10 px, al centro y a los bordes. El
-grupo `monster.N` mueve vida, partes y estados juntos. Debajo queda la tarjeta numérica X/Y
-para ajustar al píxel.
+Con **Barras sueltas** el hub añade un editor visual sobre la resolución real del monitor:
+arrastra una placa y se imanta a la rejilla de 10 px, al centro y a los bordes. Si la detección
+no coincide (Wayland con escala o varias pantallas), el ancho y alto del lienzo se ajustan a
+mano. El grupo `monster.N` mueve vida, partes y estados juntos; debajo queda la tarjeta numérica
+X/Y para ajustar al píxel.
 
 ### Barras sueltas
 
@@ -541,7 +548,7 @@ de la pantalla sigue siendo del juego.
 Desde el hub, **Presets** trae dos disposiciones integradas (compacto y monstruo a la derecha),
 deja guardar la actual con un nombre y eliminarla. Los presets propios viven en
 `[[overlay.presets]]` y se aplican copiando sus posiciones en `[[overlay.bars]]` con
-`layout = "free"`:
+`layout = "free"`.
 
 ### Hub de escritorio
 
@@ -566,7 +573,9 @@ notas y melodías de la cornamusa, carga del arco y, en Rise, ataque, afinidad y
 pestaña **Ajustes** edita juego, refresco, disposición, anclaje, márgenes, escala, qué monstruos
 se enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores —incluidos los
 números de vida de partes y monstruo— y todos los colores con un selector de color real, con el
-panel de ejemplo al lado: lo que ves es lo que se dibuja. Al elegir **Barras sueltas** aparece
+panel de ejemplo al lado: lo que ves es lo que se dibuja. La primera vez que abres el hub
+aparece una **guía de tres pasos** para elegir juego, explicar el permiso de memoria y abrir el
+panel; se puede saltar y volver a ver desde **Ajustes → Guía**. Al elegir **Barras sueltas** aparece
 una tarjeta para colocar cada barra con sus coordenadas X/Y y, en los monstruos, elegir si las
 partes cuelgan hacia abajo o hacia la derecha. Los cambios se guardan solos en el TOML en cuanto sueltas
 el control, así que un overlay abierto los aplica en el siguiente refresco.
@@ -737,8 +746,8 @@ los huecos; World las identifica por el índice que reporta el juego.
 ## Próximos pasos
 
 La lista viva de lo que falta —validar los lectores en juego, probar la actualización real,
-onboarding, diagnóstico exportable— está en [ROADMAP.md](ROADMAP.md), junto con el criterio
-para dar el proyecto por completo.
+diagnóstico exportable— está en [ROADMAP.md](ROADMAP.md), junto con el criterio para dar el
+proyecto por completo.
 
 ## Licencia
 

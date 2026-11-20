@@ -15,19 +15,19 @@ Estado: 20 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 - [ ] Una cacería real en World y otra en Rise con vida, partes, estados, arma y buffs correctos.
 - [ ] Instalación limpia del AppImage y del tarball en una máquina o VM sin el proyecto.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
-- [ ] Actualización real `v0.2.0 → v0.3.0`, reinicio y configuración conservada.
+- [ ] Actualización real `v0.3.0 → v0.4.0`, reinicio y configuración conservada.
 - [ ] 30 minutos de juego sin panics ni lecturas basura, con el diagnóstico limpio.
 - [ ] README y release alineados: misma versión, mismos artefactos y mismas capturas.
 
 ## Ahora
 
-### 1. Probar la actualización real de `v0.3.0`
+### 1. Probar la actualización real de `v0.4.0`
 
-- [x] Subir la versión del workspace a `0.3.0`.
+- [x] Actualización `v0.2.0 → v0.3.0` probada, reinicio y configuración conservada.
+- [x] Subir la versión del workspace a `0.4.0`.
 - [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
-- [x] Workflow `v0.3.0` en 3m25s, con release, notas y cuatro artefactos.
-- [x] Etiquetar, publicar y comprobar los assets y sus checksums.
-- [ ] Abrir el AppImage `v0.2.0`, detectar `v0.3.0`, instalar, reiniciar y verificar que la
+- [ ] Workflow `v0.4.0` y comprobar que publica release, notas y cuatro artefactos.
+- [ ] Abrir el AppImage `v0.3.0`, detectar `v0.4.0`, instalar, reiniciar y verificar que la
       configuración sigue intacta.
 - [ ] Confirmar que la release lleva el README y el banner nuevos, AppStream y los iconos.
 
@@ -62,7 +62,6 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 
 ### Producto
 
-- [ ] Onboarding de primera ejecución: detectar el juego, explicar el permiso y abrir el panel.
 - [ ] Exportar diagnóstico: proceso, mapa, CRC, último error y versión en un solo botón.
 - [ ] Registro a archivo en `$XDG_STATE_HOME/mh-overlay/` para depurar cierres.
 - [ ] Actualización más viva: comprobar periódicamente, saltar una versión y enlazar a las notas.
@@ -98,6 +97,9 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-20 · `v0.4.0`**: guía de primera ejecución, editor visual a la resolución real del
+  monitor, arrastre sin reconstruir la vista previa en cada frame, caché de rectángulos y
+  ajustes responsivos.
 - **2026-11-20 · `v0.3.0`**: pestaña **Novedades** con las notas de GitHub, editor visual de
   barras con imán, presets de disposición, `--release-notes`, `CHANGELOG.md` obligatorio y
   comprobación de etiqueta contra `Cargo.toml` antes de publicar.
