@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado: 19 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
+Estado: 20 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 `mh-overlay` por terminado; el [README](README.md) cuenta lo que ya funciona.
 
 ## Cómo se mantiene
@@ -15,17 +15,18 @@ Estado: 19 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 - [ ] Una cacería real en World y otra en Rise con vida, partes, estados, arma y buffs correctos.
 - [ ] Instalación limpia del AppImage y del tarball en una máquina o VM sin el proyecto.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
-- [ ] Actualización real `v0.1.1 → v0.2.0`, reinicio y configuración conservada.
+- [ ] Actualización real `v0.2.0 → v0.3.0`, reinicio y configuración conservada.
 - [ ] 30 minutos de juego sin panics ni lecturas basura, con el diagnóstico limpio.
 - [ ] README y release alineados: misma versión, mismos artefactos y mismas capturas.
 
 ## Ahora
 
-### 1. Probar la actualización real de `v0.2.0`
+### 1. Probar la actualización real de `v0.3.0`
 
-- [x] Subir la versión del workspace a `0.2.0`.
-- [x] Etiquetar, publicar y comprobar los assets y sus checksums.
-- [ ] Abrir el AppImage `v0.1.1`, detectar `v0.2.0`, instalar, reiniciar y verificar que la
+- [x] Subir la versión del workspace a `0.3.0`.
+- [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
+- [ ] Etiquetar, publicar y comprobar los assets y sus checksums.
+- [ ] Abrir el AppImage `v0.2.0`, detectar `v0.3.0`, instalar, reiniciar y verificar que la
       configuración sigue intacta.
 - [ ] Confirmar que la release lleva el README y el banner nuevos, AppStream y los iconos.
 
@@ -77,7 +78,6 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 
 ### Comunidad
 
-- [ ] `CHANGELOG.md` con una entrada por release.
 - [ ] `CONTRIBUTING.md`, `SECURITY.md` y plantillas de issue/PR.
 
 ### Calidad
@@ -97,6 +97,9 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-20 · `v0.3.0`**: pestaña **Novedades** con las notas de GitHub, editor visual de
+  barras con imán, presets de disposición, `--release-notes`, `CHANGELOG.md` obligatorio y
+  comprobación de etiqueta contra `Cargo.toml` antes de publicar.
 - **2026-11-20 · `v0.2.0`**: medidor de espíritu como espada, barras sueltas con posición
   propia y grupo de monstruo con partes pegadas, umbrales de rompimiento y vida de partes.
 - **2026-11-19 · `v0.1.0`**: AppImage y tarball, checksums, autoactualización en sitio, hub,

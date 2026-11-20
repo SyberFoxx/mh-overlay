@@ -28,6 +28,8 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
   temporizador. Las 14 armas tienen icono propio.
 - **Hub de escritorio** — diagnóstico de la conexión, selección de mapa, vista previa en vivo y
   todos los ajustes con selector de color, sin editar el TOML a mano.
+- **Novedades y disposición** — el hub enseña qué cambió en la última release, deja arrastrar
+  las placas con imán sobre una pantalla esquemática y guardar presets de disposición.
 - **Un solo archivo** — el AppImage se integra en el menú la primera vez y se actualiza solo,
   desde el hub o con `--update`, sin desinstalar ni perder la configuración.
 - **Solo lectura** — el crate de memoria no expone un writer a propósito.
@@ -106,6 +108,9 @@ o [compila desde el código](#compilar-y-usar).
 | Configuración en caliente | ✅ probado | ✅ probado |
 | Editor de ajustes | ✅ probado | ✅ probado |
 | Barras sueltas con posición propia y placas | ✅ escrito | ✅ escrito |
+| Editor visual de barras con imán | ✅ escrito | ✅ escrito |
+| Presets de disposición guardados en el TOML | ✅ escrito | ✅ escrito |
+| Pestaña **Novedades** con notas de la release | ✅ escrito | ✅ escrito |
 | Hub rediseñado con barra lateral y tarjetas | ✅ probado | ✅ probado |
 | AppImage con actualización en sitio | ⚠️ parcial | ⚠️ parcial |
 | Permiso de memoria desde el hub (polkit) | ✅ escrito | ✅ escrito |
@@ -181,6 +186,7 @@ cargo build --release
     --list-maps         muestra los address maps disponibles
     --update            actualizar esta instalación (AppImage o paquete) y salir
     --check-update      comprobar si hay versión nueva y salir, sin descargar nada
+    --release-notes     imprimir las notas de la última release y salir
 ```
 
 Sin argumentos se abre el hub. La salida de consola sigue disponible con `--print` (una
@@ -255,8 +261,8 @@ cargo run -p mh-overlay-ui --example preview
 ### AppImage (recomendado)
 
 ```bash
-chmod +x mh-overlay-0.2.0-linux-x86_64.AppImage
-./mh-overlay-0.2.0-linux-x86_64.AppImage
+chmod +x mh-overlay-0.3.0-linux-x86_64.AppImage
+./mh-overlay-0.3.0-linux-x86_64.AppImage
 ```
 
 Los nombres de archivo de los ejemplos llevan la versión de esta release; si descargas otra,
@@ -271,7 +277,7 @@ lateral con el botón **Instalar actualización**. Al terminar ofrece **Reinicia
 vuelve a abrir el AppImage ya reemplazado. También se puede actualizar a mano con:
 
 ```bash
-./mh-overlay-0.2.0-linux-x86_64.AppImage --update
+./mh-overlay-0.3.0-linux-x86_64.AppImage --update
 ```
 
 Baja la última release, comprueba su SHA-256 y reemplaza **ese mismo archivo** de forma atómica.
@@ -302,13 +308,13 @@ AppStream, el lanzador de menú y un `install.sh` que funciona en cualquier dist
 otra máquina:
 
 ```bash
-tar xzf mh-overlay-0.2.0-linux-x86_64.tar.gz
-cd mh-overlay-0.2.0-linux-x86_64
+tar xzf mh-overlay-0.3.0-linux-x86_64.tar.gz
+cd mh-overlay-0.3.0-linux-x86_64
 ./install.sh --check     # qué hay en el sistema antes de tocar nada
 ./install.sh             # instalación de usuario, sin sudo
 ```
 
-Sustituye `0.2.0` por la versión del tarball que hayas descargado.
+Sustituye `0.3.0` por la versión del tarball que hayas descargado.
 
 La instalación de usuario deja el programa en `$XDG_DATA_HOME/mh-overlay` (por defecto
 `~/.local/share/mh-overlay`), el enlace en `~/.local/bin/mh-overlay`, el lanzador
@@ -353,8 +359,8 @@ El flujo `.github/workflows/release.yml` repite el empaquetado en Ubuntu, ejecut
 como artefacto. Al empujar una etiqueta `v*` también los adjunta a la release de GitHub:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 Sin etiqueta, `workflow_dispatch` sirve para comprobar el empaquetado desde la pestaña Actions.
@@ -370,10 +376,11 @@ si corre desde un AppImage cambia la imagen entera, y si corre desde el paquete 
 y los mapas. No hay que desinstalar nada y la configuración no se toca. El archivo nuevo se
 escribe al lado con otro nombre y se renombra encima, así que una actualización a mitad de
 cacería nunca deja un ejecutable truncado, y un paquete cuyo checksum no coincide se rechaza sin
-tocar lo instalado. El hub consulta la última release al arrancar (solo la etiqueta, sin bajar
-nada), avisa si hay una versión nueva y deja instalarla y reiniciar sin abrir una terminal;
-**Buscar actualización** repite la consulta cuando se pide, y `--check-update` la hace desde la
-consola. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
+tocar lo instalado. El hub consulta la última release al arrancar (la etiqueta y las notas, sin
+bajar el binario), avisa si hay una versión nueva y deja instalarla y reiniciar sin abrir una
+terminal; la pestaña **Novedades** enseña el cuerpo de la release. **Buscar actualización**
+repite la consulta cuando se pide, `--check-update` la hace desde la consola y
+`--release-notes` imprime las notas sin descargar nada. Si el binario tenía `cap_sys_ptrace`, el archivo nuevo la pierde al cambiar
 de inodo: el actualizador intenta restaurarla y, si no tiene permisos, imprime la orden exacta.
 
 Para probar el actualizador o usar un espejo, `MH_OVERLAY_UPDATE_API` y
@@ -433,6 +440,15 @@ hide_on_empty = true
 # x = 24
 # y = 24
 # direction = "down"   # down: partes debajo; right: partes a la derecha
+#
+# Presets que aparecen en el hub para reaplicar una disposición:
+# [[overlay.presets]]
+# name = "Monstruo a la derecha"
+# [[overlay.presets.bars]]
+# id = "monster.0"
+# x = 24
+# y = 24
+# direction = "right"
 
 [style]
 panel = "#0b0d12e6"
@@ -466,6 +482,11 @@ Los colores no están en el editor: son cinco selectores hexadecimales que se to
 olvidan, y meterlos en la misma ventana sin un selector de color de verdad habría sido peor que
 editarlos en el TOML.
 
+Con **Barras sueltas** el hub añade un editor visual sobre una pantalla esquemática de
+1920×1080: arrastra una placa y se imanta a la rejilla de 10 px, al centro y a los bordes. El
+grupo `monster.N` mueve vida, partes y estados juntos. Debajo queda la tarjeta numérica X/Y
+para ajustar al píxel.
+
 ### Barras sueltas
 
 Con `overlay.layout = "free"` el panel desaparece y cada barra pasa a ser una placa con su
@@ -488,6 +509,17 @@ y = 24
 direction = "down"
 ```
 
+```toml
+[[overlay.presets]]
+name = "Monstruo a la derecha"
+
+[[overlay.presets.bars]]
+id = "monster.0"
+x = 24
+y = 24
+direction = "right"
+```
+
 | id | Qué mueve |
 | --- | --- |
 | `hunt` | Reloj y vidas del equipo |
@@ -506,6 +538,11 @@ este modo `position` solo elige dónde empieza esa columna por defecto; no recol
 que ya tienen coordenadas. Con `click_through = false`, solo las placas reciben clics: el resto
 de la pantalla sigue siendo del juego.
 
+Desde el hub, **Presets** trae dos disposiciones integradas (compacto y monstruo a la derecha),
+deja guardar la actual con un nombre y eliminarla. Los presets propios viven en
+`[[overlay.presets]]` y se aplican copiando sus posiciones en `[[overlay.bars]]` con
+`layout = "free"`:
+
 ### Hub de escritorio
 
 ```bash
@@ -514,9 +551,11 @@ mh-overlay --hub    # equivalente explícito
 ```
 
 Una ventana normal pensada para cuando algo no funciona, porque el panel sobre el juego no
-tiene sitio para explicarse. La barra lateral cambia entre **Diagnóstico**, **Arma** y
-**Ajustes**, y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, la comprobación de
-actualizaciones (aviso, **Instalar** y **Reiniciar** cuando toca) y la versión instalada. La pestaña **Diagnóstico** enseña el proceso encontrado,
+tiene sitio para explicarse. La barra lateral cambia entre **Novedades**, **Diagnóstico**,
+**Arma** y **Ajustes**, y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, la
+comprobación de actualizaciones (aviso, **Instalar** y **Reiniciar** cuando toca) y la versión
+instalada. **Novedades** consulta la última release de GitHub, enseña sus notas y permite
+reintentar la consulta o instalar la versión nueva. La pestaña **Diagnóstico** enseña el proceso encontrado,
 la base del módulo, qué `.map` se está usando y si sus CRC coinciden con la build, cuántos
 monstruos, jugador y cacería se leyeron y el último error, refrescándose sola al ritmo
 configurado. Si el error es de permisos, ofrece copiar la orden exacta o **conceder el acceso
@@ -697,9 +736,9 @@ los huecos; World las identifica por el índice que reporta el juego.
 
 ## Próximos pasos
 
-La lista viva de lo que falta —validar los lectores en juego, publicar `v0.2.0` y probar la
-actualización real, onboarding, diagnóstico exportable— está en [ROADMAP.md](ROADMAP.md), junto
-con el criterio para dar el proyecto por completo.
+La lista viva de lo que falta —validar los lectores en juego, probar la actualización real,
+onboarding, diagnóstico exportable— está en [ROADMAP.md](ROADMAP.md), junto con el criterio
+para dar el proyecto por completo.
 
 ## Licencia
 
