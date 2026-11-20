@@ -25,7 +25,8 @@ Estado: 20 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 
 - [x] Subir la versión del workspace a `0.3.0`.
 - [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
-- [ ] Etiquetar, publicar y comprobar los assets y sus checksums.
+- [x] Workflow `v0.3.0` en 3m25s, con release, notas y cuatro artefactos.
+- [x] Etiquetar, publicar y comprobar los assets y sus checksums.
 - [ ] Abrir el AppImage `v0.2.0`, detectar `v0.3.0`, instalar, reiniciar y verificar que la
       configuración sigue intacta.
 - [ ] Confirmar que la release lleva el README y el banner nuevos, AppStream y los iconos.
