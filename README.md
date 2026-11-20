@@ -230,8 +230,9 @@ plateada o dorada, con la misma forma que usa el juego en las notas del cazador.
 objetivo —el fijado en el mapa o el de la cacería— en vez de la zona entera. Las partes rompibles llevan
 un hueco por cada rompimiento que aguantan y el contador `1/2` a la derecha (hechos de
 posibles), para saber cuánto falta sin adivinar por el porcentaje de vida. Con
-`overlay.show_part_health` ese contador se cambia por la vida real de la parte (`1500/2000`), y
-con `overlay.show_health_numbers` la vida real del monstruo (`1600/2350`) se suma al porcentaje.
+`overlay.show_part_health` ese contador y la barra se cambian por la vida real de la parte
+(`1500/2000`), y con `overlay.show_health_numbers` la vida real del monstruo (`1600/2350`) se
+suma al porcentaje.
 Las que el juego no rompe ni corta (cuello, brazos, patas) no se muestran, porque solo son
 barras llenas que confunden. El redondeo de las esquinas y la región de entrada vacía usan la extensión `SHAPE`;
 si el servidor no la tiene, el panel sale rectangular y sigue funcionando.

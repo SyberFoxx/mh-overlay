@@ -133,7 +133,7 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                 y,
                 Row {
                     label: part.name.unwrap_or(&fallback),
-                    fraction: part_fraction(part),
+                    fraction: part_fraction(config, part),
                     color: if broken {
                         config.style.capture
                     } else if part.severable.is_some() {
@@ -1696,7 +1696,15 @@ fn draw_row(
     );
 }
 
-fn part_fraction(part: &Part) -> f32 {
+fn part_fraction(config: &Config, part: &Part) -> f32 {
+    // Con la vida numérica activada, la barra tiene que medir lo mismo que el número; si no,
+    // una parte al 75 % de vida podría pintar un 50 % de progreso de rompimiento.
+    if config.overlay.show_part_health
+        && let Some(health) = part.health
+    {
+        return (health.percent() / 100.0).clamp(0.0, 1.0);
+    }
+
     let health = part.severable.or(part.breakable);
     health.map_or(0.0, |health| (health.percent() / 100.0).clamp(0.0, 1.0))
 }
@@ -1882,6 +1890,7 @@ mod tests {
         let numbers = render(&config, &text, &snapshot, None);
 
         assert_eq!(counter.width(), numbers.width());
+        assert!((part_fraction(&config, &snapshot.monsters[0].parts[0]) - 0.75).abs() < 0.001);
         let changed = counter
             .pixels()
             .iter()
