@@ -328,6 +328,14 @@ pub enum Origin {
     Defaults,
 }
 
+/// Ruta hermana con un sufijo (`config.toml` → `config.toml.bak`), sin perder la extensión.
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".");
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
 /// Lee solo `config_version`, tolerando el resto del archivo. Un TOML sin la clave es esquema 0.
 fn schema_version(text: &str) -> u32 {
     #[derive(Deserialize)]
@@ -469,6 +477,13 @@ impl Config {
                 path: parent.display().to_string(),
                 source,
             })?;
+        }
+
+        // Copia del archivo anterior: los cambios se guardan solos y un valor a medio editar no
+        // tiene deshacer en la interfaz. Si la copia falla se guarda igual: perder la red de
+        // seguridad no es motivo para perder el cambio del usuario.
+        if let Ok(previous) = fs::read(path) {
+            let _ = fs::write(with_suffix(path, "bak"), previous);
         }
 
         let temporary = path.with_extension("toml.tmp");
@@ -924,6 +939,26 @@ mod tests {
         let error = config.validate().unwrap_err();
 
         assert!(error.to_string().contains("hub.window_width"), "{error}");
+    }
+
+    #[test]
+    fn the_previous_configuration_is_kept_as_a_backup() {
+        let directory = std::env::temp_dir().join(format!("mh-backup-{}", std::process::id()));
+        let path = directory.join("config.toml");
+        let backup = directory.join("config.toml.bak");
+        let mut config = Config::default();
+
+        config.save(&path).unwrap();
+        assert!(!backup.exists(), "no había nada que copiar");
+
+        config.overlay.margin_x = 99;
+        config.save(&path).unwrap();
+
+        let previous = fs::read_to_string(&backup).unwrap();
+        assert!(previous.contains("margin_x = 24"), "{previous}");
+        assert!(fs::read_to_string(&path).unwrap().contains("margin_x = 99"));
+
+        fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
