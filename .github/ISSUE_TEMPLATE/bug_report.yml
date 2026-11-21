@@ -1,0 +1,91 @@
+name: Fallo
+description: Algo no funciona como dice el README
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes de nada, `mh-overlay --doctor` reúne sesión, permisos, configuración, mapas,
+        procesos y la ruta del registro. Pega la salida aquí: ahorra casi todas las preguntas.
+
+        Si el problema es de seguridad, no lo pongas aquí: usa el aviso privado que aparece en
+        «Reportar un problema de seguridad».
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: La salida de `mh-overlay --version`
+      placeholder: mh-overlay 0.5.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Cómo está instalado
+      options:
+        - AppImage
+        - Tarball con install.sh
+        - Compilado con cargo
+        - Paquete de la distribución
+    validations:
+      required: true
+
+  - type: dropdown
+    id: session
+    attributes:
+      label: Sesión gráfica
+      options:
+        - Wayland
+        - X11
+        - No lo sé
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: Juego
+      options:
+        - Monster Hunter Rise
+        - Monster Hunter World
+        - Los dos
+        - Ninguno abierto (solo el hub)
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Salida de `mh-overlay --doctor`
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Qué haces y qué pasa
+      description: Los pasos mínimos para llegar al fallo, y lo que ves en su lugar.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Últimas líneas del registro
+      description: >
+        Solo si el hub se cierra solo, se queda en blanco o no arranca. Está en
+        `$XDG_STATE_HOME/mh-overlay/hub.log` (por defecto `~/.local/state/mh-overlay/hub.log`).
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: He mirado los límites conocidos del README.
+          required: true
+        - label: No adjunto volcados de memoria del juego ni mi configuración con rutas personales.
+          required: true

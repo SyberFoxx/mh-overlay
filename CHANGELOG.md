@@ -3,6 +3,23 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [Unreleased]
+
+### Añadido
+
+- Copia de la configuración anterior en `config.toml.bak` cada vez que se guarda, para poder
+  volver atrás después de un cambio a medias.
+- `CONTRIBUTING.md`, `SECURITY.md`, plantillas de issue y PR, y una política de estabilidad que
+  dice qué se congela en 1.0 y qué no.
+- Dependabot para las dependencias de Cargo y las acciones del CI.
+- El runtime del AppImage se fija por etiqueta y SHA-256, como `appimagetool`: dos builds del
+  mismo commit dejan de depender de lo que haya publicado upstream esa semana.
+
+### Corregido
+
+- El tarball y el AppImage incluyen las imágenes que enlaza el README; antes quien abría el
+  README del paquete veía dos imágenes rotas.
+
 ## [0.5.0] - 2026-11-21
 
 ### Añadido

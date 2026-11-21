@@ -791,6 +791,28 @@ los huecos; World las identifica por el índice que reporta el juego.
 - **Online**: leer memoria no modifica el juego, pero ningún método de este tipo tiene garantía
   del publisher. Úsalo bajo tu criterio.
 
+## Estabilidad y versiones
+
+Mientras la versión mayor sea 0, cualquier cosa puede cambiar. A partir de **1.0.0** el proyecto
+se compromete a esto, y solo esto:
+
+- **La configuración.** Un `config.toml` escrito por cualquier 1.x se abre en cualquier 1.x
+  posterior. El archivo lleva `config_version`: un esquema anterior se migra al leerlo y uno de
+  una versión más nueva se rechaza con un mensaje claro, nunca se interpreta a medias.
+- **La línea de órdenes.** Los flags documentados no desaparecen dentro de 1.x sin pasar antes
+  por una versión menor que los marque como obsoletos.
+- **Los nombres de los artefactos.** `mh-overlay-<versión>-linux-<arquitectura>.AppImage` y
+  `.tar.gz` no cambian de forma, porque `--update` los busca por ese patrón.
+- **El formato `.map` y la carpeta `data/maps/`.** Un mapa que funcione hoy se seguirá leyendo.
+
+Lo que **no** se congela: el texto de la consola (`--print`, `--ps`, `--doctor`) está pensado
+para leerse y puede mejorar; la apariencia del hub; y las claves nuevas con valor por defecto,
+que entran en una versión menor sin tocar tu archivo.
+
+Un cambio que rompa alguno de esos contratos sube la versión mayor. `CHANGELOG.md` dice qué
+entra en cada versión, `ROADMAP.md` qué falta y [CONTRIBUTING.md](CONTRIBUTING.md) cómo se
+propone un cambio. Para fallos de seguridad, [SECURITY.md](SECURITY.md).
+
 ## Próximos pasos
 
 La lista viva de lo que falta —validar los lectores en juego, probar la actualización real,

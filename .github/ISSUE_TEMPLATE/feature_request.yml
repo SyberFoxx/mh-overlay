@@ -1,0 +1,41 @@
+name: Propuesta
+description: Una idea para mejorar lo que ya hace
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        El proyecto es local-first, de solo lectura y solo para Linux con Proton. Antes de
+        escribir, mira la lista de «Ideas (sin aprobar)» del ROADMAP: si tu propuesta está ahí,
+        el issue sirve para discutirla, no para darla por hecha.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qué problema resuelve
+      description: Describe la situación real, no la solución.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Qué propones
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas que has considerado
+      description: Incluye «no hacer nada» si te parece razonable.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Alcance
+      options:
+        - label: La propuesta no necesita escribir en la memoria del juego.
+          required: true
+        - label: He comprobado que no está ya en el ROADMAP como hecha.
+          required: true
