@@ -3,7 +3,15 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
-## [Unreleased]
+## [0.5.1] - 2026-11-21
+
+### Corregido
+
+- Leer los monstruos dejaba de ser un error cuando el juego está en el menú o la zona aún se
+  está cargando: la lista no existe todavía y el panel mostraba un fallo en rojo en vez de
+  «sin monstruos». En Rise tampoco se escanea la lista si la cacería no está en curso.
+- El aviso de CRC desajustado explica también la causa más habitual: un mod como REFramework
+  parchea el módulo, así que los CRC de Capcom ya no cuadran aunque la versión sea la correcta.
 
 ### Añadido
 
