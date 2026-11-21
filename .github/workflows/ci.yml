@@ -68,7 +68,10 @@ jobs:
       - name: Diagnóstico del AppImage
         run: |
           appimage=$(ls dist/*.AppImage)
-          "$appimage" --appimage-extract-and-run --doctor
+          "$appimage" --appimage-extract-and-run --doctor | tee /tmp/doctor.txt
+          # Un AppImage no puede llevar CAP_SYS_PTRACE; el diagnóstico tiene que nombrarla
+          # para que quien no pueda leer memoria sepa qué mirar.
+          grep -q 'CAP_SYS_PTRACE' /tmp/doctor.txt
 
       # Contra la API real de GitHub. Se marca como informativo: un límite de peticiones o un
       # corte de red del runner no debe teñir de rojo un cambio que no toca la actualización.
