@@ -267,6 +267,8 @@ struct Hub {
     overlay: Option<Child>,
     /// Bandeja de sistema; `None` si el escritorio no la ofrece.
     tray: Option<Tray>,
+    /// Ventana escondida en la bandeja: no hay nada que pintar ni que leer.
+    hidden: bool,
     /// Cierre de verdad en curso: no se cancela para minimizar.
     closing: bool,
     /// Actualización corriendo en segundo plano, para no congelar la ventana.
@@ -351,6 +353,7 @@ impl Hub {
             preview_live: false,
             overlay: None,
             tray: None,
+            hidden: false,
             closing: false,
             update: None,
             update_note: None,
@@ -2797,6 +2800,9 @@ impl eframe::App for Hub {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                self.hidden = false;
+                // Lo que se enseñe al volver tiene que ser de ahora, no de cuando se escondió.
+                self.last_refresh = None;
             }
 
             if signals.take_toggle_overlay() {
@@ -2819,6 +2825,7 @@ impl eframe::App for Hub {
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.hidden = true;
         }
     }
 
@@ -2847,9 +2854,14 @@ impl eframe::App for Hub {
         self.poll_notes();
         self.poll_access();
 
-        if self.last_refresh.is_none_or(|last| {
-            last.elapsed() >= Duration::from_millis(self.config.game.interval_ms)
-        }) {
+        // Escondido en la bandeja no se pinta nada: la lectura y el repintado quedarían para
+        // nadie. Se despierta una vez por segundo solo para recoger el panel si se cierra solo,
+        // y al volver se fuerza una lectura nueva.
+        if !self.hidden
+            && self.last_refresh.is_none_or(|last| {
+                last.elapsed() >= Duration::from_millis(self.config.game.interval_ms)
+            })
+        {
             self.refresh();
         }
 
@@ -2867,7 +2879,15 @@ impl eframe::App for Hub {
             .preview_built_at
             .is_none_or(|at| at.elapsed() >= Duration::from_millis(120));
 
-        if self.preview_stale && !pointer_down && preview_due {
+        // La vista previa solo se dibuja en Ajustes y con la ventana a la vista: fuera de ahí,
+        // reconstruirla es un lienzo de 1920×1080 tirado a la basura (medido: 12 ms el dibujo)
+        // cada refresco. Al volver, `preview_stale` sigue en pie y se rehace antes de pintarla.
+        if self.preview_stale
+            && !self.hidden
+            && self.tab == Tab::Settings
+            && !pointer_down
+            && preview_due
+        {
             self.rebuild_preview(&ctx);
         }
 
@@ -2928,7 +2948,11 @@ impl eframe::App for Hub {
             });
 
         self.onboarding(&ctx);
-        ctx.request_repaint_after(Duration::from_millis(250));
+        ctx.request_repaint_after(if self.hidden {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_millis(250)
+        });
     }
 }
 
