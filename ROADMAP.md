@@ -15,20 +15,21 @@ Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 - [ ] Una cacería real en World y otra en Rise con vida, partes, estados, arma y buffs correctos.
 - [ ] Instalación limpia del AppImage y del tarball en una máquina o VM sin el proyecto.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
-- [ ] Actualización real `v0.3.0 → v0.4.0`, reinicio y configuración conservada.
+- [ ] Actualización real `v0.4.0 → v0.5.0`, reinicio y configuración conservada.
 - [ ] 30 minutos de juego sin panics ni lecturas basura, con el diagnóstico limpio.
 - [ ] README y release alineados: misma versión, mismos artefactos y mismas capturas.
 
 ## Ahora
 
-### 1. Probar la actualización real de `v0.4.0`
+### 1. Probar la actualización real de `v0.5.0`
 
 - [x] Actualización `v0.2.0 → v0.3.0` probada, reinicio y configuración conservada.
 - [x] Subir la versión del workspace a `0.4.0`.
+- [x] Subir la versión del workspace a `0.5.0` y publicar sus notas desde `CHANGELOG.md`.
 - [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
 - [x] Workflow `v0.4.0` en 3m43s, con release, notas y cuatro artefactos verificados.
-- [ ] Abrir el AppImage `v0.3.0`, detectar `v0.4.0`, instalar, reiniciar y verificar que la
-      configuración sigue intacta.
+- [ ] Abrir el AppImage `v0.4.0`, detectar `v0.5.0`, instalar, reiniciar y verificar que la
+      configuración y el permiso siguen intactos.
 - [ ] Confirmar que la release lleva el README y el banner nuevos, AppStream y los iconos.
 
 **Por qué:** la autoactualización solo se probó contra un servidor local con una versión
@@ -94,6 +95,9 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-21 · `v0.5.0`**: rediseño del hub (tokens, tema automático/oscuro/claro, fondo
+  ambiental), atajos, diagnóstico copiable, `--doctor`, registro con pánico, `config_version`
+  con migración y tamaño de ventana recordado.
 - **2026-11-21 · `858a125`, `fa04653`, `57a1917`, `91d398b`**: paquete de robustez 0.5.0.
   Registro del hub en `$XDG_STATE_HOME` con rotación y hook de pánico; `--doctor` con sesión,
   permisos, configuración, mapas, procesos y registro; `config_version = 1` con migración y

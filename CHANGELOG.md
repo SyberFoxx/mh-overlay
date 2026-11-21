@@ -3,6 +3,43 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.5.0] - 2026-11-21
+
+### Añadido
+
+- Rediseño del hub con tokens de color por papel: tarjetas, navegación y controles nuevos, y
+  tema **Automático/Oscuro/Claro** que sigue al escritorio y se cambia en caliente desde
+  **Ajustes → Interfaz**.
+- Fondo ambiental de la ventana, generado al dibujar (dos focos sobre el color base), con
+  intensidad configurable y opción **Sin fondo**. No añade imágenes ni dependencias y escala
+  con la ventana.
+- Atajos en el hub: **Ctrl+1** a **Ctrl+4** cambian de pestaña y **Esc** cierra la guía o la
+  confirmación.
+- **Copiar diagnóstico** en la pestaña Diagnóstico: versión, juego, proceso, base, mapa, CRC y
+  último error en el portapapeles. **Buscar procesos** enseña lo que ve la detección —pid,
+  línea de comandos y módulo mapeado— sin abrir una terminal.
+- `--doctor`: informe de sesión, permisos, configuración, mapas, procesos y registro, pensado
+  para pegarlo en un informe de fallo.
+- Registro del hub en `$XDG_STATE_HOME/mh-overlay/hub.log`, con rotación a 256 KiB y, ante un
+  pánico, su mensaje y la pila.
+- `config_version` en el TOML: un archivo anterior al versionado se migra al leerlo y uno de
+  una versión futura se rechaza diciéndolo en vez de fallar por una clave desconocida.
+- El hub recuerda el tamaño de su ventana entre sesiones.
+- `--ps`, para listar los procesos que mencionan o mapean el ejecutable del juego cuando la
+  detección automática no lo encuentra.
+- Pruebas de los lectores contra una imagen de memoria por juego, sin juego abierto, y pruebas
+  del hub sin ventana: atajos, fondo, estados de validación y tamaño de ventana recordado.
+
+### Cambiado
+
+- La detección del juego ya no depende del nombre del proceso: tolera `comm` truncado a 15
+  bytes, la ausencia de `.exe` y busca el módulo mapeado cuando Proton no nombra el ejecutable
+  en la línea de comandos.
+- Escondido en la bandeja el hub no lee ni repinta (latido de un segundo), y la vista previa
+  solo se rehace en Ajustes cuando algo cambia.
+- Leer una lista de punteros o de `f32` cuesta una sola llamada al kernel: 32 991 ns a 553 ns
+  por array de 64 en la medida del proyecto.
+
 ## [0.4.0] - 2026-11-20
 
 ### Añadido
