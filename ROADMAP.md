@@ -37,6 +37,9 @@ actualización probadas, y sin sorpresas en el panel ni en el hub.
       parte agotada muestra **Roto** y que los estados enseñan segundos o lo que falta.
 - [ ] Rise: romper una parte con el panel abierto y comprobar que no hay saltos ni un
       «roto» prematuro cuando el hielo regenera la vida de la parte.
+- [ ] Confirmar el salto observado en la cabeza de Lunagaron al romperse (2.052 → 4.104 de
+      máximo): si es la segunda fase del juego, mostrarlo como tal; si no, es una lectura mal
+      atribuida.
 - [ ] Rise: una cacería con dos monstruos, captura y cambio de zona.
 - [ ] World: repetir todo lo anterior en una máquina con el juego.
 - [ ] Probar al menos dos builds o mapas por juego, no solo el más nuevo.
