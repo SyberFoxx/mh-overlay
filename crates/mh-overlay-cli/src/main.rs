@@ -420,6 +420,13 @@ fn run_overlay(
     let text = Text::bundled()?;
     let mut window = Panel::open_with("mh-overlay", arguments.backend.into())?;
     eprintln!("panel: {}", window.backend_name());
+
+    // El panel corre sin terminal cuando lo lanza el hub: lo que pase aquí tiene que quedar en
+    // el mismo registro, o el cierre no deja rastro.
+    mh_overlay_app::log::install();
+    mh_overlay_app::log::info(&format!("panel: abierto en {}", window.backend_name()));
+
+    let mut visible = true;
     let mut config = config;
     let mut stamp = modified_at(config_path);
     let mut last_error: Option<String> = None;
@@ -471,9 +478,19 @@ fn run_overlay(
         let status = last_error.as_deref().map(|_| "sin conexión con el juego");
 
         if snapshot.monsters.is_empty() && status.is_none() && config.overlay.hide_on_empty {
+            if visible {
+                mh_overlay_app::log::info("panel: oculto hasta que haya monstruos en la zona");
+                visible = false;
+            }
+
             window.hide()?;
             sleep(Duration::from_millis(config.game.interval_ms));
             continue;
+        }
+
+        if !visible {
+            mh_overlay_app::log::info("panel: visible");
+            visible = true;
         }
 
         let screen = window.screen_size();

@@ -278,6 +278,13 @@ impl WaylandOverlay {
 
     /// Oculta el panel: en una capa, quitar el contenido es lo que la deja vacía.
     pub fn hide(&mut self) -> Result<(), OverlayError> {
+        // wlr-layer-shell exige un tamaño antes del primer commit: una superficie anclada no
+        // puede medir cero y el compositor cierra la conexión si se le manda sin `set_size`.
+        // Pasa la primera vez, cuando el panel se oculta porque todavía no hay monstruos.
+        if self.size == (0, 0) {
+            self.layer_surface.set_size(1, 1);
+        }
+
         self.surface.attach(None, 0, 0);
         self.surface.commit();
         self.connection

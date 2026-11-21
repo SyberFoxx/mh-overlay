@@ -988,6 +988,20 @@ impl Hub {
                 self.toggle_overlay();
             }
 
+            // Con el panel abierto y sin monstruos no hay nada que enseñar: el panel se oculta a
+            // propósito, y sin decirlo parece que «Abrir panel» no hace nada.
+            if running
+                && self.status.snapshot.monsters.is_empty()
+                && self.config.overlay.hide_on_empty
+            {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("en espera: el panel aparece al entrar en una cacería")
+                        .small()
+                        .color(self.palette.muted),
+                );
+            }
+
             ui.add_space(10.0);
             let (title, detail, color) = self.connection_state();
             ui.horizontal(|ui| {
