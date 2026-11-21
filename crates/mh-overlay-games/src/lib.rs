@@ -5,6 +5,7 @@
 
 pub mod buffs;
 #[cfg(test)]
+#[cfg(test)]
 mod fixtures;
 pub mod model;
 pub mod rise;

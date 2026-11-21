@@ -6,7 +6,7 @@
 //! que nadie escribe se leen como cero, igual que una página vacía.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use mh_overlay_memory::{AddressMap, MemoryError, Reads};
 
@@ -118,12 +118,46 @@ impl Reads for Fixture {
     }
 }
 
+fn maps_directory() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/maps")
+}
+
 fn map_for(game: &str) -> AddressMap {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/maps");
-    let path = AddressMap::newest_for_game(game, &directory).expect("hay mapas del juego");
+    let path = AddressMap::newest_for_game(game, maps_directory()).expect("hay mapas del juego");
     let mut map = AddressMap::load(path).expect("el mapa más nuevo parsea");
     map.set_base(BASE);
     map
+}
+
+/// Todos los mapas del juego, del más nuevo al más viejo, con la base de la fixture aplicada.
+fn maps_for(game: &str) -> Vec<AddressMap> {
+    AddressMap::candidates_for_game(game, maps_directory())
+        .expect("hay mapas del juego")
+        .into_iter()
+        .map(|path| {
+            let mut map = AddressMap::load(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            map.set_base(BASE);
+            map
+        })
+        .collect()
+}
+
+/// Claves que el lector de Rise necesita para llegar a la lista de monstruos: sin ellas el
+/// mapa es de una build anterior al esquema que entiende el lector y no se prueba.
+fn rise_reader_keys(map: &AddressMap) -> bool {
+    map.offsets("QUEST_OFFSETS").is_ok()
+        && map.absolute("UI_ADDRESS").is_ok()
+        && map.offsets("PLAYER_HUD_OFFSETS").is_ok()
+        && map.absolute("MONSTERS_ADDRESS").is_ok()
+        && map.offsets("MONSTER_LIST_OFFSETS").is_ok()
+}
+
+fn world_reader_keys(map: &AddressMap) -> bool {
+    map.absolute("MONSTER_LIST_ADDRESS").is_ok()
+        && map.offsets("MONSTER_LIST_OFFSETS").is_ok()
+        && map.absolute("EQUIPMENT_ADDRESS").is_ok()
+        && map.offsets("PLAYER_BASIC_INFORMATION_OFFSETS").is_ok()
 }
 
 #[test]
@@ -150,11 +184,9 @@ fn a_world_without_a_zone_has_no_monsters_instead_of_an_error() {
     );
 }
 
-#[test]
-fn rise_reads_a_snapshot_from_a_memory_image() {
+fn assert_rise_reader(map: &AddressMap) {
     use crate::rise::Rise;
 
-    let map = map_for("MonsterHunterRise");
     let mut fixture = Fixture::new();
     let id = (1..2000)
         .find(|id| crate::tables::rise_monster_name(*id).is_some())
@@ -271,7 +303,7 @@ fn rise_reads_a_snapshot_from_a_memory_image() {
     fixture.write_f32(ailment + 0x44, 60.0);
     fixture.write_f32(ailment + 0x48, 30.0);
 
-    let snapshot = Rise::new(fixture, &map).snapshot().unwrap();
+    let snapshot = Rise::new(fixture, map).snapshot().unwrap();
 
     let player = snapshot.player.expect("el HUD da un jugador");
     assert_eq!(player.health.percent(), 80.0);
@@ -316,11 +348,9 @@ fn rise_reads_a_snapshot_from_a_memory_image() {
     assert_eq!(monster.ailments[0].buildup_percent(), 40.0);
 }
 
-#[test]
-fn world_reads_a_snapshot_from_a_memory_image() {
+fn assert_world_reader(map: &AddressMap) {
     use crate::world::World;
 
-    let map = map_for("MonsterHunterWorld");
     let mut fixture = Fixture::new();
     let id = (1..2000)
         .find(|id| crate::tables::world_monster_name(*id).is_some())
@@ -361,7 +391,7 @@ fn world_reads_a_snapshot_from_a_memory_image() {
     fixture.write_f32(values + 0x60, 3000.0);
     fixture.write_f32(values + 0x64, 750.0);
 
-    let snapshot = World::new(fixture, &map).snapshot().unwrap();
+    let snapshot = World::new(fixture, map).snapshot().unwrap();
 
     let player = snapshot.player.expect("el HUD da un jugador");
     assert_eq!(player.health.percent(), 80.0);
@@ -380,4 +410,57 @@ fn world_reads_a_snapshot_from_a_memory_image() {
     assert_eq!(monster.health.percent(), 25.0);
     assert!(monster.ailments.is_empty());
     assert!(monster.parts.is_empty());
+}
+
+#[test]
+fn rise_reads_a_snapshot_from_a_memory_image() {
+    assert_rise_reader(&map_for("MonsterHunterRise"));
+}
+
+#[test]
+fn every_rise_map_with_the_reader_keys_reads_a_snapshot() {
+    let maps = maps_for("MonsterHunterRise");
+    let supported = maps.iter().filter(|map| rise_reader_keys(map)).count();
+
+    for map in maps.iter().filter(|map| rise_reader_keys(map)) {
+        assert_rise_reader(map);
+    }
+
+    // Los mapas viejos guardan el estado de la cacería con claves separadas
+    // (`QUEST_TIMER_OFFSETS` y compañía); el lector no las usa, así que no cuentan como
+    // soportados. Si un mapa nuevo deja de traer las claves, esto lo delata.
+    assert!(
+        supported > 0,
+        "ningún mapa de Rise tiene las claves del lector"
+    );
+    assert!(
+        rise_reader_keys(&maps[0]),
+        "el mapa más nuevo de Rise ya no tiene las claves del lector"
+    );
+}
+
+#[test]
+fn world_reads_a_snapshot_from_a_memory_image() {
+    assert_world_reader(&map_for("MonsterHunterWorld"));
+}
+
+#[test]
+fn every_world_map_with_the_reader_keys_reads_a_snapshot() {
+    let maps = maps_for("MonsterHunterWorld");
+    let supported = maps.iter().filter(|map| world_reader_keys(map)).count();
+
+    for map in maps.iter().filter(|map| world_reader_keys(map)) {
+        assert_world_reader(map);
+    }
+
+    // La lista de monstruos con este esquema existe desde la build 421652; las anteriores
+    // usan otras claves y el README lo dice. El mapa más nuevo tiene que estar siempre.
+    assert!(
+        supported > 0,
+        "ningún mapa de World tiene las claves del lector"
+    );
+    assert!(
+        world_reader_keys(&maps[0]),
+        "el mapa más nuevo de World ya no tiene las claves del lector"
+    );
 }
