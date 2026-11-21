@@ -187,6 +187,7 @@ cargo build --release
     --interval <MS>     periodo de refresco; por defecto, el de la configuración
     --list-maps         muestra los address maps disponibles
     --ps                lista los procesos que mencionan o mapean el ejecutable del juego
+    --doctor            informe de sesión, permisos, configuración, mapas y procesos
     --update            actualizar esta instalación (AppImage o paquete) y salir
     --check-update      comprobar si hay versión nueva y salir, sin descargar nada
     --release-notes     imprimir las notas de la última release y salir
@@ -200,6 +201,23 @@ sudo setcap cap_sys_ptrace+ep ./target/release/mh-overlay
 ./target/release/mh-overlay --print --game world
 ./target/release/mh-overlay --watch --game rise --interval 250
 ```
+
+### Cuando algo no funciona
+
+```bash
+mh-overlay --doctor
+```
+
+Un solo informe para pegar en un issue: sesión (X11 o Wayland), escritorio,
+`kernel.yama.ptrace_scope`, si el binario lleva `CAP_SYS_PTRACE`, la configuración y su esquema,
+la carpeta de mapas, los procesos que mencionan o mapean el ejecutable y dónde está el registro.
+No incluye memoria del juego ni datos de la partida, así que se puede compartir entero.
+
+El hub no siempre tiene una terminal detrás, así que escribe en
+`$XDG_STATE_HOME/mh-overlay/hub.log` (por defecto `~/.local/state/mh-overlay/hub.log`): el
+arranque, los cambios de error de lectura, los fallos al guardar y, si hay un pánico, su mensaje
+y la pila. Al pasar de 256 KiB el anterior queda como `hub.log.1`, de modo que una ventana abierta
+durante semanas no llena el disco.
 
 ### El panel
 
@@ -462,6 +480,9 @@ theme = "auto"
 backdrop = "ambient"
 # Intensidad del fondo, de 0 a 1 (0 lo apaga sin cambiar de modo).
 backdrop_opacity = 0.7
+# Tamaño de la ventana, en puntos; el hub lo actualiza al cerrarse.
+window_width = 1120.0
+window_height = 720.0
 
 [style]
 panel = "#0b0d12e6"
@@ -602,6 +623,12 @@ bandeja para no cortarlo y sigue leyendo; sin panel, cerrar termina el proceso, 
 Super+Q. El icono de la bandeja tiene «Mostrar», «Abrir/Cerrar panel» y «Salir». Si el escritorio
 no ofrece bandeja, cerrar termina el proceso en vez de esconder la ventana sin retorno.
 
+El hub recuerda el tamaño de la ventana y lo guarda al cerrar; si el archivo trae uno imposible
+(editado a mano), lo recorta al mínimo o al máximo razonable en vez de negarse a abrir. El TOML
+lleva un `config_version`: un archivo anterior al versionado se migra en memoria y se reescribe
+al siguiente cambio, y uno de una versión más nueva se rechaza diciéndolo, en vez de abrirse con
+claves que no entiende.
+
 El hub detecta solo si estás jugando Rise o World y cambia de juego (y de mapa) en el siguiente
 refresco; la barra superior lo marca con «auto». Si eliges un juego a mano, la detección se
 apaga para no pisar tu elección, y se reactiva con la casilla de Ajustes. En «Mapa» puedes
@@ -688,7 +715,8 @@ los huecos; World las identifica por el índice que reporta el juego.
   línea de comandos que no nombra el ejecutable, así que si nada coincide se busca qué proceso
   tiene mapeado el `.exe`, que es lo que el juego no puede esconder. Cuando el juego corre y aun
   así no aparece, `mh-overlay --ps` lista los procesos que lo mencionan o lo mapean, con su pid,
-  su línea de comandos y si tienen el módulo; `--pid` se salta la detección por completo.
+  su línea de comandos y si tienen el módulo; `--pid` se salta la detección por completo y
+  `--doctor` reúne eso con la sesión, los permisos y la configuración.
 - **El detalle del arma depende de lo que exponga cada juego.** World tiene munición,
   proyectiles de la lanza pistola, cola de la cornamusa y carga del arco a partir de los offsets
   de HunterPie legacy; Rise no publica esas estructuras en los mapas que lee HunterPie v2, así

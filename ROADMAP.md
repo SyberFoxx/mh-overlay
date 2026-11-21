@@ -62,9 +62,7 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 
 ### Producto
 
-- [ ] Registro a archivo en `$XDG_STATE_HOME/mh-overlay/` para depurar cierres.
 - [ ] Actualización más viva: comprobar periódicamente, saltar una versión y enlazar a las notas.
-- [ ] Migración de configuración cuando cambie el esquema del TOML.
 - [ ] Restaurar el permiso de memoria desde el hub tras jugar.
 
 ### Distribución
@@ -81,7 +79,8 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 
 ### Calidad
 
-- [ ] Tests del hub: cierre, bandeja, actualización y navegación.
+- [ ] Tests del hub: cierre, bandeja y actualización (navegación, atajos y fondo ya están
+      cubiertos sin ventana).
 - [ ] Prueba de actualización contra GitHub en CI, sin publicar nada.
 
 ## Ideas (sin aprobar)
@@ -95,6 +94,11 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-21 · `858a125`, `fa04653`, `57a1917`, `91d398b`**: paquete de robustez 0.5.0.
+  Registro del hub en `$XDG_STATE_HOME` con rotación y hook de pánico; `--doctor` con sesión,
+  permisos, configuración, mapas, procesos y registro; `config_version = 1` con migración y
+  rechazo de esquemas futuros; tamaño de ventana recordado; y pruebas sin ventana de atajos,
+  fondo y estados del `.map`.
 - **2026-11-21 · `dcfc0ad`**: hub con tokens de color por papel, tema oscuro/claro/automático y
   fondo ambiental generado al dibujar (desactivable e intensidad configurable), atajos
   Ctrl+1..4 y Esc, y diagnóstico copiable con la lista de procesos que mapean el ejecutable.
