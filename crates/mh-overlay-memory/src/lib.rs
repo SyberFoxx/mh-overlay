@@ -4,6 +4,7 @@
 //! la estructura de ningún juego. Eso vive en `mh-overlay-games`.
 
 pub mod address_map;
+pub mod env;
 pub mod error;
 pub mod memory;
 pub mod process;
