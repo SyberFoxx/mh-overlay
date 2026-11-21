@@ -62,7 +62,6 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 
 ### Producto
 
-- [ ] Exportar diagnóstico: proceso, mapa, CRC, último error y versión en un solo botón.
 - [ ] Registro a archivo en `$XDG_STATE_HOME/mh-overlay/` para depurar cierres.
 - [ ] Actualización más viva: comprobar periódicamente, saltar una versión y enlazar a las notas.
 - [ ] Migración de configuración cuando cambie el esquema del TOML.
@@ -96,6 +95,9 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-21 · `dcfc0ad`**: hub con tokens de color por papel, tema oscuro/claro/automático y
+  fondo ambiental generado al dibujar (desactivable e intensidad configurable), atajos
+  Ctrl+1..4 y Esc, y diagnóstico copiable con la lista de procesos que mapean el ejecutable.
 - **2026-11-21 · `58b4c7f`**: fixtures de memoria. Las lecturas viven en el trait `Reads` y un
   test por juego recorre vida, partes, estados, captura, corona, jugador y cacería contra una
   imagen de bytes y el `.map` más nuevo, sin ptrace ni juego abierto.
