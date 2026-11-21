@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-use mh_overlay_memory::{AddressMap, Memory, MemoryError};
+use mh_overlay_memory::{AddressMap, Memory, MemoryError, Reads};
 
 use crate::buffs::WORLD_BUFFS;
 use crate::model::{
@@ -297,18 +297,18 @@ const QUEST_STATE_IN_QUEST: i32 = 2;
 /// El reloj de World se guarda en tics de 60 Hz.
 const TIMER_TICKS_PER_SECOND: f32 = 60.0;
 
-/// Lector de World sobre un proceso ya adjuntado.
-pub struct World<'map> {
-    memory: Memory,
+/// Lector de World sobre un proceso ya adjuntado, o sobre una fixture en los tests.
+pub struct World<'map, M: Reads = Memory> {
+    memory: M,
     map: &'map AddressMap,
     /// Duración máxima vista de cada buff, por offset: el juego solo guarda lo que queda y
     /// una barra necesita el total.
     seen_buffs: Mutex<HashMap<u32, f32>>,
 }
 
-impl<'map> World<'map> {
+impl<'map, M: Reads> World<'map, M> {
     /// El `map` debe tener ya aplicada la base del módulo.
-    pub fn new(memory: Memory, map: &'map AddressMap) -> Self {
+    pub fn new(memory: M, map: &'map AddressMap) -> Self {
         Self {
             memory,
             map,

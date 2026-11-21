@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::MemoryError;
-use crate::memory::Memory;
+use crate::memory::{Memory, Reads};
 
 /// Parsed `.map` file: static addresses and pointer offsets for one game version.
 ///

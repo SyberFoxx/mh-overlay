@@ -3,7 +3,7 @@
 //! Todos los desplazamientos fijos de esta sección fueron verificados contra la build
 //! 16.0.2.0 y están documentados junto a la estructura de la que salen.
 
-use mh_overlay_memory::{AddressMap, Memory, MemoryError};
+use mh_overlay_memory::{AddressMap, Memory, MemoryError, Reads};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -155,18 +155,18 @@ fn clamp_percent(value: f32) -> f32 {
     }
 }
 
-/// Lector de Rise sobre un proceso ya adjuntado.
-pub struct Rise<'map> {
-    memory: Memory,
+/// Lector de Rise sobre un proceso ya adjuntado, o sobre una fixture en los tests.
+pub struct Rise<'map, M: Reads = Memory> {
+    memory: M,
     map: &'map AddressMap,
     /// Duración máxima vista de cada estado, por offset: el juego solo guarda lo que queda y
     /// una barra necesita el total.
     seen_buffs: Mutex<HashMap<u32, f32>>,
 }
 
-impl<'map> Rise<'map> {
+impl<'map, M: Reads> Rise<'map, M> {
     /// El `map` debe tener ya aplicada la base del módulo.
-    pub fn new(memory: Memory, map: &'map AddressMap) -> Self {
+    pub fn new(memory: M, map: &'map AddressMap) -> Self {
         Self {
             memory,
             map,

@@ -4,6 +4,8 @@
 //! ni de cómo se muestra el resultado.
 
 pub mod buffs;
+#[cfg(test)]
+mod fixtures;
 pub mod model;
 pub mod rise;
 pub mod tables;

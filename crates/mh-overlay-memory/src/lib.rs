@@ -10,5 +10,5 @@ pub mod process;
 
 pub use address_map::{AddressMap, MapValidation, SelectedMap, maps_directory};
 pub use error::MemoryError;
-pub use memory::Memory;
+pub use memory::{Memory, Reads};
 pub use process::{Lookalike, Process, lookalikes};

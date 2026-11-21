@@ -23,7 +23,8 @@ impl Memory {
         self.pid
     }
 
-    /// Reads exactly `buffer.len()` bytes, failing if the kernel returns fewer.
+    /// Reads exactly `buffer.len()` bytes from the target process, failing if the kernel
+    /// returns fewer.
     pub fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<(), MemoryError> {
         if buffer.is_empty() {
             return Ok(());
@@ -62,41 +63,58 @@ impl Memory {
 
         Ok(())
     }
+}
+
+/// Everything the readers do to a game: the only thing a source has to provide is
+/// [`Reads::read_into`], and the rest are the typed reads and pointer chains built on it.
+///
+/// `Memory` implements it for a live process; the tests implement it over a byte image, so a
+/// reader can be exercised without a game running and the fixture and the real process go
+/// through the same code path.
+pub trait Reads {
+    /// Reads exactly `buffer.len()` bytes at `address`.
+    fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<(), MemoryError>;
 
     /// Fixed-size read whose length is known at compile time.
-    pub fn read_bytes<const N: usize>(&self, address: u64) -> Result<[u8; N], MemoryError> {
+    fn read_bytes<const N: usize>(&self, address: u64) -> Result<[u8; N], MemoryError> {
         let mut buffer = [0u8; N];
         self.read_into(address, &mut buffer)?;
         Ok(buffer)
     }
 
-    pub fn read_u8(&self, address: u64) -> Result<u8, MemoryError> {
+    fn read_u8(&self, address: u64) -> Result<u8, MemoryError> {
         Ok(u8::from_le_bytes(self.read_bytes::<1>(address)?))
     }
 
-    pub fn read_u16(&self, address: u64) -> Result<u16, MemoryError> {
+    fn read_u16(&self, address: u64) -> Result<u16, MemoryError> {
         Ok(u16::from_le_bytes(self.read_bytes::<2>(address)?))
     }
 
-    pub fn read_u32(&self, address: u64) -> Result<u32, MemoryError> {
+    fn read_u32(&self, address: u64) -> Result<u32, MemoryError> {
         Ok(u32::from_le_bytes(self.read_bytes::<4>(address)?))
     }
 
-    pub fn read_i32(&self, address: u64) -> Result<i32, MemoryError> {
+    fn read_i32(&self, address: u64) -> Result<i32, MemoryError> {
         Ok(i32::from_le_bytes(self.read_bytes::<4>(address)?))
     }
 
-    pub fn read_u64(&self, address: u64) -> Result<u64, MemoryError> {
+    fn read_u64(&self, address: u64) -> Result<u64, MemoryError> {
         Ok(u64::from_le_bytes(self.read_bytes::<8>(address)?))
     }
 
-    pub fn read_f32(&self, address: u64) -> Result<f32, MemoryError> {
+    fn read_f32(&self, address: u64) -> Result<f32, MemoryError> {
         Ok(f32::from_le_bytes(self.read_bytes::<4>(address)?))
     }
 
-    /// Reads `count` 64-bit pointers in one call: a 64-entry array costs one syscall instead of
-    /// 64, and a hole anywhere in the range is an error like `read_u64` would be.
-    pub fn read_pointers(&self, address: u64, count: usize) -> Result<Vec<u64>, MemoryError> {
+    fn read_vec(&self, address: u64, length: usize) -> Result<Vec<u8>, MemoryError> {
+        let mut buffer = vec![0u8; length];
+        self.read_into(address, &mut buffer)?;
+        Ok(buffer)
+    }
+
+    /// Reads `count` 64-bit pointers in one call: a 64-entry array costs one read instead of 64,
+    /// and a hole anywhere in the range is an error like `read_u64` would be.
+    fn read_pointers(&self, address: u64, count: usize) -> Result<Vec<u64>, MemoryError> {
         let bytes = self.read_vec(address, count * 8)?;
 
         Ok(bytes
@@ -107,8 +125,8 @@ impl Memory {
             .collect())
     }
 
-    /// Reads `count` floats in one call, with the same deal as [`Self::read_pointers`].
-    pub fn read_f32_array(&self, address: u64, count: usize) -> Result<Vec<f32>, MemoryError> {
+    /// Reads `count` floats in one call, with the same deal as [`Reads::read_pointers`].
+    fn read_f32_array(&self, address: u64, count: usize) -> Result<Vec<f32>, MemoryError> {
         let bytes = self.read_vec(address, count * 4)?;
 
         Ok(bytes
@@ -120,7 +138,7 @@ impl Memory {
     }
 
     /// Reads a NUL-terminated string, decoding up to `max_length` bytes.
-    pub fn read_cstring(&self, address: u64, max_length: usize) -> Result<String, MemoryError> {
+    fn read_cstring(&self, address: u64, max_length: usize) -> Result<String, MemoryError> {
         let bytes = self.read_vec(address, max_length)?;
         let end = bytes
             .iter()
@@ -129,16 +147,10 @@ impl Memory {
         Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
     }
 
-    pub fn read_vec(&self, address: u64, length: usize) -> Result<Vec<u8>, MemoryError> {
-        let mut buffer = vec![0u8; length];
-        self.read_into(address, &mut buffer)?;
-        Ok(buffer)
-    }
-
     /// Deref-then-offset chain: `addr = *(addr) + offset` per step (HunterPie's `ReadAsync`).
     ///
     /// The returned value is an address, not the contents stored there.
-    pub fn deref_chain(&self, address: u64, offsets: &[i32]) -> Result<u64, MemoryError> {
+    fn deref_chain(&self, address: u64, offsets: &[i32]) -> Result<u64, MemoryError> {
         let mut current = address;
 
         for (step, offset) in offsets.iter().enumerate() {
@@ -155,7 +167,7 @@ impl Memory {
     /// Offset-then-deref chain: `addr = *(addr + offset)` per step (HunterPie's `ReadPtrAsync`).
     ///
     /// This is the shape most `Offset` entries in the `.map` files expect.
-    pub fn follow_ptr_chain(&self, address: u64, offsets: &[i32]) -> Result<u64, MemoryError> {
+    fn follow_ptr_chain(&self, address: u64, offsets: &[i32]) -> Result<u64, MemoryError> {
         let mut current = address;
 
         for (step, offset) in offsets.iter().enumerate() {
@@ -168,6 +180,12 @@ impl Memory {
         }
 
         Ok(current)
+    }
+}
+
+impl Reads for Memory {
+    fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<(), MemoryError> {
+        Memory::read_into(self, address, buffer)
     }
 }
 
