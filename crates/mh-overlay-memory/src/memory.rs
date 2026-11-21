@@ -94,22 +94,29 @@ impl Memory {
         Ok(f32::from_le_bytes(self.read_bytes::<4>(address)?))
     }
 
-    /// Reads `count` 64-bit pointers one by one, so a chain that walks off a mapped page
-    /// stops at the first bad element instead of losing the whole array.
+    /// Reads `count` 64-bit pointers in one call: a 64-entry array costs one syscall instead of
+    /// 64, and a hole anywhere in the range is an error like `read_u64` would be.
     pub fn read_pointers(&self, address: u64, count: usize) -> Result<Vec<u64>, MemoryError> {
-        let mut pointers = Vec::with_capacity(count);
-        for index in 0..count {
-            pointers.push(self.read_u64(address + (index as u64) * 8)?);
-        }
-        Ok(pointers)
+        let bytes = self.read_vec(address, count * 8)?;
+
+        Ok(bytes
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| u64::from_le_bytes(*chunk))
+            .collect())
     }
 
+    /// Reads `count` floats in one call, with the same deal as [`Self::read_pointers`].
     pub fn read_f32_array(&self, address: u64, count: usize) -> Result<Vec<f32>, MemoryError> {
-        let mut values = Vec::with_capacity(count);
-        for index in 0..count {
-            values.push(self.read_f32(address + (index as u64) * 4)?);
-        }
-        Ok(values)
+        let bytes = self.read_vec(address, count * 4)?;
+
+        Ok(bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
+            .collect())
     }
 
     /// Reads a NUL-terminated string, decoding up to `max_length` bytes.
