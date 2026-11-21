@@ -537,7 +537,9 @@ fn report_validation(path: &Path, validation: MapValidation) {
     match validation {
         MapValidation::Verified => eprintln!("mapa: {name} (versión verificada por CRC)"),
         MapValidation::Mismatch => eprintln!(
-            "aviso: {name} no coincide con los CRC del juego: es de otra build.\n       \
+            "aviso: {name} no coincide con los CRC del juego: el módulo no está como lo dejó \
+             Capcom.\n       \
+             puede ser otra build o un mod que parchea código (REFramework, Fluffy).\n       \
              si los números salen mal, pasa --map con el mapa de tu versión."
         ),
         MapValidation::Unavailable => {
