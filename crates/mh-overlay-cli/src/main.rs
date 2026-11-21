@@ -710,6 +710,11 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
                     .unwrap_or_else(|| format!("parte {:02}", part.index))
             ));
 
+            if part.is_broken() {
+                output.push_str("  roto\n");
+                continue;
+            }
+
             if let Some(health) = part.health {
                 output.push_str(&format!("  vida {}", health.label()));
             }
@@ -727,13 +732,24 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
         }
 
         for ailment in &monster.ailments {
-            output.push_str(&format!(
-                "  {} {:>5.1}%  ({:.0} / {:.0})\n",
-                ailment.name,
-                ailment.buildup_percent(),
-                ailment.buildup,
-                ailment.max_buildup,
-            ));
+            if ailment.is_elemental() {
+                continue;
+            }
+
+            if ailment.is_triggered() {
+                output.push_str(&format!(
+                    "  {:<14} {:>3.0} s de estado\n",
+                    ailment.name, ailment.timer
+                ));
+            } else {
+                output.push_str(&format!(
+                    "  {:<14} faltan {:.0}  ({:.0} / {:.0})\n",
+                    ailment.name,
+                    ailment.missing_buildup(),
+                    ailment.buildup,
+                    ailment.max_buildup,
+                ));
+            }
         }
 
         output.push('\n');

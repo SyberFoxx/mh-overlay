@@ -131,9 +131,7 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
 
         for part in &visible_parts(monster) {
             let fallback = format!("parte {:02}", part.index);
-            let broken = part
-                .breaks
-                .is_some_and(|breaks| breaks.total > 0 && breaks.done >= breaks.total);
+            let broken = part.is_broken();
 
             draw_row(
                 &mut canvas,
@@ -153,7 +151,9 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                     },
                     recoverable: 0.0,
                     segments: part.breaks.map(|breaks| breaks.total),
-                    value: if config.overlay.show_part_health {
+                    value: if broken {
+                        Some("Roto".to_string())
+                    } else if config.overlay.show_part_health {
                         part.health.map(|health| health.label())
                     } else {
                         part.breaks.map(|breaks| breaks.label())
@@ -167,7 +167,7 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
         for ailment in monster
             .ailments
             .iter()
-            .filter(|ailment| ailment.is_active())
+            .filter(|ailment| ailment.is_active() && !ailment.is_elemental())
             .take(MAX_AILMENTS)
         {
             draw_row(
@@ -178,11 +178,11 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                 y,
                 Row {
                     label: ailment.name,
-                    fraction: (ailment.buildup_percent() / 100.0).clamp(0.0, 1.0),
+                    fraction: ailment.fraction(),
                     color: ailment_color(&config.style, ailment.name),
                     recoverable: 0.0,
                     segments: None,
-                    value: None,
+                    value: Some(ailment.value_label()),
                 },
             );
 
@@ -393,7 +393,7 @@ fn free_plates(
             for ailment in monster
                 .ailments
                 .iter()
-                .filter(|ailment| ailment.is_active())
+                .filter(|ailment| ailment.is_active() && !ailment.is_elemental())
                 .take(MAX_AILMENTS)
             {
                 place_part(&row_plate(
@@ -402,11 +402,11 @@ fn free_plates(
                     &geometry,
                     Row {
                         label: ailment.name,
-                        fraction: (ailment.buildup_percent() / 100.0).clamp(0.0, 1.0),
+                        fraction: ailment.fraction(),
                         color: ailment_color(&config.style, ailment.name),
                         recoverable: 0.0,
                         segments: None,
-                        value: None,
+                        value: Some(ailment.value_label()),
                     },
                 ));
             }
@@ -472,9 +472,7 @@ fn row_plate(config: &Config, text: &Text, geometry: &Geometry, row: Row<'_>) ->
 
 fn part_plate(config: &Config, text: &Text, geometry: &Geometry, part: &Part) -> Canvas {
     let fallback = format!("parte {:02}", part.index);
-    let broken = part
-        .breaks
-        .is_some_and(|breaks| breaks.total > 0 && breaks.done >= breaks.total);
+    let broken = part.is_broken();
 
     row_plate(
         config,
@@ -492,7 +490,9 @@ fn part_plate(config: &Config, text: &Text, geometry: &Geometry, part: &Part) ->
             },
             recoverable: 0.0,
             segments: part.breaks.map(|breaks| breaks.total),
-            value: if config.overlay.show_part_health {
+            value: if broken {
+                Some("Roto".to_string())
+            } else if config.overlay.show_part_health {
                 part.health.map(|health| health.label())
             } else {
                 part.breaks.map(|breaks| breaks.label())
@@ -809,7 +809,7 @@ fn rows(config: &Config, monster: &Monster) -> usize {
         rows += monster
             .ailments
             .iter()
-            .filter(|ailment| ailment.is_active())
+            .filter(|ailment| ailment.is_active() && !ailment.is_elemental())
             .take(MAX_AILMENTS)
             .count();
     }
@@ -1490,6 +1490,11 @@ fn draw_sharpness(
         return;
     }
 
+    // El relleno llega hasta el filo actual y no hasta el máximo del arma: en el juego la
+    // franja del color vigente se encoge con cada golpe, y una barra llena con un marcador de
+    // dos píxeles se ve inmóvil aunque el valor baje.
+    let marker_x = bar.x as f32 + bar.width as f32 * sharpness.fraction();
+    let empty = lighten(style.panel, 0.10);
     let mut x = bar.x as f32;
 
     for (index, level) in SharpnessLevel::ALL.iter().enumerate() {
@@ -1497,21 +1502,26 @@ fn draw_sharpness(
         let width = bar.width as f32 * length / total;
 
         if width >= 1.5 {
-            let color = sharpness_color(*level);
-            let segment = Rect::new(
+            let inner = Rect::new(
                 (x + scale).round() as i32,
                 bar.y + scale.round() as i32,
                 (width - scale * 2.0).max(1.0) as u32,
                 bar.height.saturating_sub((2.0 * scale).round() as u32),
             );
 
-            canvas.fill_rounded_gradient(segment, radius, lighten(color, 0.32), color);
+            canvas.fill_rounded(inner, radius, empty);
+
+            let filled = (marker_x - x - scale).clamp(0.0, inner.width as f32);
+            if filled >= 1.5 {
+                let color = sharpness_color(*level);
+                let segment = Rect::new(inner.x, inner.y, filled.round() as u32, inner.height);
+
+                canvas.fill_rounded_gradient(segment, radius, lighten(color, 0.32), color);
+            }
         }
 
         x += width;
     }
-
-    let marker_x = bar.x as f32 + bar.width as f32 * sharpness.fraction();
     canvas.fill_rect(
         Rect::new(
             marker_x.round() as i32 - 1,
@@ -2925,7 +2935,7 @@ mod tests {
             breaks: Some(Breaks::new(1, Some(2), 1, 2)),
         });
         detailed.ailments.push(Ailment {
-            name: "fuego",
+            name: "veneno",
             buildup: 30.0,
             max_buildup: 100.0,
             timer: 0.0,

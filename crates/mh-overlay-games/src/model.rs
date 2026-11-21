@@ -104,6 +104,27 @@ pub struct Part {
     pub breaks: Option<Breaks>,
 }
 
+impl Part {
+    /// `true` cuando la parte ya no admite más daño de rompimiento.
+    ///
+    /// En Rise se mira el componente que se agota al romper o cortar; en World, además, el
+    /// contador de rompimientos. Una parte rota no debe seguir enseñando vida: el juego
+    /// reinicia ese medidor o lo deja a cero y el número no significa nada para el jugador.
+    pub fn is_broken(&self) -> bool {
+        if self
+            .breaks
+            .is_some_and(|breaks| breaks.total > 0 && breaks.done >= breaks.total)
+        {
+            return true;
+        }
+
+        [self.breakable, self.severable]
+            .into_iter()
+            .flatten()
+            .any(|health| health.max > 0.0 && health.current <= 0.05)
+    }
+}
+
 /// Acumulación de un estado alterado.
 #[derive(Debug, Clone)]
 pub struct Ailment {
@@ -120,11 +141,59 @@ impl Ailment {
         self.max_buildup > 0.0 && (self.buildup > 0.0 || self.timer > 0.0)
     }
 
+    /// El estado ya se disparó y corre su temporizador.
+    pub fn is_triggered(&self) -> bool {
+        self.timer > 0.0
+    }
+
+    /// Los estados de elemento (fuego, agua, hielo, rayo, dragón) no se muestran: al monstruo
+    /// no le cambian la pelea como una parálisis o un sueño, y su porcentaje solo ocupa filas.
+    pub fn is_elemental(&self) -> bool {
+        matches!(
+            self.name.to_lowercase().as_str(),
+            "fuego"
+                | "agua"
+                | "hielo"
+                | "rayo"
+                | "dragón"
+                | "dragon"
+                | "plaga de fuego"
+                | "plaga de agua"
+                | "plaga de hielo"
+                | "plaga de rayo"
+                | "plaga de dragón"
+        )
+    }
+
     pub fn buildup_percent(&self) -> f32 {
         if self.max_buildup > 0.0 {
             (self.buildup / self.max_buildup) * 100.0
         } else {
             0.0
+        }
+    }
+
+    /// Cuánto le falta a la acumulación para disparar el estado.
+    pub fn missing_buildup(&self) -> f32 {
+        (self.max_buildup - self.buildup).max(0.0)
+    }
+
+    /// Relleno de la barra: tiempo restante si el estado está activo y acumulación si no.
+    pub fn fraction(&self) -> f32 {
+        if self.is_triggered() && self.max_timer > 0.0 {
+            return (self.timer / self.max_timer).clamp(0.0, 1.0);
+        }
+
+        (self.buildup_percent() / 100.0).clamp(0.0, 1.0)
+    }
+
+    /// Texto de la columna derecha: segundos que dura el estado activo o lo que falta para
+    /// activarlo. Es el dato que el jugador no puede leer en el HUD.
+    pub fn value_label(&self) -> String {
+        if self.is_triggered() {
+            format!("{:.0} s", self.timer.max(0.0))
+        } else {
+            format!("faltan {:.0}", self.missing_buildup())
         }
     }
 }
@@ -334,28 +403,18 @@ impl Sharpness {
         self.lengths.iter().map(|length| f32::from(*length)).sum()
     }
 
-    /// Longitud acumulada hasta el principio del color indicado.
-    pub fn start_of(&self, level: SharpnessLevel) -> f32 {
-        let position = SharpnessLevel::ALL
-            .iter()
-            .position(|candidate| *candidate == level)
-            .unwrap_or(0);
-
-        self.lengths
-            .iter()
-            .take(position)
-            .map(|length| f32::from(*length))
-            .sum()
-    }
-
     /// Fracción de 0 a 1 en la que está el filo actual.
+    ///
+    /// `current` son las unidades que le quedan al arma sobre el total de la barra, no las que
+    /// quedan del color vigente: con el filo lleno vale `total` y baja con cada golpe. Sumarle
+    /// el inicio del color lo clavaba en el máximo hasta gastar el último tramo.
     pub fn fraction(&self) -> f32 {
         let total = self.total();
         if total <= 0.0 {
             return 0.0;
         }
 
-        ((self.start_of(self.level) + self.current) / total).clamp(0.0, 1.0)
+        (self.current / total).clamp(0.0, 1.0)
     }
 }
 
@@ -847,15 +906,118 @@ mod tests {
     }
 
     #[test]
-    fn sharpness_fraction_walks_the_colors() {
+    fn sharpness_fraction_is_the_remaining_units_over_the_total() {
         let sharpness = Sharpness {
             lengths: [50, 50, 0, 0, 0, 0, 0],
             level: SharpnessLevel::Orange,
             max_level: SharpnessLevel::Orange,
-            current: 25.0,
+            current: 75.0,
         };
 
         assert!((sharpness.fraction() - 0.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn consuming_sharpness_moves_the_fill_back() {
+        let mut sharpness = Sharpness {
+            lengths: [50, 50, 0, 0, 0, 0, 0],
+            level: SharpnessLevel::Orange,
+            max_level: SharpnessLevel::Orange,
+            current: 100.0,
+        };
+        let full = sharpness.fraction();
+        sharpness.current = 30.0;
+
+        assert!(
+            (full - 1.0).abs() < f32::EPSILON,
+            "con todas las unidades la barra está llena"
+        );
+        assert!(
+            (sharpness.fraction() - 0.3).abs() < f32::EPSILON,
+            "el relleno sigue a las unidades que quedan"
+        );
+    }
+
+    #[test]
+    fn a_sharpness_that_is_still_blue_does_not_fill_the_whole_bar() {
+        let sharpness = Sharpness {
+            lengths: [40, 50, 90, 100, 60, 10, 0],
+            level: SharpnessLevel::Blue,
+            max_level: SharpnessLevel::White,
+            current: 332.0,
+        };
+
+        assert!(
+            (sharpness.fraction() - 332.0 / 350.0).abs() < f32::EPSILON,
+            "el inicio del color no se suma a las unidades restantes"
+        );
+    }
+
+    #[test]
+    fn a_part_without_break_health_left_is_broken() {
+        let part = Part {
+            breakable: Some(Health::new(0.0, 950.0)),
+            health: Some(Health::new(950.0, 950.0)),
+            ..Part::default()
+        };
+        let intact = Part {
+            breakable: Some(Health::new(12.0, 950.0)),
+            ..Part::default()
+        };
+
+        assert!(part.is_broken());
+        assert!(!intact.is_broken());
+    }
+
+    #[test]
+    fn a_part_with_every_break_done_is_broken() {
+        let part = Part {
+            breaks: Some(Breaks::new(6, None, 2, 2)),
+            health: Some(Health::new(100.0, 100.0)),
+            ..Part::default()
+        };
+
+        assert!(part.is_broken());
+    }
+
+    #[test]
+    fn ailments_show_time_left_or_what_is_missing() {
+        let active = Ailment {
+            name: "parálisis",
+            buildup: 0.0,
+            max_buildup: 400.0,
+            timer: 12.0,
+            max_timer: 20.0,
+        };
+        let charging = Ailment {
+            buildup: 100.0,
+            timer: 0.0,
+            ..active.clone()
+        };
+
+        assert!(active.is_triggered());
+        assert!((active.fraction() - 0.6).abs() < f32::EPSILON);
+        assert_eq!(active.value_label(), "12 s");
+        assert!((charging.fraction() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(charging.value_label(), "faltan 300");
+    }
+
+    #[test]
+    fn elemental_buildups_are_not_read_as_statuses() {
+        let element = Ailment {
+            name: "hielo",
+            buildup: 13.0,
+            max_buildup: 375.0,
+            timer: 0.0,
+            max_timer: 0.0,
+        };
+        let status = Ailment {
+            name: "sueño",
+            ..element.clone()
+        };
+
+        assert!(element.is_elemental());
+        assert!(!status.is_elemental());
     }
 
     #[test]
