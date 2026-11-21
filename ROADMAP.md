@@ -111,6 +111,9 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-21 · 0.5.4**: observado en una cacería real: el filo se muestra en golpes del
+  color actual y del siguiente; las partes repetidas se numeran; se elimina el buff fantasma
+  de «Llamada de spiribird» y las filas de estado dejan de parpadear con residuos mínimos.
 - **2026-11-21 · 0.5.3**: el filo del arma ya baja con los golpes (el relleno era
   `inicio_del_color + unidades`, que se clavaba al llenar un color); las partes agotadas
   muestran **Roto** con la barra vacía en el panel y en `--print`; los estados elementales

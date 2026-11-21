@@ -24,8 +24,9 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
 [HunterPie](https://github.com/HunterPie/HunterPie) en Linux.
 
 - **Panel sobre el juego** — vida, umbral de captura, reloj y vidas del equipo; partes con
-  flinch/romper/cortar; estados alterados; filo, medidores de clase, munición y buffs con
-  temporizador. Las 14 armas tienen icono propio.
+  flinch/romper/cortar y aviso **Roto**; estados alterados con su duración; filo en golpes del
+  color actual, medidores de clase, munición y buffs con temporizador. Las 14 armas tienen
+  icono propio.
 - **Hub de escritorio** — diagnóstico de la conexión, selección de mapa, vista previa en vivo y
   todos los ajustes con selector de color, sin editar el TOML a mano.
 - **Novedades y disposición** — el hub enseña qué cambió en la última release, deja arrastrar
@@ -42,6 +43,8 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
 cacería  12:34 restante   vidas 0/3
 
 tú  HP  71.2%  (712/1.000)   aguante  84.0%  (126/150)
+    arma   Espada larga
+    filo   23 · azul · luego blanco 10
 
 id 12  Tigrex  HP  74.3%  (16.420/22.100)   captura ≤ 20%
   Cabeza       vida 1.376/2.200  flinch 100.0%  romper  62.4%  cortar 100.0%

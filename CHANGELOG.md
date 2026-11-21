@@ -3,6 +3,24 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.5.4] - 2026-11-21
+
+### Corregido
+
+- «Llamada de spiribird» aparecía siempre con 60 s eternos: el lector trataba el cero de un
+  estado inactivo como «acaba de empezar». Los estados que guardan el tiempo transcurrido ya
+  no se muestran hasta que ese tiempo avanza.
+- El agotamiento y otros estados entraban y salían de la lista con residuos de una o dos
+  unidades, y con cada aparición cambiaba la altura del panel. Ahora hace falta un 1 % de
+  acumulación, o un temporizador activo.
+
+### Mejorado
+
+- El filo se lee en golpes: los que quedan del color actual y los que dura el siguiente
+  (`filo 23 · azul · luego blanco 10`), en el panel y en `--print`.
+- Las partes con el mismo nombre se numeran para no confundirlas (`Cabeza 1`, `Cabeza 2`,
+  `Pata trasera 1`, `Pata trasera 2`).
+
 ## [0.5.3] - 2026-11-21
 
 ### Corregido
