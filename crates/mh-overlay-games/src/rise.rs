@@ -13,6 +13,7 @@ use crate::model::{
     Ailment, Buff, Crown, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
     Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
+use crate::optional_chain;
 
 /// Monstruos grandes que pueden coexistir en una zona.
 const MAX_MONSTERS: usize = 5;
@@ -623,6 +624,23 @@ impl<'map, M: Reads> Rise<'map, M> {
         self.memory.read_f32_array(address + ARRAY_DATA, count).ok()
     }
 
+    /// Estado de la cacería (`QuestState`), si el juego tiene ya la estructura.
+    fn quest_state(&self) -> Option<i32> {
+        let quest = self
+            .memory
+            .deref_chain(
+                self.map.absolute("QUEST_ADDRESS").ok()?,
+                self.map.offsets("QUEST_OFFSETS").ok()?,
+            )
+            .ok()?;
+
+        if quest == 0 {
+            return None;
+        }
+
+        self.memory.read_i32(quest + QUEST_STATE).ok()
+    }
+
     /// Cacería en curso: el reloj corre hacia atrás y las vidas se cuentan por el equipo.
     pub fn hunt(&self) -> Result<Option<Hunt>, MemoryError> {
         let quest = self.memory.deref_chain(
@@ -653,10 +671,21 @@ impl<'map, M: Reads> Rise<'map, M> {
     /// Monstruos grandes presentes ahora mismo. Una zona sin monstruos devuelve una lista
     /// vacía, no un error.
     pub fn monsters(&self) -> Result<Vec<Monster>, MemoryError> {
-        let list = self.memory.deref_chain(
+        // Sin cacería no hay zona: el juego mantiene los contenedores a medio inicializar y
+        // leerlos devuelve punteros que no son monstruos. Preguntar por el estado de la cacería
+        // es lo que distingue «no hay monstruos» de «los offsets están mal».
+        if self.quest_state() != Some(QUEST_STATE_IN_QUEST) {
+            return Ok(Vec::new());
+        }
+
+        let Some(list) = optional_chain(
+            &self.memory,
             self.map.absolute("MONSTERS_ADDRESS")?,
             self.map.offsets("MONSTER_LIST_OFFSETS")?,
-        )?;
+        )?
+        else {
+            return Ok(Vec::new());
+        };
 
         let pointers = self.memory.read_pointers(list, MAX_MONSTERS)?;
         let target = self.target();
@@ -674,8 +703,9 @@ impl<'map, M: Reads> Rise<'map, M> {
                     monsters.push(monster);
                 }
                 Ok(_) => continue,
-                // Un monstruo despawnando deja punteros a medio limpiar.
-                Err(MemoryError::NullPointer { .. }) => continue,
+                // Un monstruo despawneando, o una zona a medio cargar, deja punteros a medio
+                // limpiar: uno ilegible no invalida los demás ni el resto del panel.
+                Err(MemoryError::NullPointer { .. } | MemoryError::Read { .. }) => continue,
                 Err(error) => return Err(error),
             }
         }

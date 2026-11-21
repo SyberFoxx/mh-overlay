@@ -14,13 +14,31 @@ pub mod world;
 use std::fmt;
 use std::str::FromStr;
 
-use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process};
+use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process, Reads};
 
 pub use model::{
     Ailment, AmmoSlot, BowState, Breaks, Buff, Crown, CrownThresholds, Extracts, GunlanceState,
     Health, HornNote, HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness,
     SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
+
+/// Resuelve la raíz de una lista de monstruos: `None` si el juego todavía no la ha creado.
+///
+/// Fuera de una cacería —menú, aldea, pantalla de carga— el contenedor no existe y la cadena
+/// acaba en un nulo. Eso no es un offset roto: es la respuesta correcta, un mundo sin monstruos.
+/// Devolver un error ahí convertía «todavía no hay zona» en un fallo rojo en el panel.
+pub(crate) fn optional_chain<M: Reads>(
+    memory: &M,
+    address: u64,
+    offsets: &[i32],
+) -> Result<Option<u64>, MemoryError> {
+    match memory.deref_chain(address, offsets) {
+        Ok(0) => Ok(None),
+        Ok(pointer) => Ok(Some(pointer)),
+        Err(MemoryError::NullPointer { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
 
 /// Juegos con lector implementado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

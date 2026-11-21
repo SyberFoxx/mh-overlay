@@ -127,6 +127,30 @@ fn map_for(game: &str) -> AddressMap {
 }
 
 #[test]
+fn a_world_without_a_zone_has_no_monsters_instead_of_an_error() {
+    use crate::rise::Rise;
+    use crate::world::World;
+
+    let rise = map_for("MonsterHunterRise");
+    let world = map_for("MonsterHunterWorld");
+
+    // Una imagen sin nada escrito es un juego en el menú o en la aldea: todas las cadenas
+    // acaban en cero, y eso significa «sin monstruos», no «offset roto».
+    assert!(
+        Rise::new(Fixture::new(), &rise)
+            .monsters()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        World::new(Fixture::new(), &world)
+            .monsters()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn rise_reads_a_snapshot_from_a_memory_image() {
     use crate::rise::Rise;
 

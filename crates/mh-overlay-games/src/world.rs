@@ -15,6 +15,7 @@ use crate::model::{
     HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness, SharpnessLevel,
     Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
+use crate::optional_chain;
 
 // Desplazamientos fijos verificados contra la build 421810 (Iceborne), la misma que
 // documenta HunterPie para esta rama del lector.
@@ -975,10 +976,14 @@ impl<'map, M: Reads> World<'map, M> {
     }
 
     pub fn monsters(&self) -> Result<Vec<Monster>, MemoryError> {
-        let list = self.memory.deref_chain(
+        let Some(list) = optional_chain(
+            &self.memory,
             self.map.absolute("MONSTER_LIST_ADDRESS")?,
             self.map.offsets("MONSTER_LIST_OFFSETS")?,
-        )?;
+        )?
+        else {
+            return Ok(Vec::new());
+        };
 
         let components = self.memory.read_pointers(list, MAX_COMPONENTS)?;
         let target = self.target();
