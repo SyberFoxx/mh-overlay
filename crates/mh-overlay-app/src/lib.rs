@@ -5,6 +5,7 @@
 //! se lee la memoria, elegir el mapa cuando el CRC no coincide y ajustar colores y disposición
 //! viendo el resultado antes de aplicarlo.
 
+pub mod log;
 mod theme;
 mod tray;
 
@@ -37,6 +38,12 @@ use tray::Tray;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Icono de la ventana: el mismo dibujo de la bandeja, pasado de ARGB a RGBA.
+/// Tamaño recordado, dentro de lo que la ventana admite; un TOML editado a mano no la encoge
+/// hasta hacerla inutilizable.
+fn window_size(width: f32, height: f32) -> [f32; 2] {
+    [width.clamp(860.0, 4096.0), height.clamp(560.0, 2160.0)]
+}
+
 fn window_icon() -> egui::IconData {
     let size = 64;
     let argb = icons::tray_icon(size);
@@ -83,11 +90,33 @@ pub fn run(
     initial_map: Option<PathBuf>,
     force_game: Option<GameKind>,
 ) -> Result<(), AppError> {
+    let log_path = log::install();
+    // Desde aquí, cualquier pánico deja mensaje y pila en el registro en vez de perderse.
+    log::install_panic_hook();
+
     let has_display =
         std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
 
+    log::info(&format!(
+        "arranque · {VERSION} · {} · {} · tema {} · config {}",
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            "wayland"
+        } else {
+            "x11"
+        },
+        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "escritorio sin declarar".into()),
+        config.hub.theme,
+        config_path.display()
+    ));
+
     if !has_display {
+        log::warn("sin DISPLAY ni WAYLAND_DISPLAY: no se abre la ventana");
         return Err(AppError::NoDisplay);
+    }
+
+    if log_path.is_none() {
+        // El hub funciona igual, pero conviene que se sepa por qué no hay rastro.
+        eprintln!("aviso: no hay dónde escribir el registro (¿HOME sin definir?)");
     }
 
     let text = Text::bundled()?;
@@ -95,7 +124,10 @@ pub fn run(
     let theme = config.hub.theme;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1120.0, 720.0])
+            .with_inner_size(window_size(
+                config.hub.window_width,
+                config.hub.window_height,
+            ))
             .with_min_inner_size([860.0, 560.0])
             .with_title("mh-overlay · hub")
             .with_icon(window_icon()),
@@ -128,6 +160,32 @@ enum Tab {
     Diagnostics,
     Weapon,
     Settings,
+}
+
+/// Pestaña pedida con Ctrl+1..4; consume la tecla para que no la vea también otro control.
+fn tab_shortcut(input: &mut egui::InputState) -> Option<Tab> {
+    [
+        (egui::Key::Num1, Tab::News),
+        (egui::Key::Num2, Tab::Diagnostics),
+        (egui::Key::Num3, Tab::Weapon),
+        (egui::Key::Num4, Tab::Settings),
+    ]
+    .into_iter()
+    .find_map(|(key, tab)| input.consume_key(egui::Modifiers::CTRL, key).then_some(tab))
+}
+
+fn consume_escape(input: &mut egui::InputState) -> bool {
+    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+}
+
+/// Estado del `.map` en una línea, para el diagnóstico copiable y `--doctor`.
+fn validation_label(validation: Option<MapValidation>) -> &'static str {
+    match validation {
+        Some(MapValidation::Verified) => "CRC verificado",
+        Some(MapValidation::Mismatch) => "CRC no coincide con la build",
+        Some(MapValidation::Unavailable) => "sin CRC que comparar",
+        None => "sin validar",
+    }
 }
 
 /// Notas de la última release, tal como las imprime `--release-notes`.
@@ -344,28 +402,16 @@ impl Hub {
 
     /// Atajos: Ctrl+1..4 cambia de pestaña y Esc cierra la guía o la confirmación.
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        let mut selected = None;
+        let (selected, escape) =
+            ctx.input_mut(|input| (tab_shortcut(input), consume_escape(input)));
 
-        ctx.input_mut(|input| {
-            for (key, tab) in [
-                (egui::Key::Num1, Tab::News),
-                (egui::Key::Num2, Tab::Diagnostics),
-                (egui::Key::Num3, Tab::Weapon),
-                (egui::Key::Num4, Tab::Settings),
-            ] {
-                if input.consume_key(egui::Modifiers::CTRL, key) {
-                    selected = Some(tab);
-                }
+        if escape {
+            if self.onboarding.is_some() {
+                self.finish_onboarding();
+            } else if self.confirm_access {
+                self.confirm_access = false;
             }
-
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
-                if self.onboarding.is_some() {
-                    self.finish_onboarding();
-                } else if self.confirm_access {
-                    self.confirm_access = false;
-                }
-            }
-        });
+        }
 
         if let Some(tab) = selected {
             self.set_tab(tab);
@@ -551,8 +597,17 @@ impl Hub {
     }
 
     fn refresh(&mut self) {
+        let previous = self.status.error.clone();
         self.status = self.probe();
         self.last_refresh = Some(Instant::now());
+
+        // Solo las transiciones: el mismo error a 10 Hz llenaría el archivo.
+        if self.status.error != previous {
+            match &self.status.error {
+                Some(error) => log::warn(&format!("lectura: {error}")),
+                None => log::info("lectura recuperada"),
+            }
+        }
         // La vista previa sigue al juego cuando hay partida; sin juego se queda en el ejemplo.
         self.preview_stale = true;
     }
@@ -601,6 +656,7 @@ impl Hub {
             match command.spawn() {
                 Ok(child) => self.overlay = Some(child),
                 Err(error) => {
+                    log::warn(&format!("no se pudo abrir el panel: {error}"));
                     eprintln!("aviso: no se pudo abrir el panel: {error}");
                     self.save_error = Some(format!("no se pudo abrir el panel: {error}"));
                 }
@@ -612,10 +668,33 @@ impl Hub {
         }
     }
 
+    /// Guarda el tamaño actual de la ventana para la próxima vez que se abra.
+    fn remember_geometry(&mut self, ctx: &egui::Context) {
+        let size = ctx.viewport_rect().size();
+
+        // Escondida o minimizada la ventana no informa de un tamaño real; guardar eso la dejaría
+        // diminuta para siempre.
+        if !size.x.is_finite() || !size.y.is_finite() || size.x < 400.0 || size.y < 300.0 {
+            return;
+        }
+
+        if (self.config.hub.window_width - size.x).abs() < 1.0
+            && (self.config.hub.window_height - size.y).abs() < 1.0
+        {
+            return;
+        }
+
+        self.config.hub.window_width = size.x;
+        self.config.hub.window_height = size.y;
+        self.dirty = true;
+        self.save();
+    }
+
     fn save(&mut self) {
         self.dirty = false;
 
         if let Err(error) = self.config.validate() {
+            log::warn(&format!("configuración inválida, no se guarda: {error}"));
             self.save_error = Some(error.to_string());
             return;
         }
@@ -625,7 +704,10 @@ impl Hub {
                 self.save_error = None;
                 self.last_saved = Some(Instant::now());
             }
-            Err(error) => self.save_error = Some(error.to_string()),
+            Err(error) => {
+                log::warn(&format!("no se guardó la configuración: {error}"));
+                self.save_error = Some(error.to_string());
+            }
         }
     }
 
@@ -1659,6 +1741,12 @@ impl Hub {
             },
         ));
         report.push_str(&format!(
+            "registro: {}\n",
+            log::path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "sin ruta".to_string())
+        ));
+        report.push_str(&format!(
             "interfaz: tema {} · fondo {}\n",
             self.config.hub.theme,
             match self.config.hub.backdrop {
@@ -1677,12 +1765,7 @@ impl Hub {
         report.push_str(&format!(
             "mapa: {} · {}\n",
             self.status.map.as_deref().unwrap_or("ninguno"),
-            match self.status.validation {
-                Some(MapValidation::Verified) => "CRC verificado",
-                Some(MapValidation::Mismatch) => "CRC no coincide con la build",
-                Some(MapValidation::Unavailable) => "sin CRC que comparar",
-                None => "sin validar",
-            }
+            validation_label(self.status.validation)
         ));
 
         report.push_str(&format!(
@@ -3134,6 +3217,12 @@ impl eframe::App for Hub {
 
         self.shortcuts(ctx);
 
+        // El tamaño se guarda al cerrar, no mientras se arrastra el borde: es lo último que el
+        // usuario eligió y no hay razón para escribir el TOML en cada frame.
+        if self.closing || ctx.input(|input| input.viewport().close_requested()) {
+            self.remember_geometry(ctx);
+        }
+
         // Cerrar solo oculta la ventana si hay un panel vivo que conservar. Sin panel no hay
         // nada que mantener en segundo plano: cerrar termina, como espera Super+Q.
         // `Minimized` no existe en Wayland; para esconder de verdad se oculta la superficie.
@@ -3854,6 +3943,94 @@ fn ailment(name: &'static str, buildup: f32, max: f32, timer: f32, max_timer: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pulsa una tecla en un contexto egui sin ventana y devuelve la pestaña que resolvería.
+    fn pressed_key(key: egui::Key, modifiers: egui::Modifiers) -> Option<Tab> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        };
+
+        let mut found = None;
+        ctx.run_pass(input, |ctx| {
+            found = ctx.input_mut(tab_shortcut);
+        })
+        .drop_without_applying_deltas();
+
+        found
+    }
+
+    #[test]
+    fn each_control_number_picks_its_tab() {
+        for (key, tab) in [
+            (egui::Key::Num1, Tab::News),
+            (egui::Key::Num2, Tab::Diagnostics),
+            (egui::Key::Num3, Tab::Weapon),
+            (egui::Key::Num4, Tab::Settings),
+        ] {
+            assert_eq!(pressed_key(key, egui::Modifiers::CTRL), Some(tab));
+        }
+    }
+
+    #[test]
+    fn a_number_without_control_is_not_a_shortcut() {
+        assert_eq!(pressed_key(egui::Key::Num1, egui::Modifiers::NONE), None);
+        assert_eq!(pressed_key(egui::Key::Num1, egui::Modifiers::ALT), None);
+    }
+
+    #[test]
+    fn a_shortcut_key_is_consumed_once() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Num3,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+
+        let mut pressed: Option<(Option<Tab>, Option<Tab>)> = None;
+        ctx.run_pass(input, |ctx| {
+            ctx.input_mut(|input| {
+                pressed = Some((tab_shortcut(input), tab_shortcut(input)));
+            });
+        })
+        .drop_without_applying_deltas();
+
+        assert_eq!(pressed, Some((Some(Tab::Weapon), None)));
+    }
+
+    #[test]
+    fn every_validation_state_has_its_own_label() {
+        let labels = [
+            validation_label(None),
+            validation_label(Some(MapValidation::Verified)),
+            validation_label(Some(MapValidation::Mismatch)),
+            validation_label(Some(MapValidation::Unavailable)),
+        ];
+
+        for (index, label) in labels.iter().enumerate() {
+            assert!(!label.is_empty());
+            assert!(!labels[..index].contains(label), "{label} repetido");
+        }
+    }
+
+    #[test]
+    fn a_remembered_window_size_stays_inside_the_window() {
+        assert_eq!(window_size(1120.0, 720.0), [1120.0, 720.0]);
+        assert_eq!(window_size(10.0, 10.0), [860.0, 560.0]);
+        assert_eq!(window_size(9000.0, 9000.0), [4096.0, 2160.0]);
+    }
 
     #[test]
     fn closing_quits_without_a_panel_and_hides_with_one() {
