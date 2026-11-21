@@ -15,7 +15,8 @@ Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 - [ ] Una cacería real en World y otra en Rise con vida, partes, estados, arma y buffs correctos.
 - [ ] Instalación limpia del AppImage y del tarball en una máquina o VM sin el proyecto.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
-- [ ] Actualización real `v0.4.0 → v0.5.0`, reinicio y configuración conservada.
+- [x] Actualización real `v0.4.0 → v0.5.0`, reinicio y configuración conservada (AppImage
+      real sobre un `HOME` aislado: el binario se reemplaza en sitio y el TOML queda idéntico).
 - [ ] 30 minutos de juego sin panics ni lecturas basura, con el diagnóstico limpio.
 - [ ] README y release alineados: misma versión, mismos artefactos y mismas capturas.
 
@@ -28,9 +29,12 @@ Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 - [x] Subir la versión del workspace a `0.5.0` y publicar sus notas desde `CHANGELOG.md`.
 - [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
 - [x] Workflow `v0.4.0` en 3m43s, con release, notas y cuatro artefactos verificados.
-- [ ] Abrir el AppImage `v0.4.0`, detectar `v0.5.0`, instalar, reiniciar y verificar que la
-      configuración y el permiso siguen intactos.
-- [ ] Confirmar que la release lleva el README y el banner nuevos, AppStream y los iconos.
+- [x] Abrir el AppImage `v0.4.0`, detectar `v0.5.0`, instalar, reiniciar y verificar que la
+      configuración llega intacta. El permiso no aplica al AppImage, que no puede llevar
+      `cap_sys_ptrace`.
+- [x] Confirmar que la release lleva README, LICENSE, NOTICE, AppStream, `.desktop` e iconos
+      128/256/512; el tarball instala y desinstala en un prefijo propio. Las imágenes del README
+      se añaden al paquete a partir de la próxima release.
 
 **Por qué:** la autoactualización solo se probó contra un servidor local con una versión
 falsa, y los artefactos de `v0.1.0` son anteriores al acabado de distribución y al arreglo
@@ -95,7 +99,9 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
-- **2026-11-21 · `v0.5.0`**: rediseño del hub (tokens, tema automático/oscuro/claro, fondo
+- **2026-11-21 · `v0.5.0`**: release publicada con cuatro artefactos verificados; el AppImage
+  `0.4.0` detecta, descarga e instala `0.5.0` en sitio y conserva la configuración, y el
+  tarball se instala y desinstala en un prefijo propio. Rediseño del hub (tokens, tema automático/oscuro/claro, fondo
   ambiental), atajos, diagnóstico copiable, `--doctor`, registro con pánico, `config_version`
   con migración y tamaño de ventana recordado.
 - **2026-11-21 · `858a125`, `fa04653`, `57a1917`, `91d398b`**: paquete de robustez 0.5.0.

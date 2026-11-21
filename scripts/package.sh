@@ -24,6 +24,9 @@ mkdir -p "$stage/data"
 install -m755 target/release/mh-overlay "$stage/mh-overlay"
 cp -r data/maps "$stage/data/maps"
 install -m644 README.md LICENSE NOTICE "$stage/"
+# El README enlaza estas dos imágenes; sin ellas, el que llega dentro del paquete las ve rotas.
+install -d "$stage/docs"
+install -m644 docs/banner.jpeg docs/title.png "$stage/docs/"
 install -m755 packaging/install.sh "$stage/install.sh"
 install -m644 packaging/mh-overlay.desktop \
     "$stage/io.github.syberfoxx.mh_overlay.desktop"
