@@ -3,6 +3,16 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.5.2] - 2026-11-21
+
+### Corregido
+
+- El panel moría al abrirse en compositores wlroots (Hyprland, Sway): la capa se confirmaba sin
+  tamaño antes del primer fotograma y el compositor cerraba la conexión. Ahora se le da un
+  tamaño mínimo y el panel se queda en espera hasta que hay algo que enseñar.
+- El hub explica esa espera («el panel aparece al entrar en una cacería») en vez de parecer que
+  «Abrir panel» no hace nada, y el panel anota en el registro cuándo se oculta y cuándo vuelve.
+
 ## [0.5.1] - 2026-11-21
 
 ### Corregido
