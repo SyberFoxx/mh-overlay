@@ -1,6 +1,6 @@
 # Roadmap
 
-Estado: 20 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
+Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
 `mh-overlay` por terminado; el [README](README.md) cuenta lo que ya funciona.
 
 ## Cómo se mantiene
@@ -82,7 +82,6 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 
 ### Calidad
 
-- [ ] Fixtures de memoria para probar los lectores sin el juego.
 - [ ] Tests del hub: cierre, bandeja, actualización y navegación.
 - [ ] Prueba de actualización contra GitHub en CI, sin publicar nada.
 
@@ -97,6 +96,11 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-21 · `58b4c7f`**: fixtures de memoria. Las lecturas viven en el trait `Reads` y un
+  test por juego recorre vida, partes, estados, captura, corona, jugador y cacería contra una
+  imagen de bytes y el `.map` más nuevo, sin ptrace ni juego abierto.
+- **2026-11-21 · `e2ae463`**: detección por el módulo mapeado (Wine corta `comm` a 15 bytes) y
+  `--ps` para ver qué procesos mencionan o mapean el ejecutable.
 - **2026-11-20 · `v0.4.0`**: guía de primera ejecución, editor visual a la resolución real del
   monitor, arrastre sin reconstruir la vista previa en cada frame, caché de rectángulos y
   ajustes responsivos.
