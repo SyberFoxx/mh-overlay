@@ -306,6 +306,9 @@ vuelve a abrir el AppImage ya reemplazado. También se puede actualizar a mano c
 ```
 
 Baja la última release, comprueba su SHA-256 y reemplaza **ese mismo archivo** de forma atómica.
+Si la release trae un `.minisig` junto al artefacto, la firma se puede verificar con la clave
+pública publicada en la release (`minisign -Vm <archivo> -P <clave>`); el SHA-256 sigue siendo
+la comprobación mínima cuando no hay firma.
 No hay que desinstalar: la configuración vive en `~/.config/mh-overlay` y se conserva, y el
 lanzador del menú sigue apuntando al AppImage actualizado. Si el archivo está en una carpeta de
 solo lectura, el actualizador lo dice y no toca nada.
@@ -690,6 +693,18 @@ juego, y avisa por stderr de la versión elegida. Un mapa que no trae CRC no se 
 `--map` sigue permitiendo forzar uno. Los números de los mapas son hexadecimales aunque les
 falte el `0x`, igual que en HunterPie.
 
+No todos los mapas incluidos usan el esquema de claves que lee el binario. Rise necesita
+`QUEST_OFFSETS` para llegar a la lista de monstruos, y solo lo trae el mapa 16.0.2.0; los
+anteriores separan el estado de la cacería en `QUEST_TIMER_OFFSETS`, `QUEST_STATUS_OFFSETS` y
+compañía, que el lector todavía no usa. World necesita `MONSTER_LIST_ADDRESS`, presente desde la
+build 421652. Los tests recorren todos los mapas que sí tienen las claves del lector, así que un
+mapa nuevo que las pierda se detecta al añadirlo.
+
+| Juego | Build probada | Cómo |
+| --- | --- | --- |
+| Monster Hunter Rise | 16.0.2.0 | En partida real, el 21 de noviembre de 2026 |
+| Monster Hunter World | 421810 | Con las fixtures de memoria; pendiente de una máquina con el juego |
+
 Si actualizas un mapa a mano, sube el archivo con el número de versión del ejecutable en el
 nombre. `--map` permite probar uno sin tocar los demás.
 
@@ -712,6 +727,10 @@ Rise identifica las partes por su posición en el array, así que su tabla conse
 los huecos; World las identifica por el índice que reporta el juego.
 
 ## Límites conocidos
+
+Los fallos más comunes —permiso de memoria, proceso que no aparece, CRC de otra build, panel
+invisible, mapas viejos— están resueltos paso a paso en
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 - **Solo lectura.** No hay escritura ni inyección; el crate no expone un writer a propósito.
 - **La detección mira el nombre del proceso, la línea de comandos y el módulo mapeado.** El

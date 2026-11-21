@@ -41,6 +41,14 @@ install -m644 README.md LICENSE NOTICE "$appdir/usr/share/doc/mh-overlay/"
 # Las imágenes que enlaza el README, para que el que se lee dentro del AppImage no las vea rotas.
 install -d "$appdir/usr/share/doc/mh-overlay/docs"
 install -m644 docs/banner.jpeg docs/title.png "$appdir/usr/share/doc/mh-overlay/docs/"
+# Capturas del README, si ya están: sin la carpeta, el README de dentro las vería rotas.
+if [ -d docs/captures ]; then
+    install -d "$appdir/usr/share/doc/mh-overlay/docs/captures"
+    for image in docs/captures/*.png; do
+        [ -e "$image" ] || continue
+        install -m644 "$image" "$appdir/usr/share/doc/mh-overlay/docs/captures/"
+    done
+fi
 install -m644 packaging/mh-overlay.svg "$appdir/mh-overlay.svg"
 install -m644 packaging/mh-overlay.png "$appdir/mh-overlay.png"
 install -m644 packaging/mh-overlay.svg "$appdir/usr/share/icons/hicolor/scalable/apps/mh-overlay.svg"

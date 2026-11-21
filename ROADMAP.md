@@ -26,7 +26,7 @@ actualización probadas, y sin sorpresas en el panel ni en el hub.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
 - [ ] 30 minutos de juego sin panics, sin lecturas basura y con el diagnóstico limpio.
 - [ ] README, capturas, CHANGELOG y artefactos de la release alineados con la etiqueta.
-- [ ] Los `.map` soportados están enumerados y probados; ningún juego lee con un mapa que
+- [x] Los `.map` soportados están enumerados y probados; ningún juego lee con un mapa que
       no corresponda a su build.
 
 ## Lo que falta, por orden de riesgo
@@ -72,18 +72,21 @@ está verificado por tests; falta verlo con el compositor real.
       reinicio y configuración intacta).
 - [ ] Verificar que la release lleva README, LICENSE, NOTICE, AppStream, `.desktop`, iconos
       y las imágenes que enlaza el README.
-- [ ] Firmar los artefactos (minisign o GPG) además del SHA-256.
+- [x] Firmar los artefactos (minisign) además del SHA-256. El paso está en el workflow;
+      falta generar el par de claves y subir `MINISIGN_SECRET_KEY` para que la release lo use.
 - [ ] Publicar también para `aarch64` si hay usuarios en ARM.
-- [ ] Revisar que un AppImage sin `CAP_SYS_PTRACE` explica qué hacer en vez de fallar en
-      silencio.
+- [x] Revisar que un AppImage sin `CAP_SYS_PTRACE` explica qué hacer en vez de fallar en
+      silencio; CI exige que `--doctor` lo nombre.
 
 ### 5. Calidad y mantenimiento
 
 - [ ] Tests del hub: cierre, bandeja y actualización (navegación, atajos y fondo ya están
       cubiertos sin ventana).
 - [ ] Prueba de actualización contra GitHub en CI, sin publicar nada.
-- [ ] Un test por lector contra la fixture de cada `.map` soportado, para detectar un cambio
-      de offsets al añadir una versión.
+- [x] Un test por lector contra la fixture de cada `.map` soportado, para detectar un cambio
+      de offsets al añadir una versión. Rise cubre los mapas con `QUEST_OFFSETS` y World los
+      que tienen `MONSTER_LIST_ADDRESS`; los demás esquemas quedan documentados como no
+      soportados.
 - [ ] Revisar los `unwrap`/`expect` que queden y convertir en `Err` los que el juego pueda
       provocar.
 - [ ] Repasar avisos y mensajes para que un fallo de lectura diga qué mapa o permiso falta.
@@ -91,8 +94,9 @@ está verificado por tests; falta verlo con el compositor real.
 ### 6. Documentación de la 1.0
 
 - [ ] Capturas reales del hub y del panel, y un GIF corto para el README.
-- [ ] Página de solución de problemas: ptrace, Proton, REFramework, mapas y Wayland.
-- [ ] Enumerar en el README las builds y mapas probados, con fecha.
+- [x] Página de solución de problemas: ptrace, Proton, REFramework, mapas y Wayland
+      (`docs/TROUBLESHOOTING.md`).
+- [x] Enumerar en el README las builds y mapas probados, con fecha.
 - [ ] Notas de la 1.0 con lo que se congela (formato del TOML, CLI y `.map`) y lo que no.
 
 ## Después de la 1.0
@@ -114,6 +118,10 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-21 · sin publicar**: tests por cada mapa con el esquema del lector (Rise y World),
+  firma opcional con minisign en la release, diagnóstico de `CAP_SYS_PTRACE` exigido en CI,
+  guía de solución de problemas y builds probadas en el README. Las capturas siguen
+  pendientes de una cacería.
 - **2026-11-21 · 0.5.4**: observado en una cacería real: el filo se muestra en golpes del
   color actual y del siguiente; las partes repetidas se numeran; se elimina el buff fantasma
   de «Llamada de spiribird» y las filas de estado dejan de parpadear con residuos mínimos.

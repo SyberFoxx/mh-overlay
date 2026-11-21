@@ -3,6 +3,25 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [Unreleased]
+
+### Añadido
+
+- Firma opcional de los artefactos con minisign: si el repositorio define
+  `MINISIGN_SECRET_KEY`, la release publica un `.minisig` por AppImage y tarball. Sin ese
+  secreto la release sigue saliendo con su SHA-256, igual que antes.
+- [Guía de solución de problemas](docs/TROUBLESHOOTING.md): permiso de memoria, proceso que no
+  aparece, CRC de otra build, mapas viejos, panel invisible y actualización.
+- El README enumera las builds probadas y su fecha, y los mapas que usan el esquema de claves
+  que lee el binario.
+
+### Mejorado
+
+- Los tests recorren cada `.map` de Rise y World que tiene las claves del lector, no solo el más
+  nuevo: un mapa añadido que pierda `QUEST_OFFSETS` o `MONSTER_LIST_ADDRESS` falla al instante.
+- El diagnóstico del AppImage en CI exige que `--doctor` nombre `CAP_SYS_PTRACE`, para que el
+  caso «se adjunta pero no lee» nunca quede sin pista.
+
 ## [0.5.4] - 2026-11-21
 
 ### Corregido
