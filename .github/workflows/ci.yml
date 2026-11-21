@@ -65,6 +65,19 @@ jobs:
           MH_OVERLAY_UPDATE_API=file:///tmp/release.json \
             "$appimage" --appimage-extract-and-run --check-update
 
+      - name: Diagnóstico del AppImage
+        run: |
+          appimage=$(ls dist/*.AppImage)
+          "$appimage" --appimage-extract-and-run --doctor
+
+      # Contra la API real de GitHub. Se marca como informativo: un límite de peticiones o un
+      # corte de red del runner no debe teñir de rojo un cambio que no toca la actualización.
+      - name: Comprobar la actualización contra GitHub
+        continue-on-error: true
+        run: |
+          appimage=$(ls dist/*.AppImage)
+          "$appimage" --appimage-extract-and-run --check-update
+
       - name: Probar el instalador
         run: |
           tar xzf dist/*.tar.gz -C /tmp

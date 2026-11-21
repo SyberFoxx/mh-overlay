@@ -38,6 +38,9 @@ mkdir -p \
 install -m755 target/release/mh-overlay "$appdir/usr/bin/mh-overlay"
 cp -r data/maps "$appdir/usr/share/mh-overlay/data/maps"
 install -m644 README.md LICENSE NOTICE "$appdir/usr/share/doc/mh-overlay/"
+# Las imágenes que enlaza el README, para que el que se lee dentro del AppImage no las vea rotas.
+install -d "$appdir/usr/share/doc/mh-overlay/docs"
+install -m644 docs/banner.jpeg docs/title.png "$appdir/usr/share/doc/mh-overlay/docs/"
 install -m644 packaging/mh-overlay.svg "$appdir/mh-overlay.svg"
 install -m644 packaging/mh-overlay.png "$appdir/mh-overlay.png"
 install -m644 packaging/mh-overlay.svg "$appdir/usr/share/icons/hicolor/scalable/apps/mh-overlay.svg"
@@ -146,9 +149,39 @@ if ! tool_ok 2>/dev/null; then
     chmod +x "$tool"
 fi
 
+# El runtime type2 también se fija por etiqueta y SHA-256. Sin `--runtime-file`, appimagetool usa
+# el runtime que lleva dentro o descarga el de `continuous`, que cambia sin aviso: dos builds del
+# mismo commit dejarían de ser idénticos. La etiqueta es una release fechada, no una rama.
+runtime_version="20251108"
+case "$machine" in
+    x86_64) runtime_sha256="2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d" ;;
+    aarch64) runtime_sha256="00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444" ;;
+    *)
+        echo "error: no hay runtime type2 verificado para $machine" >&2
+        exit 1
+        ;;
+esac
+runtime="target/appimage/type2-runtime-$runtime_version-$machine"
+
+runtime_ok() {
+    printf '%s  %s\n' "$runtime_sha256" "$runtime" | sha256sum -c --quiet -
+}
+
+if ! runtime_ok 2>/dev/null; then
+    echo "descargando runtime type2 $runtime_version para $machine"
+    mkdir -p "$(dirname "$runtime")"
+    rm -f "$runtime" "$runtime.part"
+    curl -fL --retry 3 -o "$runtime.part" \
+        "https://github.com/AppImage/type2-runtime/releases/download/$runtime_version/runtime-$machine"
+    printf '%s  %s\n' "$runtime_sha256" "$runtime.part" | sha256sum -c --quiet -
+    mv "$runtime.part" "$runtime"
+    chmod +x "$runtime"
+fi
+
 echo "generando $appimage"
 rm -f "$appimage"
-VERSION="$version" ARCH="$machine" "$tool" --appimage-extract-and-run "$appdir" "$appimage"
+VERSION="$version" ARCH="$machine" "$tool" --appimage-extract-and-run \
+    --runtime-file "$runtime" "$appdir" "$appimage"
 
 sha256sum "$appimage" | sed "s|dist/||" >"$appimage.sha256"
 
