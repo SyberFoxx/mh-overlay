@@ -5,114 +5,36 @@
 //! se lee la memoria, elegir el mapa cuando el CRC no coincide y ajustar colores y disposición
 //! viendo el resultado antes de aplicarlo.
 
+mod theme;
 mod tray;
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
 use mh_overlay_config::{
-    BarPlacement, Color, Config, Direction, Layout, LayoutPreset, Monsters, OverlaySection,
-    Position, StyleSection,
+    Backdrop, BarPlacement, Color, Config, Direction, Layout, LayoutPreset, Monsters,
+    OverlaySection, Position, StyleSection, Theme,
 };
 use mh_overlay_games::{
     Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
     Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
 };
 use mh_overlay_memory::{
-    AddressMap, MapValidation, Memory, MemoryError, Process, SelectedMap, maps_directory,
+    AddressMap, Lookalike, MapValidation, Memory, MemoryError, Process, SelectedMap, lookalikes,
+    maps_directory,
 };
 use mh_overlay_ui::OverlayError;
 use mh_overlay_ui::icons;
 use mh_overlay_ui::text::Text;
 use mh_overlay_ui::view;
+use theme::{Palette, RADIUS};
 use tray::Tray;
-
-/// Paleta del hub. Es la misma familia que el panel sobre el juego: fondo profundo, texto claro
-/// y un ámbar de acento, para que la ventana y el overlay se lean como la misma aplicación.
-const BG: egui::Color32 = egui::Color32::from_rgb(0x0b, 0x0d, 0x12);
-const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x14, 0x18, 0x21);
-const SURFACE_2: egui::Color32 = egui::Color32::from_rgb(0x1b, 0x20, 0x2b);
-const SURFACE_3: egui::Color32 = egui::Color32::from_rgb(0x24, 0x2a, 0x37);
-const INPUT: egui::Color32 = egui::Color32::from_rgb(0x0f, 0x12, 0x19);
-const BORDER: egui::Color32 = egui::Color32::from_rgb(0x2a, 0x31, 0x3f);
-const TEXT: egui::Color32 = egui::Color32::from_rgb(0xe8, 0xec, 0xf4);
-const MUTED: egui::Color32 = egui::Color32::from_rgb(0x93, 0x9d, 0xb0);
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xe6, 0xb4, 0x5e);
-const GOOD: egui::Color32 = egui::Color32::from_rgb(0x7f, 0xd4, 0x7f);
-const BAD: egui::Color32 = egui::Color32::from_rgb(0xe2, 0x56, 0x5c);
 
 /// Versión que enseña el hub, la misma que `--version`.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Tipografía, espaciado y colores de los widgets. Se aplica una sola vez, antes de construir
-/// la ventana, para que egui no pinte un fotograma con su tema por defecto.
-fn apply_theme(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "rajdhani".to_owned(),
-        Arc::new(egui::FontData::from_static(
-            mh_overlay_ui::text::font_bytes(),
-        )),
-    );
-    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        family.insert(0, "rajdhani".to_owned());
-    }
-    ctx.set_fonts(fonts);
-    ctx.set_theme(egui::Theme::Dark);
-
-    let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(10.0, 6.0);
-    style.spacing.interact_size.y = 28.0;
-    style.text_styles = [
-        (egui::TextStyle::Heading, egui::FontId::proportional(26.0)),
-        (egui::TextStyle::Body, egui::FontId::proportional(15.0)),
-        (egui::TextStyle::Button, egui::FontId::proportional(15.0)),
-        (egui::TextStyle::Small, egui::FontId::proportional(12.0)),
-        (egui::TextStyle::Monospace, egui::FontId::monospace(13.0)),
-    ]
-    .into();
-
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = BG;
-    visuals.window_fill = SURFACE;
-    visuals.extreme_bg_color = INPUT;
-    visuals.faint_bg_color = SURFACE_2;
-    visuals.override_text_color = Some(TEXT);
-    visuals.weak_text_color = Some(MUTED);
-    visuals.selection.bg_fill = ACCENT.gamma_multiply(0.30);
-    visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
-
-    for widget in [
-        &mut visuals.widgets.noninteractive,
-        &mut visuals.widgets.inactive,
-        &mut visuals.widgets.hovered,
-        &mut visuals.widgets.active,
-        &mut visuals.widgets.open,
-    ] {
-        widget.corner_radius = egui::CornerRadius::same(8);
-    }
-
-    visuals.widgets.noninteractive.bg_fill = SURFACE;
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-    visuals.widgets.inactive.weak_bg_fill = SURFACE_2;
-    visuals.widgets.inactive.bg_fill = SURFACE_2;
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT);
-    visuals.widgets.hovered.weak_bg_fill = SURFACE_3;
-    visuals.widgets.hovered.bg_fill = SURFACE_3;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.6));
-    visuals.widgets.active.weak_bg_fill = ACCENT.gamma_multiply(0.25);
-    visuals.widgets.active.bg_fill = ACCENT.gamma_multiply(0.25);
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-
-    style.visuals = visuals;
-    ctx.set_style_of(egui::Theme::Dark, style);
-}
 
 /// Icono de la ventana: el mismo dibujo de la bandeja, pasado de ARGB a RGBA.
 fn window_icon() -> egui::IconData {
@@ -169,6 +91,8 @@ pub fn run(
     }
 
     let text = Text::bundled()?;
+    // El tema se aplica dentro del cierre, antes de mover `config` al `Hub`.
+    let theme = config.hub.theme;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1120.0, 720.0])
@@ -182,7 +106,9 @@ pub fn run(
         "mh-overlay · hub",
         options,
         Box::new(move |context| {
-            apply_theme(&context.egui_ctx);
+            theme::install(&context.egui_ctx);
+            // Antes del primer fotograma, para que la ventana no parpadee con el tema de egui.
+            theme::apply(&context.egui_ctx, theme);
             Ok(Box::new(Hub::new(
                 config_path,
                 config,
@@ -242,6 +168,16 @@ struct Hub {
     config_path: PathBuf,
     config: Config,
     text: Text,
+    /// Paleta vigente, para el dibujo propio (tarjetas, píldoras, gráficas).
+    palette: Palette,
+    /// Procesos que mencionan o mapean el ejecutable, pedidos a mano desde Diagnóstico.
+    seen: Option<Vec<Lookalike>>,
+    /// Cuándo se copió el diagnóstico, para confirmarlo sin un diálogo.
+    copied_at: Option<Instant>,
+    /// Tema con el que se vistió la ventana; `None` hasta el primer fotograma.
+    applied_theme: Option<Theme>,
+    /// Si la paleta aplicada es oscura, para notar un cambio del escritorio en `auto`.
+    applied_dark: bool,
     maps_directory: Option<PathBuf>,
     tab: Tab,
     status: Status,
@@ -335,6 +271,11 @@ impl Hub {
             config_path,
             config,
             text,
+            palette: Palette::dark(),
+            seen: None,
+            copied_at: None,
+            applied_theme: None,
+            applied_dark: true,
             maps_directory,
             tab: Tab::Diagnostics,
             status: Status::default(),
@@ -387,6 +328,63 @@ impl Hub {
         hub.start_check(false);
         hub.start_notes();
         hub
+    }
+
+    /// Viste la ventana con el tema configurado y lo rehace si cambia el del escritorio.
+    ///
+    /// Se llama una vez por fotograma: cuando no hay nada que cambiar no toca el estilo, que
+    /// si no invalidaría la maquetación en cada frame.
+    /// Cambia de pestaña y vuelve arriba, para que un atajo no deje media pantalla scrolleada.
+    fn set_tab(&mut self, tab: Tab) {
+        if self.tab != tab {
+            self.tab = tab;
+            self.scroll_to_top = true;
+        }
+    }
+
+    /// Atajos: Ctrl+1..4 cambia de pestaña y Esc cierra la guía o la confirmación.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        let mut selected = None;
+
+        ctx.input_mut(|input| {
+            for (key, tab) in [
+                (egui::Key::Num1, Tab::News),
+                (egui::Key::Num2, Tab::Diagnostics),
+                (egui::Key::Num3, Tab::Weapon),
+                (egui::Key::Num4, Tab::Settings),
+            ] {
+                if input.consume_key(egui::Modifiers::CTRL, key) {
+                    selected = Some(tab);
+                }
+            }
+
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                if self.onboarding.is_some() {
+                    self.finish_onboarding();
+                } else if self.confirm_access {
+                    self.confirm_access = false;
+                }
+            }
+        });
+
+        if let Some(tab) = selected {
+            self.set_tab(tab);
+        }
+    }
+
+    fn sync_theme(&mut self, ctx: &egui::Context) {
+        let theme = self.config.hub.theme;
+        let system_dark = matches!(ctx.theme(), egui::Theme::Dark);
+        let changed = self.applied_theme != Some(theme)
+            || (theme == Theme::Auto && self.applied_dark != system_dark);
+
+        if changed {
+            let look = theme::apply(ctx, theme);
+            self.palette = look.palette;
+            self.applied_theme = Some(theme);
+            self.applied_dark = look.dark;
+            self.preview_stale = true;
+        }
     }
 
     fn game(&self) -> GameKind {
@@ -688,32 +686,32 @@ impl Hub {
                     "pid {pid} · {}",
                     self.status.map.as_deref().unwrap_or("sin mapa")
                 ),
-                GOOD,
+                self.palette.good,
             ),
-            (Some(error), Some(_)) => ("Error de lectura", error.clone(), BAD),
+            (Some(error), Some(_)) => ("Error de lectura", error.clone(), self.palette.bad),
             (Some(_), None) => (
                 "Sin juego",
                 "Abre Monster Hunter y el hub se conecta solo.".to_string(),
-                MUTED,
+                self.palette.muted,
             ),
             _ => (
                 "Sin leer todavía",
                 "La primera lectura llega en un instante.".to_string(),
-                MUTED,
+                self.palette.muted,
             ),
         }
     }
 
-    fn nav_item(&mut self, ui: &mut egui::Ui, tab: Tab, title: &str, subtitle: &str) {
+    fn nav_item(&mut self, ui: &mut egui::Ui, tab: Tab, title: &str, subtitle: &str, hint: &str) {
         let active = self.tab == tab;
         let width = ui.available_width();
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(width, 44.0), egui::Sense::click());
 
         let fill = if active {
-            ACCENT.gamma_multiply(0.14)
+            self.palette.accent.gamma_multiply(0.14)
         } else if response.hovered() {
-            SURFACE_2
+            self.palette.surface_2
         } else {
             egui::Color32::TRANSPARENT
         };
@@ -723,7 +721,7 @@ impl Hub {
             ui.painter().rect_stroke(
                 rect,
                 egui::CornerRadius::same(9),
-                egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.45)),
+                egui::Stroke::new(1.0, self.palette.accent.gamma_multiply(0.45)),
                 egui::StrokeKind::Inside,
             );
         }
@@ -734,19 +732,33 @@ impl Hub {
             egui::Align2::LEFT_TOP,
             title,
             egui::FontId::proportional(15.0),
-            if active { ACCENT } else { TEXT },
+            if active {
+                self.palette.accent
+            } else {
+                self.palette.text
+            },
         );
         ui.painter().text(
             egui::pos2(x, rect.top() + 26.0),
             egui::Align2::LEFT_TOP,
             subtitle,
             egui::FontId::proportional(11.5),
-            MUTED,
+            self.palette.muted,
+        );
+        ui.painter().text(
+            egui::pos2(rect.right() - 10.0, rect.top() + 8.0),
+            egui::Align2::RIGHT_TOP,
+            hint,
+            egui::FontId::proportional(10.5),
+            if active {
+                self.palette.accent.gamma_multiply(0.8)
+            } else {
+                self.palette.muted.gamma_multiply(0.7)
+            },
         );
 
         if response.clicked() {
-            self.tab = tab;
-            self.scroll_to_top = true;
+            self.set_tab(tab);
         }
         ui.add_space(2.0);
     }
@@ -755,27 +767,44 @@ impl Hub {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             egui::Frame::new()
-                .fill(ACCENT)
+                .fill(self.palette.accent)
                 .corner_radius(egui::CornerRadius::same(10))
                 .inner_margin(egui::Margin::symmetric(9, 4))
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new("MH").color(BG).strong().size(17.0));
+                    ui.label(
+                        egui::RichText::new("MH")
+                            .color(self.palette.bg)
+                            .strong()
+                            .size(17.0),
+                    );
                 });
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new("mh-overlay").strong().size(18.0));
                 ui.label(
                     egui::RichText::new("Monster Hunter HUD")
                         .small()
-                        .color(MUTED),
+                        .color(self.palette.muted),
                 );
             });
         });
 
         ui.add_space(20.0);
-        self.nav_item(ui, Tab::News, "Novedades", "Qué trae la última versión");
-        self.nav_item(ui, Tab::Diagnostics, "Diagnóstico", "Conexión y lectura");
-        self.nav_item(ui, Tab::Weapon, "Arma", "Filo, medidores y datos");
-        self.nav_item(ui, Tab::Settings, "Ajustes", "Panel y colores");
+        self.nav_item(
+            ui,
+            Tab::News,
+            "Novedades",
+            "Qué trae la última versión",
+            "Ctrl+1",
+        );
+        self.nav_item(
+            ui,
+            Tab::Diagnostics,
+            "Diagnóstico",
+            "Conexión y lectura",
+            "Ctrl+2",
+        );
+        self.nav_item(ui, Tab::Weapon, "Arma", "Filo, medidores y datos", "Ctrl+3");
+        self.nav_item(ui, Tab::Settings, "Ajustes", "Panel y colores", "Ctrl+4");
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             // En un layout de abajo arriba, lo primero que se añade queda más abajo.
@@ -790,7 +819,7 @@ impl Hub {
                     }
                 ))
                 .small()
-                .color(MUTED),
+                .color(self.palette.muted),
             );
 
             if let Some(version) = &self.available {
@@ -798,7 +827,7 @@ impl Hub {
                 ui.label(
                     egui::RichText::new(format!("Actualización {version} disponible"))
                         .small()
-                        .color(ACCENT),
+                        .color(self.palette.accent),
                 );
             }
 
@@ -851,19 +880,19 @@ impl Hub {
 
             if let Some((ok, message)) = &self.update_note {
                 ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(message)
-                        .small()
-                        .color(if *ok { GOOD } else { BAD }),
-                );
+                ui.label(egui::RichText::new(message).small().color(if *ok {
+                    self.palette.good
+                } else {
+                    self.palette.bad
+                }));
             }
 
             ui.add_space(10.0);
             let running = self.overlay_running();
             let (label, fill, color) = if running {
-                ("Cerrar panel", SURFACE_3, TEXT)
+                ("Cerrar panel", self.palette.surface_3, self.palette.text)
             } else {
-                ("Abrir panel", ACCENT, BG)
+                ("Abrir panel", self.palette.accent, self.palette.bg)
             };
             if ui
                 .add(
@@ -884,15 +913,29 @@ impl Hub {
                 ui.painter().circle_filled(rect.center(), 4.0, color);
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(title).small().color(color).strong());
-                    ui.label(egui::RichText::new(detail).size(10.5).color(MUTED));
+                    ui.label(
+                        egui::RichText::new(detail)
+                            .size(10.5)
+                            .color(self.palette.muted),
+                    );
                 });
             });
         });
     }
 
     fn page_header(ui: &mut egui::Ui, title: &str, subtitle: &str) {
-        ui.label(egui::RichText::new(title).size(28.0).strong().color(TEXT));
-        ui.label(egui::RichText::new(subtitle).size(13.5).color(MUTED));
+        let palette = Palette::current();
+        ui.label(
+            egui::RichText::new(title)
+                .size(28.0)
+                .strong()
+                .color(palette.text),
+        );
+        ui.label(
+            egui::RichText::new(subtitle)
+                .size(13.5)
+                .color(palette.muted),
+        );
         ui.add_space(14.0);
     }
 
@@ -918,7 +961,7 @@ impl Hub {
                     egui::RichText::new(format!("PASO {} DE 3", step + 1))
                         .size(11.0)
                         .strong()
-                        .color(ACCENT),
+                        .color(self.palette.accent),
                 );
                 ui.add_space(4.0);
 
@@ -976,7 +1019,7 @@ impl Hub {
             egui::RichText::new(
                 "Puede detectar Rise o World solo, o quedarse con el título que elijas.",
             )
-            .color(MUTED),
+            .color(self.palette.muted),
         );
         ui.add_space(6.0);
 
@@ -1010,7 +1053,11 @@ impl Hub {
             ui.painter().circle_filled(rect.center(), 4.0, color);
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(title).small().color(color).strong());
-                ui.label(egui::RichText::new(detail).size(11.0).color(MUTED));
+                ui.label(
+                    egui::RichText::new(detail)
+                        .size(11.0)
+                        .color(self.palette.muted),
+                );
             });
         });
     }
@@ -1031,7 +1078,7 @@ impl Hub {
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new("La última lectura falló por permisos.")
-                    .color(BAD)
+                    .color(self.palette.bad)
                     .strong(),
             );
         }
@@ -1052,7 +1099,7 @@ impl Hub {
                     "Se pedirá tu contraseña y se pondrá el valor en 0 hasta el próximo reinicio.",
                 )
                 .small()
-                .color(MUTED),
+                .color(self.palette.muted),
             );
         } else {
             if ui.button("Copiar orden").clicked() {
@@ -1063,7 +1110,7 @@ impl Hub {
                 egui::RichText::new("sudo sysctl -w kernel.yama.ptrace_scope=0")
                     .monospace()
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
             );
         }
 
@@ -1073,7 +1120,7 @@ impl Hub {
                 ui.label(
                     egui::RichText::new("esperando permisos…")
                         .small()
-                        .color(MUTED),
+                        .color(self.palette.muted),
                 );
             });
         }
@@ -1083,9 +1130,9 @@ impl Hub {
                 egui::RichText::new(note)
                     .small()
                     .color(if note.contains("concedido") {
-                        GOOD
+                        self.palette.good
                     } else {
-                        BAD
+                        self.palette.bad
                     }),
             );
         }
@@ -1113,11 +1160,11 @@ impl Hub {
             .num_columns(2)
             .spacing([20.0, 6.0])
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("Juego").color(MUTED));
+                ui.label(egui::RichText::new("Juego").color(self.palette.muted));
                 ui.label(display_game(self.game()));
                 ui.end_row();
 
-                ui.label(egui::RichText::new("Conexión").color(MUTED));
+                ui.label(egui::RichText::new("Conexión").color(self.palette.muted));
                 ui.label(self.connection_state().0);
                 ui.end_row();
             });
@@ -1127,7 +1174,7 @@ impl Hub {
             ui.label(
                 egui::RichText::new("El panel ya está abierto.")
                     .small()
-                    .color(GOOD),
+                    .color(self.palette.good),
             );
         } else if ui.button("Abrir el panel ahora").clicked() {
             return true;
@@ -1494,11 +1541,11 @@ impl Hub {
                 .num_columns(2)
                 .spacing([24.0, 7.0])
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new("Instalada").color(MUTED));
+                    ui.label(egui::RichText::new("Instalada").color(self.palette.muted));
                     ui.label(egui::RichText::new(format!("v{installed}")).strong());
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Última publicada").color(MUTED));
+                    ui.label(egui::RichText::new("Última publicada").color(self.palette.muted));
                     ui.label(
                         egui::RichText::new(match &notes_version {
                             Some(version) => format!("v{version}"),
@@ -1531,11 +1578,11 @@ impl Hub {
 
             if let Some((ok, message)) = &self.update_note {
                 ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(message)
-                        .small()
-                        .color(if *ok { GOOD } else { BAD }),
-                );
+                ui.label(egui::RichText::new(message).small().color(if *ok {
+                    self.palette.good
+                } else {
+                    self.palette.bad
+                }));
             }
         });
 
@@ -1543,14 +1590,14 @@ impl Hub {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(egui::RichText::new("leyendo las notas…").color(MUTED));
+                ui.label(egui::RichText::new("leyendo las notas…").color(self.palette.muted));
             });
         }
 
         if let Some(error) = &self.notes_error {
             alert(
                 ui,
-                BAD,
+                self.palette.bad,
                 "No se pudieron leer las novedades",
                 &format!("{error}. ¿Hay conexión con GitHub?"),
             );
@@ -1566,13 +1613,13 @@ impl Hub {
                         egui::RichText::new(&notes.tag)
                             .size(20.0)
                             .strong()
-                            .color(ACCENT),
+                            .color(self.palette.accent),
                     );
                     if !notes.published.is_empty() {
                         ui.label(
                             egui::RichText::new(release_date(&notes.published))
                                 .small()
-                                .color(MUTED),
+                                .color(self.palette.muted),
                         );
                     }
                     ui.hyperlink_to(
@@ -1591,11 +1638,107 @@ impl Hub {
         if let Some(version) = &available {
             alert(
                 ui,
-                ACCENT,
+                self.palette.accent,
                 &format!("La versión v{version} está disponible"),
                 "Ábrela desde el botón de arriba o desde la barra lateral; la configuración se conserva.",
             );
         }
+    }
+
+    /// Informe de una pieza con lo que hace falta para reproducir un problema.
+    fn diagnostic_report(&self) -> String {
+        let mut report = format!("mh-overlay {VERSION}\n");
+        report.push_str(&format!(
+            "juego: {} ({}) · detección automática {}\n",
+            display_game(self.game()),
+            self.game().module(),
+            if self.config.game.auto_detect {
+                "sí"
+            } else {
+                "no"
+            },
+        ));
+        report.push_str(&format!(
+            "interfaz: tema {} · fondo {}\n",
+            self.config.hub.theme,
+            match self.config.hub.backdrop {
+                Backdrop::Ambient => "ambiente",
+                Backdrop::None => "ninguno",
+            }
+        ));
+
+        match (self.status.pid, self.status.base) {
+            (Some(pid), Some(base)) => {
+                report.push_str(&format!("proceso: pid {pid} · base 0x{base:016X}\n"));
+            }
+            _ => report.push_str("proceso: no encontrado\n"),
+        }
+
+        report.push_str(&format!(
+            "mapa: {} · {}\n",
+            self.status.map.as_deref().unwrap_or("ninguno"),
+            match self.status.validation {
+                Some(MapValidation::Verified) => "CRC verificado",
+                Some(MapValidation::Mismatch) => "CRC no coincide con la build",
+                Some(MapValidation::Unavailable) => "sin CRC que comparar",
+                None => "sin validar",
+            }
+        ));
+
+        report.push_str(&format!(
+            "lectura: {} · {} · monstruos {} · jugador {} · cacería {}\n",
+            self.status
+                .checked_at
+                .map(|at| seconds_ago(at.elapsed()))
+                .unwrap_or_else(|| "—".to_string()),
+            self.status
+                .read_ms
+                .map(|ms| format!("{ms} ms"))
+                .unwrap_or_else(|| "—".to_string()),
+            self.status.snapshot.monsters.len(),
+            if self.status.snapshot.player.is_some() {
+                "sí"
+            } else {
+                "no"
+            },
+            if self.status.snapshot.hunt.is_some() {
+                "sí"
+            } else {
+                "no"
+            },
+        ));
+
+        if let Some(error) = &self.status.error {
+            report.push_str(&format!("error: {error}\n"));
+        }
+
+        if let Some(seen) = &self.seen {
+            report.push_str("procesos vistos:\n");
+
+            if seen.is_empty() {
+                report.push_str("  ninguno menciona el ejecutable\n");
+            }
+
+            for process in seen {
+                report.push_str(&format!("  pid {} · {}", process.pid, process.comm));
+                if let Some((module, base)) = &process.mapping {
+                    report.push_str(&format!(" · mapea {module} en 0x{base:X}"));
+                }
+                report.push('\n');
+
+                if !process.cmdline.is_empty() {
+                    report.push_str(&format!("    {}\n", process.cmdline));
+                }
+            }
+        }
+
+        report
+    }
+
+    /// Lo mismo que `mh-overlay --ps`, sin pedir una terminal.
+    fn scan_processes(&mut self) {
+        let names = GameKind::ALL.map(GameKind::module);
+        self.seen = Some(lookalikes(&names));
     }
 
     fn diagnostics(&mut self, ui: &mut egui::Ui) {
@@ -1618,10 +1761,33 @@ impl Hub {
                         ui.allocate_exact_size(egui::vec2(11.0, 11.0), egui::Sense::hover());
                     ui.painter().circle_filled(rect.center(), 5.5, color);
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(title).size(20.0).strong().color(TEXT));
-                        ui.label(egui::RichText::new(detail).size(12.5).color(MUTED));
+                        ui.label(
+                            egui::RichText::new(title)
+                                .size(20.0)
+                                .strong()
+                                .color(self.palette.text),
+                        );
+                        ui.label(
+                            egui::RichText::new(detail)
+                                .size(12.5)
+                                .color(self.palette.muted),
+                        );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Copiar diagnóstico").clicked() {
+                            ui.ctx().copy_text(self.diagnostic_report());
+                            self.copied_at = Some(Instant::now());
+                        }
+                        if self
+                            .copied_at
+                            .is_some_and(|at| at.elapsed() < Duration::from_secs(3))
+                        {
+                            ui.label(
+                                egui::RichText::new("copiado")
+                                    .small()
+                                    .color(self.palette.good),
+                            );
+                        }
                         if ui.button("Leer ahora").clicked() {
                             self.refresh();
                         }
@@ -1638,7 +1804,7 @@ impl Hub {
                 .num_columns(2)
                 .spacing([24.0, 9.0])
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new("Juego").color(MUTED));
+                    ui.label(egui::RichText::new("Juego").color(self.palette.muted));
                     ui.label(format!(
                         "{} · {}",
                         display_game(self.game()),
@@ -1646,7 +1812,7 @@ impl Hub {
                     ));
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Proceso").color(MUTED));
+                    ui.label(egui::RichText::new("Proceso").color(self.palette.muted));
                     match (self.status.pid, self.status.base) {
                         (Some(pid), Some(base)) => {
                             ui.label(format!("pid {pid} · base del módulo 0x{base:08X}"));
@@ -1663,16 +1829,67 @@ impl Hub {
                     self.map_row(ui);
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Verificación").color(MUTED));
+                    ui.label(egui::RichText::new("Verificación").color(self.palette.muted));
                     let (text, color) = match self.status.validation {
-                        Some(MapValidation::Verified) => ("CRC verificado", GOOD),
-                        Some(MapValidation::Mismatch) => ("no coincide con esta build", BAD),
-                        Some(MapValidation::Unavailable) => ("sin CRC que comparar", MUTED),
-                        None => ("—", MUTED),
+                        Some(MapValidation::Verified) => ("CRC verificado", self.palette.good),
+                        Some(MapValidation::Mismatch) => {
+                            ("no coincide con esta build", self.palette.bad)
+                        }
+                        Some(MapValidation::Unavailable) => {
+                            ("sin CRC que comparar", self.palette.muted)
+                        }
+                        None => ("—", self.palette.muted),
                     };
                     ui.colored_label(color, text);
                     ui.end_row();
                 });
+        });
+
+        card(ui, Some("PROCESOS"), |ui| {
+            ui.label(
+                egui::RichText::new(
+                    "Lo mismo que mira la detección: nombre del proceso, línea de comandos y si \
+                     tiene mapeado el ejecutable del juego.",
+                )
+                .small()
+                .color(self.palette.muted),
+            );
+            ui.add_space(4.0);
+
+            if ui.button("Buscar procesos").clicked() {
+                self.scan_processes();
+            }
+
+            let Some(seen) = &self.seen else {
+                return;
+            };
+
+            ui.add_space(4.0);
+
+            if seen.is_empty() {
+                ui.label(
+                    egui::RichText::new("ninguno menciona el ejecutable del juego")
+                        .small()
+                        .color(self.palette.muted),
+                );
+            }
+
+            for process in seen {
+                let state = match &process.mapping {
+                    Some((module, base)) => format!("mapea {module} en 0x{base:X}"),
+                    None => "sin el ejecutable mapeado".to_string(),
+                };
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("pid {}", process.pid))
+                            .monospace()
+                            .color(self.palette.muted),
+                    );
+                    ui.label(egui::RichText::new(&process.comm).strong());
+                    ui.label(egui::RichText::new(state).small().color(self.palette.muted));
+                });
+            }
         });
 
         card(ui, Some("LECTURA"), |ui| {
@@ -1695,11 +1912,11 @@ impl Hub {
                     ui,
                     "Monstruos",
                     &self.status.snapshot.monsters.len().to_string(),
-                    ACCENT,
+                    self.palette.accent,
                 );
-                stat_tile(ui, "Jugador", &player, GOOD);
-                stat_tile(ui, "Cacería", &hunt, TEXT);
-                stat_tile(ui, "Última lectura", &last, MUTED);
+                stat_tile(ui, "Jugador", &player, self.palette.good);
+                stat_tile(ui, "Cacería", &hunt, self.palette.text);
+                stat_tile(ui, "Última lectura", &last, self.palette.muted);
             });
 
             if let Some(player) = &self.status.snapshot.player {
@@ -1711,7 +1928,7 @@ impl Hub {
                         player.stamina.percent()
                     ))
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
             }
             if let Some(hunt) = &self.status.snapshot.hunt {
@@ -1721,19 +1938,19 @@ impl Hub {
                         hunt.deaths, hunt.max_deaths
                     ))
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
             }
         });
 
         if let Some(error) = &self.status.error {
-            alert(ui, BAD, "La lectura falló", error);
+            alert(ui, self.palette.bad, "La lectura falló", error);
         }
 
         if self.status.validation == Some(MapValidation::Mismatch) {
             alert(
                 ui,
-                ACCENT,
+                self.palette.accent,
                 "El mapa no es de esta build",
                 "Los números que salgan serán basura plausible. Elige a mano el mapa de tu versión \
                  en «Mapa», o pon el archivo correcto en data/maps.",
@@ -1782,7 +1999,7 @@ impl Hub {
                              hasta el próximo reinicio. Es el mismo ajuste que la orden de arriba.",
                         )
                         .small()
-                        .color(ACCENT),
+                        .color(self.palette.accent),
                     );
                     ui.horizontal(|ui| {
                         if ui.button("Conceder").clicked() {
@@ -1800,7 +2017,7 @@ impl Hub {
                         ui.label(
                             egui::RichText::new("esperando permisos…")
                                 .small()
-                                .color(MUTED),
+                                .color(self.palette.muted),
                         );
                     });
                 }
@@ -1808,9 +2025,9 @@ impl Hub {
                 if let Some(note) = &self.access_note {
                     ui.label(egui::RichText::new(note).small().color(
                         if note.contains("concedido") {
-                            GOOD
+                            self.palette.good
                         } else {
-                            BAD
+                            self.palette.bad
                         },
                     ));
                 }
@@ -1833,8 +2050,8 @@ impl Hub {
             .and_then(|player| player.weapon.as_ref())
         else {
             egui::Frame::new()
-                .fill(SURFACE)
-                .stroke(egui::Stroke::new(1.0, BORDER))
+                .fill(self.palette.surface)
+                .stroke(egui::Stroke::new(1.0, self.palette.border))
                 .corner_radius(egui::CornerRadius::same(14))
                 .inner_margin(egui::Margin::same(24))
                 .show(ui, |ui| {
@@ -1849,15 +2066,15 @@ impl Hub {
                             "Abre el juego y espera a que el hub lea al jugador. Si el diagnóstico \
                              dice «sin juego», el proceso todavía no está corriendo.",
                         )
-                        .color(MUTED),
+                        .color(self.palette.muted),
                     );
                 });
             return;
         };
 
         egui::Frame::new()
-            .fill(SURFACE)
-            .stroke(egui::Stroke::new(1.0, BORDER))
+            .fill(self.palette.surface)
+            .stroke(egui::Stroke::new(1.0, self.palette.border))
             .corner_radius(egui::CornerRadius::same(14))
             .inner_margin(egui::Margin::same(20))
             .show(ui, |ui| {
@@ -1868,7 +2085,7 @@ impl Hub {
                             egui::RichText::new(weapon.kind.label())
                                 .size(24.0)
                                 .strong()
-                                .color(TEXT),
+                                .color(self.palette.text),
                         );
                         ui.label(
                             egui::RichText::new(if weapon.kind.has_sharpness() {
@@ -1877,14 +2094,18 @@ impl Hub {
                                 "A distancia"
                             })
                             .size(12.5)
-                            .color(MUTED),
+                            .color(self.palette.muted),
                         );
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(sharpness) = &weapon.sharpness {
                             ui.vertical(|ui| {
-                                ui.label(egui::RichText::new("Filo").small().color(MUTED));
+                                ui.label(
+                                    egui::RichText::new("Filo")
+                                        .small()
+                                        .color(self.palette.muted),
+                                );
                                 ui.label(
                                     egui::RichText::new(sharpness.level.label())
                                         .size(18.0)
@@ -1921,7 +2142,7 @@ impl Hub {
                         sharpness.max_level.label()
                     ))
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
             });
         }
@@ -1933,7 +2154,7 @@ impl Hub {
                     .spacing([24.0, 6.0])
                     .show(ui, |ui| {
                         for (label, value) in gauge_summary(gauge) {
-                            ui.label(egui::RichText::new(label).color(MUTED));
+                            ui.label(egui::RichText::new(label).color(self.palette.muted));
                             ui.label(value);
                             ui.end_row();
                         }
@@ -1946,13 +2167,13 @@ impl Hub {
             card(ui, Some("ESTADÍSTICAS CALCULADAS"), |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if let Some(attack) = detail.attack {
-                        stat_tile(ui, "Ataque", &format!("{attack:.0}"), ACCENT);
+                        stat_tile(ui, "Ataque", &format!("{attack:.0}"), self.palette.accent);
                     }
                     if let Some(affinity) = detail.affinity {
-                        stat_tile(ui, "Afinidad", &format!("{affinity:+}%"), GOOD);
+                        stat_tile(ui, "Afinidad", &format!("{affinity:+}%"), self.palette.good);
                     }
                     if let Some(element) = detail.element {
-                        stat_tile(ui, "Elemento", &format!("{element:.0}"), TEXT);
+                        stat_tile(ui, "Elemento", &format!("{element:.0}"), self.palette.text);
                     }
                 });
             });
@@ -1965,10 +2186,26 @@ impl Hub {
                     .spacing([20.0, 5.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Tipo").small().color(MUTED));
-                        ui.label(egui::RichText::new("Cargada").small().color(MUTED));
-                        ui.label(egui::RichText::new("Reserva").small().color(MUTED));
-                        ui.label(egui::RichText::new("Máximo").small().color(MUTED));
+                        ui.label(
+                            egui::RichText::new("Tipo")
+                                .small()
+                                .color(self.palette.muted),
+                        );
+                        ui.label(
+                            egui::RichText::new("Cargada")
+                                .small()
+                                .color(self.palette.muted),
+                        );
+                        ui.label(
+                            egui::RichText::new("Reserva")
+                                .small()
+                                .color(self.palette.muted),
+                        );
+                        ui.label(
+                            egui::RichText::new("Máximo")
+                                .small()
+                                .color(self.palette.muted),
+                        );
                         ui.end_row();
 
                         for slot in &ranged.ammo {
@@ -2020,7 +2257,7 @@ impl Hub {
                                 },
                             ),
                         ] {
-                            ui.label(egui::RichText::new(label).color(MUTED));
+                            ui.label(egui::RichText::new(label).color(self.palette.muted));
                             ui.label(value);
                             ui.end_row();
                         }
@@ -2058,9 +2295,19 @@ impl Hub {
                             .num_columns(3)
                             .spacing([18.0, 4.0])
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("ID").small().color(MUTED));
-                                ui.label(egui::RichText::new("Notas").small().color(MUTED));
-                                ui.label(egui::RichText::new("Longitud").small().color(MUTED));
+                                ui.label(
+                                    egui::RichText::new("ID").small().color(self.palette.muted),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Notas")
+                                        .small()
+                                        .color(self.palette.muted),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Longitud")
+                                        .small()
+                                        .color(self.palette.muted),
+                                );
                                 ui.end_row();
                                 for song in &horn.available {
                                     ui.label(song.id.to_string());
@@ -2092,7 +2339,7 @@ impl Hub {
                      memoria; el detalle disponible es el estado general del arma.",
                 )
                 .small()
-                .color(MUTED),
+                .color(self.palette.muted),
             );
         }
 
@@ -2103,7 +2350,7 @@ impl Hub {
                  legacy. En Rise solo se muestran los campos que HunterPie v2 lee.",
             )
             .small()
-            .color(MUTED),
+            .color(self.palette.muted),
         );
     }
 
@@ -2126,7 +2373,7 @@ impl Hub {
 
         card(ui, Some("JUEGO"), |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Título").color(MUTED));
+                ui.label(egui::RichText::new("Título").color(self.palette.muted));
                 for kind in [GameKind::Rise, GameKind::World] {
                     if ui
                         .selectable_label(self.game() == kind, display_game(kind))
@@ -2152,7 +2399,7 @@ impl Hub {
             }
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Refresco").color(MUTED));
+                ui.label(egui::RichText::new("Refresco").color(self.palette.muted));
                 ui.add(
                     egui::DragValue::new(&mut self.config.game.interval_ms)
                         .range(100..=5000)
@@ -2161,12 +2408,67 @@ impl Hub {
             });
         });
 
+        card(ui, Some("INTERFAZ"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Tema").color(self.palette.muted));
+
+                for (theme, label) in [
+                    (Theme::Auto, "Automático"),
+                    (Theme::Dark, "Oscuro"),
+                    (Theme::Light, "Claro"),
+                ] {
+                    if ui
+                        .selectable_label(self.config.hub.theme == theme, label)
+                        .clicked()
+                    {
+                        self.config.hub.theme = theme;
+                    }
+                }
+
+                ui.label(
+                    egui::RichText::new(if self.applied_dark { "oscuro" } else { "claro" })
+                        .small()
+                        .color(self.palette.muted),
+                )
+                .on_hover_text("Lo que está aplicado ahora; con «Automático» manda el escritorio");
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Fondo").color(self.palette.muted));
+
+                let ambient = self.config.hub.backdrop == Backdrop::Ambient;
+                if ui.selectable_label(ambient, "Ambiente").clicked() {
+                    self.config.hub.backdrop = Backdrop::Ambient;
+                }
+                if ui.selectable_label(!ambient, "Sin fondo").clicked() {
+                    self.config.hub.backdrop = Backdrop::None;
+                }
+
+                if ambient {
+                    ui.add(
+                        egui::Slider::new(&mut self.config.hub.backdrop_opacity, 0.0..=1.0)
+                            .fixed_decimals(2),
+                    )
+                    .on_hover_text("Intensidad del degradado; 0 lo apaga sin cambiar de modo");
+                }
+            });
+
+            ui.label(
+                egui::RichText::new(
+                    "El fondo se genera al dibujar: no es una imagen, así que acompaña al tema y \
+                     no pesa nada en el paquete.",
+                )
+                .small()
+                .color(self.palette.muted),
+            );
+        });
+
         card(ui, Some("PANEL"), |ui| {
             egui::Grid::new("panel")
                 .num_columns(2)
                 .spacing([24.0, 10.0])
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new("Disposición").color(MUTED));
+                    ui.label(egui::RichText::new("Disposición").color(self.palette.muted));
                     egui::ComboBox::from_id_salt("layout")
                         .width(220.0)
                         .selected_text(match self.config.overlay.layout {
@@ -2191,7 +2493,7 @@ impl Hub {
                         });
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Anclaje").color(MUTED));
+                    ui.label(egui::RichText::new("Anclaje").color(self.palette.muted));
                     egui::ComboBox::from_id_salt("posicion")
                         .width(220.0)
                         .selected_text(display_position(self.config.overlay.position))
@@ -2212,7 +2514,7 @@ impl Hub {
                         });
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Márgenes").color(MUTED));
+                    ui.label(egui::RichText::new("Márgenes").color(self.palette.muted));
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.config.overlay.margin_x)
@@ -2227,7 +2529,7 @@ impl Hub {
                     });
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Escala").color(MUTED));
+                    ui.label(egui::RichText::new("Escala").color(self.palette.muted));
                     ui.add(
                         egui::Slider::new(&mut self.config.overlay.scale, 0.5..=3.0)
                             .fixed_decimals(2)
@@ -2235,7 +2537,7 @@ impl Hub {
                     );
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Monstruos").color(MUTED));
+                    ui.label(egui::RichText::new("Monstruos").color(self.palette.muted));
                     egui::ComboBox::from_id_salt("monstruos")
                         .width(220.0)
                         .selected_text(self.config.overlay.monsters.label())
@@ -2251,7 +2553,7 @@ impl Hub {
                         });
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Monstruos a la vez").color(MUTED));
+                    ui.label(egui::RichText::new("Monstruos a la vez").color(self.palette.muted));
                     ui.add(egui::Slider::new(
                         &mut self.config.overlay.max_monsters,
                         1..=8,
@@ -2311,7 +2613,7 @@ impl Hub {
                          bordes de la pantalla; monster.N mueve vida, partes y estados juntos.",
                     )
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
                 ui.add_space(6.0);
 
@@ -2321,7 +2623,7 @@ impl Hub {
                 let mut height = screen.1;
 
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(egui::RichText::new("Lienzo").color(MUTED));
+                    ui.label(egui::RichText::new("Lienzo").color(self.palette.muted));
                     ui.add(
                         egui::DragValue::new(&mut width)
                             .range(640..=16_384)
@@ -2350,7 +2652,7 @@ impl Hub {
                         }
                     })
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
                 ui.add_space(6.0);
 
@@ -2368,7 +2670,7 @@ impl Hub {
                          \"right\", a la derecha.",
                     )
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
                 ui.add_space(6.0);
 
@@ -2385,7 +2687,11 @@ impl Hub {
                         .position(|bar| bar.id == *id);
 
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(egui::RichText::new(*id).monospace().color(TEXT));
+                        ui.label(
+                            egui::RichText::new(*id)
+                                .monospace()
+                                .color(self.palette.text),
+                        );
 
                         if let Some(position) = position {
                             let bar = &mut self.config.overlay.bars[position];
@@ -2524,7 +2830,7 @@ impl Hub {
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Vida baja por debajo de").color(MUTED));
+                ui.label(egui::RichText::new("Vida baja por debajo de").color(self.palette.muted));
                 ui.add(
                     egui::Slider::new(&mut self.config.style.low_health_percent, 0.0..=100.0)
                         .suffix(" %"),
@@ -2547,7 +2853,7 @@ impl Hub {
                      panel. Puedes volver a verla cuando quieras.",
                 )
                 .small()
-                .color(MUTED),
+                .color(self.palette.muted),
             );
             ui.add_space(4.0);
             if ui.button("Ver la guía otra vez").clicked() {
@@ -2563,7 +2869,7 @@ impl Hub {
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| match (&self.save_error, self.last_saved) {
             (Some(error), _) => {
-                ui.colored_label(BAD, error);
+                ui.colored_label(self.palette.bad, error);
             }
             (None, Some(at)) => {
                 ui.label(
@@ -2573,14 +2879,14 @@ impl Hub {
                         self.config_path.display()
                     ))
                     .small()
-                    .color(MUTED),
+                    .color(self.palette.muted),
                 );
             }
             (None, None) => {
                 ui.label(
                     egui::RichText::new("los cambios se guardan solos")
                         .small()
-                        .color(MUTED),
+                        .color(self.palette.muted),
                 );
             }
         });
@@ -2598,11 +2904,11 @@ impl Hub {
         let painter = ui.painter_at(rect);
         let to_screen = |x: i32, y: i32| rect.min + egui::vec2(x as f32 * scale, y as f32 * scale);
 
-        painter.rect_filled(rect, 6.0, BG);
+        painter.rect_filled(rect, 6.0, self.palette.bg);
         painter.rect_stroke(
             rect,
             6.0,
-            egui::Stroke::new(1.0, SURFACE),
+            egui::Stroke::new(1.0, self.palette.border),
             egui::StrokeKind::Inside,
         );
 
@@ -2611,13 +2917,19 @@ impl Hub {
         for x in (0..=screen_w).step_by(step) {
             let top = to_screen(x, 0);
             let bottom = to_screen(x, screen_h);
-            painter.line_segment([top, bottom], egui::Stroke::new(1.0, SURFACE));
+            painter.line_segment(
+                [top, bottom],
+                egui::Stroke::new(1.0, self.palette.border.gamma_multiply(0.7)),
+            );
         }
 
         for y in (0..=screen_h).step_by(step) {
             let left = to_screen(0, y);
             let right = to_screen(screen_w, y);
-            painter.line_segment([left, right], egui::Stroke::new(1.0, SURFACE));
+            painter.line_segment(
+                [left, right],
+                egui::Stroke::new(1.0, self.palette.border.gamma_multiply(0.7)),
+            );
         }
 
         // Mientras se arrastra, los rectángulos solo cambian de posición. Reutilizarlos evita
@@ -2646,7 +2958,11 @@ impl Hub {
             );
             let plate = egui::Rect::from_min_max(min, max);
             let selected = self.drag_bar.as_deref() == Some(bar.id.as_str());
-            let color = if selected { ACCENT } else { TEXT };
+            let color = if selected {
+                self.palette.accent
+            } else {
+                self.palette.text
+            };
 
             painter.rect_filled(plate, 4.0, color.gamma_multiply(0.18));
             painter.rect_stroke(
@@ -2740,8 +3056,8 @@ impl Hub {
             let left = to_screen(0, y);
             let right = to_screen(screen_w, y);
 
-            painter.line_segment([top, bottom], egui::Stroke::new(1.0, ACCENT));
-            painter.line_segment([left, right], egui::Stroke::new(1.0, ACCENT));
+            painter.line_segment([top, bottom], egui::Stroke::new(1.0, self.palette.accent));
+            painter.line_segment([left, right], egui::Stroke::new(1.0, self.palette.accent));
         }
 
         if self.drag_bar.is_some() {
@@ -2758,13 +3074,13 @@ impl Hub {
                 "Sin partida en curso: así se verá el panel con datos de ejemplo."
             })
             .small()
-            .color(MUTED),
+            .color(self.palette.muted),
         );
         if self.drag_bar.is_some() {
             ui.label(
                 egui::RichText::new("Suelta para actualizar la vista previa")
                     .small()
-                    .color(ACCENT),
+                    .color(self.palette.accent),
             );
         }
         ui.add_space(10.0);
@@ -2777,8 +3093,8 @@ impl Hub {
         let available = (ui.available_width() - 24.0).max(80.0);
         let scale = (available / self.preview_size.x).clamp(0.2, 1.0);
         egui::Frame::new()
-            .fill(SURFACE_2)
-            .stroke(egui::Stroke::new(1.0, BORDER))
+            .fill(self.palette.surface_2)
+            .stroke(egui::Stroke::new(1.0, self.palette.border))
             .corner_radius(egui::CornerRadius::same(12))
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
@@ -2816,6 +3132,8 @@ impl eframe::App for Hub {
             }
         }
 
+        self.shortcuts(ctx);
+
         // Cerrar solo oculta la ventana si hay un panel vivo que conservar. Sin panel no hay
         // nada que mantener en segundo plano: cerrar termina, como espera Super+Q.
         // `Minimized` no existe en Wayland; para esconder de verdad se oculta la superficie.
@@ -2831,6 +3149,7 @@ impl eframe::App for Hub {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.sync_theme(&ctx);
 
         // El overlay cuenta píxeles físicos; egui da el monitor en puntos lógicos.
         let monitor = ctx.input(|input| {
@@ -2897,7 +3216,7 @@ impl eframe::App for Hub {
             .show_separator_line(false)
             .frame(
                 egui::Frame::new()
-                    .fill(SURFACE)
+                    .fill(self.palette.surface)
                     .inner_margin(egui::Margin::symmetric(14, 14)),
             )
             .show(ui, |ui| self.sidebar(ui));
@@ -2910,7 +3229,7 @@ impl eframe::App for Hub {
                 .show_separator_line(false)
                 .frame(
                     egui::Frame::new()
-                        .fill(BG)
+                        .fill(self.palette.bg)
                         .inner_margin(egui::Margin::same(20)),
                 )
                 .show(ui, |ui| {
@@ -2921,10 +3240,14 @@ impl eframe::App for Hub {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(BG)
+                    .fill(self.palette.bg)
                     .inner_margin(egui::Margin::same(26)),
             )
             .show(ui, |ui| {
+                if self.config.hub.backdrop == Backdrop::Ambient {
+                    theme::paint_backdrop(ui, self.palette, self.config.hub.backdrop_opacity);
+                }
+
                 let tab = match self.tab {
                     Tab::News => "novedades",
                     Tab::Diagnostics => "diagnostico",
@@ -2967,15 +3290,22 @@ impl Drop for Hub {
 
 /// Tarjeta con el fondo y el borde del hub; el título es opcional y va en versalitas.
 fn card(ui: &mut egui::Ui, title: Option<&str>, add: impl FnOnce(&mut egui::Ui)) {
+    let palette = Palette::current();
+
     egui::Frame::new()
-        .fill(SURFACE)
-        .stroke(egui::Stroke::new(1.0, BORDER))
-        .corner_radius(egui::CornerRadius::same(12))
+        .fill(palette.surface)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(RADIUS))
         .inner_margin(egui::Margin::same(16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             if let Some(title) = title {
-                ui.label(egui::RichText::new(title).size(11.0).strong().color(MUTED));
+                ui.label(
+                    egui::RichText::new(title)
+                        .size(11.0)
+                        .strong()
+                        .color(palette.muted),
+                );
                 ui.add_space(8.0);
             }
             add(ui);
@@ -2985,19 +3315,22 @@ fn card(ui: &mut egui::Ui, title: Option<&str>, add: impl FnOnce(&mut egui::Ui))
 
 /// Cifra grande con su etiqueta debajo, para los resúmenes de la pestaña de diagnóstico.
 fn stat_tile(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
+    let palette = Palette::current();
+
     egui::Frame::new()
-        .fill(SURFACE_2)
+        .fill(palette.surface_2)
         .corner_radius(egui::CornerRadius::same(10))
         .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
             ui.set_min_width(120.0);
             ui.label(egui::RichText::new(value).size(19.0).strong().color(color));
-            ui.label(egui::RichText::new(label).size(11.0).color(MUTED));
+            ui.label(egui::RichText::new(label).size(11.0).color(palette.muted));
         });
 }
 
 /// Aviso con color propio: error de lectura, mapa desajustado, permiso pendiente.
 fn alert(ui: &mut egui::Ui, color: egui::Color32, title: &str, body: &str) {
+    let palette = Palette::current();
     egui::Frame::new()
         .fill(color.gamma_multiply(0.08))
         .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.45)))
@@ -3006,7 +3339,7 @@ fn alert(ui: &mut egui::Ui, color: egui::Color32, title: &str, body: &str) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(egui::RichText::new(title).strong().color(color));
-            ui.label(egui::RichText::new(body).size(12.5).color(MUTED));
+            ui.label(egui::RichText::new(body).size(12.5).color(palette.muted));
         });
     ui.add_space(10.0);
 }
@@ -3023,10 +3356,11 @@ fn sharpness_color(level: SharpnessLevel) -> egui::Color32 {
 /// Barra de filo por tramos: cada color ocupa su longitud y lo ya gastado se ve apagado, así
 /// que de un vistazo se sabe cuánto queda antes del siguiente color.
 fn sharpness_bar(ui: &mut egui::Ui, sharpness: &Sharpness) {
+    let palette = Palette::current();
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), egui::Sense::hover());
     ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same(5), INPUT);
+        .rect_filled(rect, egui::CornerRadius::same(5), palette.input);
 
     let total: f32 = sharpness
         .lengths
@@ -3081,7 +3415,7 @@ fn sharpness_bar(ui: &mut egui::Ui, sharpness: &Sharpness) {
     ui.painter().rect_stroke(
         rect,
         egui::CornerRadius::same(5),
-        egui::Stroke::new(1.0, BORDER),
+        egui::Stroke::new(1.0, palette.border),
         egui::StrokeKind::Inside,
     );
 }
@@ -3118,8 +3452,9 @@ fn clean_inline_markdown(line: &str) -> String {
 
 /// Cuerpo de la release con un markdown mínimo: títulos, viñetas y líneas normales.
 fn release_body(ui: &mut egui::Ui, body: &str) {
+    let palette = Palette::current();
     if body.trim().is_empty() {
-        ui.label(egui::RichText::new("La release no trae notas.").color(MUTED));
+        ui.label(egui::RichText::new("La release no trae notas.").color(palette.muted));
         return;
     }
 
@@ -3134,7 +3469,7 @@ fn release_body(ui: &mut egui::Ui, body: &str) {
                 egui::RichText::new(title.to_uppercase())
                     .size(12.0)
                     .strong()
-                    .color(ACCENT),
+                    .color(palette.accent),
             );
         } else if let Some(title) = line.strip_prefix("## ").or_else(|| line.strip_prefix("# ")) {
             ui.add_space(4.0);
@@ -3142,7 +3477,7 @@ fn release_body(ui: &mut egui::Ui, body: &str) {
                 egui::RichText::new(clean_inline_markdown(title))
                     .size(15.0)
                     .strong()
-                    .color(TEXT),
+                    .color(palette.text),
             );
         } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
             ui.label(format!("  •  {}", clean_inline_markdown(item)));

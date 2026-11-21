@@ -1,0 +1,88 @@
+//! Tema visual y fondo del hub.
+
+use std::fmt;
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+
+/// Tema del hub: el del escritorio, u oscuro o claro fijos.
+///
+/// `auto` no mira la variable de entorno: deja que la ventana siga el tema del sistema y
+/// resuelve la paleta con lo que el escritorio diga en cada momento.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Auto,
+    Dark,
+    Light,
+}
+
+impl FromStr for Theme {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" | "system" | "sistema" => Ok(Self::Auto),
+            "dark" | "oscuro" => Ok(Self::Dark),
+            "light" | "claro" => Ok(Self::Light),
+            other => Err(format!(
+                "tema desconocido '{other}' (usa: auto, dark, light)"
+            )),
+        }
+    }
+}
+
+impl fmt::Display for Theme {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Auto => "auto",
+            Self::Dark => "dark",
+            Self::Light => "light",
+        })
+    }
+}
+
+/// Fondo de la ventana del hub.
+///
+/// `ambient` es un degradado generado al dibujar: no trae ninguna imagen ni licencia que
+/// repartir y escala a cualquier tamaño de ventana.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backdrop {
+    #[default]
+    Ambient,
+    None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_backdrop_names_accept_the_documented_ones() {
+        let config: crate::Config =
+            crate::Config::from_toml("[hub]\nbackdrop = \"none\"\n", "prueba").unwrap();
+        assert_eq!(config.hub.backdrop, Backdrop::None);
+
+        let config: crate::Config =
+            crate::Config::from_toml("[hub]\nbackdrop = \"ambient\"\n", "prueba").unwrap();
+        assert_eq!(config.hub.backdrop, Backdrop::Ambient);
+    }
+
+    #[test]
+    fn the_theme_names_accept_spanish_and_english() {
+        assert_eq!("auto".parse::<Theme>().unwrap(), Theme::Auto);
+        assert_eq!("Sistema".parse::<Theme>().unwrap(), Theme::Auto);
+        assert_eq!("dark".parse::<Theme>().unwrap(), Theme::Dark);
+        assert_eq!("Claro".parse::<Theme>().unwrap(), Theme::Light);
+        assert!("neon".parse::<Theme>().is_err());
+    }
+
+    #[test]
+    fn a_theme_round_trips_through_its_name() {
+        for theme in [Theme::Auto, Theme::Dark, Theme::Light] {
+            assert_eq!(theme.to_string().parse::<Theme>().unwrap(), theme);
+        }
+    }
+}

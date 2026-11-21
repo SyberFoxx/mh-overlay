@@ -8,6 +8,7 @@
 mod color;
 mod monsters;
 mod position;
+mod theme;
 
 use std::env;
 use std::fs;
@@ -20,6 +21,7 @@ use serde::{Deserialize, Serialize};
 pub use color::Color;
 pub use monsters::Monsters;
 pub use position::Position;
+pub use theme::{Backdrop, Theme};
 
 /// Archivo de configuración documentado que se escribe la primera vez.
 pub const TEMPLATE: &str = r##"# mh-overlay · configuración
@@ -85,6 +87,12 @@ hide_on_empty = true
 # El hub enseña una guía la primera vez. Se pone en true al terminarla o saltarla;
 # vuelve a false si quieres verla de nuevo.
 onboarding_done = false
+# Tema del hub: auto sigue al escritorio; dark y light lo fijan.
+theme = "auto"
+# Fondo de la ventana: ambient (degradado generado) o none.
+backdrop = "ambient"
+# Opacidad del fondo, de 0 a 1.
+backdrop_opacity = 0.7
 
 [style]
 panel = "#0b0d12e6"
@@ -247,11 +255,28 @@ impl Default for StyleSection {
 }
 
 /// Sección `[hub]`: estado de la ventana de escritorio, no del panel.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HubSection {
     /// La guía de primera ejecución ya se terminó o se saltó.
     pub onboarding_done: bool,
+    /// Tema del hub; `auto` sigue al escritorio.
+    pub theme: Theme,
+    /// Fondo de la ventana; `ambient` se genera al dibujar.
+    pub backdrop: Backdrop,
+    /// Opacidad del fondo, de 0 a 1.
+    pub backdrop_opacity: f32,
+}
+
+impl Default for HubSection {
+    fn default() -> Self {
+        Self {
+            onboarding_done: false,
+            theme: Theme::default(),
+            backdrop: Backdrop::default(),
+            backdrop_opacity: 0.7,
+        }
+    }
 }
 
 /// Configuración completa del overlay.
@@ -428,6 +453,18 @@ impl Config {
             return Err(invalid(
                 "overlay.scale",
                 format!("{} está fuera de 0.5..3.0", self.overlay.scale),
+            ));
+        }
+
+        if !self.hub.backdrop_opacity.is_finite()
+            || !(0.0..=1.0).contains(&self.hub.backdrop_opacity)
+        {
+            return Err(invalid(
+                "hub.backdrop_opacity",
+                format!(
+                    "{} está fuera de 0..1; es una opacidad, no un porcentaje",
+                    self.hub.backdrop_opacity
+                ),
             ));
         }
 
@@ -656,6 +693,38 @@ mod tests {
         let config = Config::from_toml("[game]\nkind = \"world\"\n", "prueba").unwrap();
 
         assert!(!config.hub.onboarding_done);
+    }
+
+    #[test]
+    fn an_old_file_without_a_theme_follows_the_desktop() {
+        let config = Config::from_toml("[game]\nkind = \"world\"\n", "prueba").unwrap();
+
+        assert_eq!(config.hub.theme, Theme::Auto);
+    }
+
+    #[test]
+    fn a_backdrop_opacity_out_of_range_names_the_field() {
+        let error = Config::from_toml("[hub]\nbackdrop_opacity = 4.0\n", "prueba").unwrap_err();
+
+        assert!(
+            error.to_string().contains("hub.backdrop_opacity"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_hub_theme_comes_from_the_file() {
+        let config = Config::from_toml("[hub]\ntheme = \"light\"\n", "prueba").unwrap();
+
+        assert_eq!(config.hub.theme, Theme::Light);
+    }
+
+    #[test]
+    fn an_unknown_theme_names_the_valid_ones() {
+        let error = Config::from_toml("[hub]\ntheme = \"neon\"\n", "prueba").unwrap_err();
+
+        assert!(error.to_string().contains("auto"), "{error}");
+        assert!(error.to_string().contains("light"), "{error}");
     }
 
     #[test]

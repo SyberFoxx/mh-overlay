@@ -456,6 +456,12 @@ hide_on_empty = true
 [hub]
 # El hub enseña la guía de primera ejecución; se marca al terminarla o saltarla.
 onboarding_done = false
+# auto sigue al escritorio; dark y light lo fijan. Se cambia también desde Ajustes.
+theme = "auto"
+# ambient pinta un degradado generado al dibujar; none lo apaga.
+backdrop = "ambient"
+# Intensidad del fondo, de 0 a 1 (0 lo apaga sin cambiar de modo).
+backdrop_opacity = 0.7
 
 [style]
 panel = "#0b0d12e6"
@@ -560,18 +566,25 @@ mh-overlay --hub    # equivalente explícito
 
 Una ventana normal pensada para cuando algo no funciona, porque el panel sobre el juego no
 tiene sitio para explicarse. La barra lateral cambia entre **Novedades**, **Diagnóstico**,
-**Arma** y **Ajustes**, y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, la
+**Arma** y **Ajustes** —también con **Ctrl+1** a **Ctrl+4**, y **Esc** cierra la guía o la
+confirmación— y abajo quedan el estado de la conexión, **Abrir/Cerrar panel**, la
 comprobación de actualizaciones (aviso, **Instalar** y **Reiniciar** cuando toca) y la versión
 instalada. **Novedades** consulta la última release de GitHub, enseña sus notas y permite
 reintentar la consulta o instalar la versión nueva. La pestaña **Diagnóstico** enseña el proceso encontrado,
 la base del módulo, qué `.map` se está usando y si sus CRC coinciden con la build, cuántos
 monstruos, jugador y cacería se leyeron y el último error, refrescándose sola al ritmo
 configurado. Si el error es de permisos, ofrece copiar la orden exacta o **conceder el acceso
-con polkit**, sin abrir una terminal. La
+con polkit**, sin abrir una terminal. **Copiar diagnóstico** deja en el portapapeles eso mismo
+en texto —versión, juego, proceso, base, mapa, CRC, lectura y último error— y **Buscar
+procesos** enseña lo mismo que `--ps`: qué procesos mencionan o mapean el ejecutable, con su
+pid, para no depender de la consola cuando el juego no aparece. La
 pestaña **Arma** enseña la clase equipada, el detalle del filo, el medidor completo y los datos
 de combate disponibles: munición y reserva de las ballestas, proyectiles de la lanza pistola,
 notas y melodías de la cornamusa, carga del arco y, en Rise, ataque, afinidad y elemento. La
-pestaña **Ajustes** edita juego, refresco, disposición, anclaje, márgenes, escala, qué monstruos
+pestaña **Ajustes** empieza por la tarjeta **Interfaz**: tema **Automático/Oscuro/Claro** y fondo
+**Ambiente/Sin fondo** con su intensidad. El fondo es un degradado generado al dibujar, no una
+imagen: sigue a la paleta, escala con la ventana y se apaga con un clic o desde el TOML. Sigue
+con juego, refresco, disposición, anclaje, márgenes, escala, qué monstruos
 se enseñan (toda la zona o solo el objetivo), cuántos a la vez, los interruptores —incluidos los
 números de vida de partes y monstruo— y todos los colores con un selector de color real, con el
 panel de ejemplo al lado: lo que ves es lo que se dibuja. La primera vez que abres el hub
