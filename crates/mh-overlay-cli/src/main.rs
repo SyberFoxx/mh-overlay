@@ -104,6 +104,10 @@ struct Arguments {
     #[arg(long)]
     ps: bool,
 
+    /// Imprimir un informe del entorno, la configuración y la detección, y salir
+    #[arg(long)]
+    doctor: bool,
+
     /// Actualizar esta instalación (AppImage o paquete) y salir
     #[arg(long)]
     update: bool,
@@ -194,6 +198,18 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
         return Ok(());
     }
 
+    let config_path = arguments
+        .config
+        .clone()
+        .unwrap_or_else(Config::default_path);
+
+    // El informe se pide justo cuando algo no funciona, así que no puede fallar por lo que
+    // intenta explicar: ni los mapas ni la configuración tienen que estar bien.
+    if arguments.doctor {
+        doctor(&config_path);
+        return Ok(());
+    }
+
     let maps_directory = maps_directory()?;
 
     if arguments.list_maps {
@@ -201,17 +217,20 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
         return Ok(());
     }
 
-    let config_path = arguments
-        .config
-        .clone()
-        .unwrap_or_else(Config::default_path);
-
     if arguments.init_config {
         init_config(&config_path)?;
         return Ok(());
     }
 
     let loaded = Config::load_or_default(&config_path)?;
+
+    if loaded.migrated {
+        eprintln!(
+            "configuración de un esquema anterior: se usa el actual ({}) y se reescribe al \
+             siguiente cambio",
+            mh_overlay_config::CONFIG_VERSION
+        );
+    }
 
     // Sin una acción explícita, la aplicación es su interfaz gráfica: es lo que espera quien
     // pulsa el lanzador del menú. La consola queda en --print y --watch.
@@ -776,6 +795,137 @@ fn emit(text: &str) {
     use std::io::Write;
 
     let _ = std::io::stdout().lock().write_all(text.as_bytes());
+}
+
+/// Informe de una pieza: sesión, permisos, configuración, mapas, procesos y registro.
+///
+/// Todo lo que aquí se imprime se puede pegar en un issue sin quitar nada, así que no incluye
+/// memoria del usuario ni nombres de personajes: solo rutas y hechos del sistema.
+fn doctor(config_path: &Path) {
+    let mut output = format!("mh-overlay {} · doctor\n", update::CURRENT);
+
+    output.push_str("\nsesión\n");
+    for (label, variable) in [
+        ("X11", "DISPLAY"),
+        ("Wayland", "WAYLAND_DISPLAY"),
+        ("tipo", "XDG_SESSION_TYPE"),
+        ("escritorio", "XDG_CURRENT_DESKTOP"),
+    ] {
+        let value = std::env::var(variable).unwrap_or_else(|_| "(sin definir)".to_string());
+        output.push_str(&format!("  {label}: {value}\n"));
+    }
+
+    output.push_str("\npermisos\n");
+    match mh_overlay_memory::env::ptrace_scope() {
+        Some(0) => output.push_str("  kernel.yama.ptrace_scope: 0 (cualquier proceso puede leer)\n"),
+        Some(scope) => output.push_str(&format!(
+            "  kernel.yama.ptrace_scope: {scope} (leer otro proceso exige CAP_SYS_PTRACE o ser su padre)\n"
+        )),
+        None => output.push_str("  kernel.yama.ptrace_scope: sin Yama (sin restricción por este lado)\n"),
+    }
+
+    let capable = mh_overlay_memory::env::has_cap_sys_ptrace();
+    output.push_str(&format!(
+        "  CAP_SYS_PTRACE efectiva: {}\n",
+        if capable { "sí" } else { "no" }
+    ));
+
+    if !capable && mh_overlay_memory::env::ptrace_scope().is_some_and(|scope| scope > 0) {
+        output.push_str(
+            "  pista: sudo setcap cap_sys_ptrace+ep $(command -v mh-overlay)  ·  o baja el sysctl\n",
+        );
+    }
+
+    output.push_str("\nconfiguración\n");
+    output.push_str(&format!("  archivo: {}\n", config_path.display()));
+
+    match Config::load_or_default(config_path) {
+        Ok(loaded) => {
+            let origin = match loaded.origin {
+                Origin::File => "leída del archivo",
+                Origin::Defaults => "valores por defecto (el archivo no existe)",
+            };
+            output.push_str(&format!("  estado: válida · {origin}\n"));
+            output.push_str(&format!(
+                "  juego: {} · detección automática {} · refresco {} ms\n",
+                loaded.config.game.kind,
+                if loaded.config.game.auto_detect {
+                    "sí"
+                } else {
+                    "no"
+                },
+                loaded.config.game.interval_ms,
+            ));
+        }
+        Err(error) => output.push_str(&format!("  estado: error: {error}\n")),
+    }
+
+    output.push_str("\nmapas\n");
+    match maps_directory() {
+        Ok(directory) => {
+            output.push_str(&format!("  carpeta: {}\n", directory.display()));
+
+            let mut names = std::fs::read_dir(&directory)
+                .map(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+                        .filter(|name| name.ends_with(".map"))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            names.sort();
+
+            output.push_str(&format!("  {} archivo(s)\n", names.len()));
+            for name in names.iter().rev().take(3) {
+                output.push_str(&format!("    {name}\n"));
+            }
+            if names.len() > 3 {
+                output.push_str(&format!("    … {} más\n", names.len() - 3));
+            }
+        }
+        Err(error) => output.push_str(&format!("  error: {error}\n")),
+    }
+
+    output.push_str("\nprocesos\n");
+    let names = GameKind::ALL.map(GameKind::module);
+    let seen = mh_overlay_memory::lookalikes(&names);
+
+    if seen.is_empty() {
+        output.push_str(&format!(
+            "  ninguno menciona {} · ¿juego cerrado, en otra cuenta, o /proc sin permiso?\n",
+            names.join(" o ")
+        ));
+    }
+
+    for process in &seen {
+        let state = match &process.mapping {
+            Some((module, base)) => format!("mapea {module} en 0x{base:X}"),
+            None => "sin el ejecutable mapeado".to_string(),
+        };
+        output.push_str(&format!(
+            "  pid {} · {} · {state}\n",
+            process.pid, process.comm
+        ));
+    }
+
+    output.push_str("\nregistro\n");
+    match mh_overlay_app::log::path() {
+        Some(path) => {
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).ok();
+            output.push_str(&format!(
+                "  {} ({})\n",
+                path.display(),
+                match size {
+                    Some(bytes) => format!("{} KiB", bytes / 1024),
+                    None => "todavía no existe".to_string(),
+                }
+            ));
+        }
+        None => output.push_str("  sin ruta: define XDG_STATE_HOME o HOME\n"),
+    }
+
+    emit(&output);
 }
 
 fn parse_hex(value: &str) -> Result<u64, std::num::ParseIntError> {
