@@ -24,10 +24,20 @@ pub use position::Position;
 pub use theme::{Backdrop, Theme};
 
 /// Archivo de configuración documentado que se escribe la primera vez.
+/// Versión del esquema del TOML que entiende esta build.
+///
+/// Se sube solo cuando un archivo viejo necesita un cambio real para seguir significando lo
+/// mismo; añadir una sección con valor por defecto no es motivo.
+pub const CONFIG_VERSION: u32 = 1;
+
 pub const TEMPLATE: &str = r##"# mh-overlay · configuración
 #
 # Se relee sola al guardar: no hace falta reiniciar el overlay.
 # Los colores son #rgb, #rrggbb o #rrggbbaa (el alfa permite paneles translúcidos).
+#
+# Esquema del archivo: no lo cambies a mano. Un archivo sin esta clave es anterior al
+# versionado y se migra al leerlo.
+config_version = 1
 #
 # En el modo free cada barra es una placa independiente. Se colocan con [[overlay.bars]]:
 #
@@ -266,6 +276,10 @@ pub struct HubSection {
     pub backdrop: Backdrop,
     /// Opacidad del fondo, de 0 a 1.
     pub backdrop_opacity: f32,
+    /// Ancho de la ventana, en puntos; se recuerda al cerrar.
+    pub window_width: f32,
+    /// Alto de la ventana, en puntos; se recuerda al cerrar.
+    pub window_height: f32,
 }
 
 impl Default for HubSection {
@@ -275,18 +289,34 @@ impl Default for HubSection {
             theme: Theme::default(),
             backdrop: Backdrop::default(),
             backdrop_opacity: 0.7,
+            window_width: 1120.0,
+            window_height: 720.0,
         }
     }
 }
 
 /// Configuración completa del overlay.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Esquema con el que se escribió el archivo; [`CONFIG_VERSION`] en los nuevos.
+    pub config_version: u32,
     pub game: GameSection,
     pub overlay: OverlaySection,
     pub style: StyleSection,
     pub hub: HubSection,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            config_version: CONFIG_VERSION,
+            game: GameSection::default(),
+            overlay: OverlaySection::default(),
+            style: StyleSection::default(),
+            hub: HubSection::default(),
+        }
+    }
 }
 
 /// De dónde salió la configuración aplicada.
@@ -298,10 +328,25 @@ pub enum Origin {
     Defaults,
 }
 
+/// Lee solo `config_version`, tolerando el resto del archivo. Un TOML sin la clave es esquema 0.
+fn schema_version(text: &str) -> u32 {
+    #[derive(Deserialize)]
+    struct Probe {
+        config_version: Option<u32>,
+    }
+
+    toml::from_str::<Probe>(text)
+        .ok()
+        .and_then(|probe| probe.config_version)
+        .unwrap_or(0)
+}
+
 #[derive(Debug)]
 pub struct Loaded {
     pub config: Config,
     pub origin: Origin,
+    /// El archivo venía de un esquema anterior y se subió en memoria; se escribirá al guardar.
+    pub migrated: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -328,6 +373,15 @@ pub enum ConfigError {
     Serialize(#[from] toml::ser::Error),
     #[error("valor inválido en {field}: {reason}")]
     Invalid { field: &'static str, reason: String },
+    #[error(
+        "{path}: el archivo usa el esquema {found} y esta versión entiende hasta el {current}; \
+         actualiza mh-overlay (o quita la clave `config_version` si sabes lo que haces)"
+    )]
+    FutureConfig {
+        path: String,
+        found: u32,
+        current: u32,
+    },
 }
 
 impl Config {
@@ -350,13 +404,33 @@ impl Config {
     /// Lee el archivo, o devuelve los valores por defecto si no existe.
     pub fn load_or_default(path: &Path) -> Result<Loaded, ConfigError> {
         match fs::read_to_string(path) {
-            Ok(text) => Ok(Loaded {
-                config: Self::from_toml(&text, &path.display().to_string())?,
-                origin: Origin::File,
-            }),
+            Ok(text) => {
+                let origin = path.display().to_string();
+
+                // La versión se mira antes de deserializar: un archivo de una versión futura
+                // trae claves que esta build no conoce, y es más útil decir «es más nuevo» que
+                // «clave desconocida».
+                let found = schema_version(&text);
+                if found > CONFIG_VERSION {
+                    return Err(ConfigError::FutureConfig {
+                        path: origin.clone(),
+                        found,
+                        current: CONFIG_VERSION,
+                    });
+                }
+
+                let config = Self::from_toml(&text, &origin)?;
+
+                Ok(Loaded {
+                    config,
+                    origin: Origin::File,
+                    migrated: found < CONFIG_VERSION,
+                })
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Loaded {
                 config: Self::default(),
                 origin: Origin::Defaults,
+                migrated: false,
             }),
             Err(source) => Err(ConfigError::Read {
                 path: path.display().to_string(),
@@ -367,11 +441,20 @@ impl Config {
 
     /// Interpreta el TOML y valida los valores.
     pub fn from_toml(text: &str, origin: &str) -> Result<Self, ConfigError> {
-        let config: Self = toml::from_str(text).map_err(|source| ConfigError::Parse {
+        let mut config: Self = toml::from_str(text).map_err(|source| ConfigError::Parse {
             path: origin.to_string(),
             source,
         })?;
 
+        if config.config_version > CONFIG_VERSION {
+            return Err(ConfigError::FutureConfig {
+                path: origin.to_string(),
+                found: config.config_version,
+                current: CONFIG_VERSION,
+            });
+        }
+
+        config.migrate();
         config.validate()?;
 
         Ok(config)
@@ -419,6 +502,21 @@ impl Config {
         Ok(toml::to_string_pretty(self)?)
     }
 
+    /// Sube un archivo viejo al esquema actual, en memoria.
+    ///
+    /// Cada paso va escrito y justificado; se sube [`CONFIG_VERSION`] cuando el paso cambia el
+    /// significado de una clave, no cuando aparece una sección nueva.
+    fn migrate(&mut self) {
+        // 0 → 1: archivos anteriores al versionado. Todos los campos tienen valor por defecto,
+        // así que lo único que faltaba era la etiqueta.
+        self.config_version = CONFIG_VERSION;
+    }
+
+    /// Versión del esquema que usa este archivo, sin deserializarlo entero.
+    pub fn schema_version(text: &str) -> u32 {
+        schema_version(text)
+    }
+
     /// Juego configurado, ya validado.
     pub fn game_kind(&self) -> Result<GameKind, ConfigError> {
         self.game
@@ -464,6 +562,20 @@ impl Config {
                 format!(
                     "{} está fuera de 0..1; es una opacidad, no un porcentaje",
                     self.hub.backdrop_opacity
+                ),
+            ));
+        }
+
+        if !self.hub.window_width.is_finite()
+            || !self.hub.window_height.is_finite()
+            || !(400.0..=8192.0).contains(&self.hub.window_width)
+            || !(400.0..=8192.0).contains(&self.hub.window_height)
+        {
+            return Err(invalid(
+                "hub.window_width/window_height",
+                format!(
+                    "{}x{} está fuera de 400..8192",
+                    self.hub.window_width, self.hub.window_height
                 ),
             ));
         }
@@ -743,6 +855,75 @@ mod tests {
 
         assert_eq!(loaded.origin, Origin::Defaults);
         assert_eq!(loaded.config, Config::default());
+    }
+
+    #[test]
+    fn the_documented_template_declares_the_current_schema() {
+        assert!(TEMPLATE.contains(&format!("config_version = {CONFIG_VERSION}")));
+    }
+
+    #[test]
+    fn a_file_without_a_schema_is_treated_as_the_oldest_one() {
+        assert_eq!(Config::schema_version("[game]\nkind = \"world\"\n"), 0);
+        assert_eq!(Config::schema_version(""), 0);
+    }
+
+    #[test]
+    fn an_unversioned_file_loads_as_the_current_schema() {
+        let config = Config::from_toml("[game]\nkind = \"world\"\n", "prueba").unwrap();
+
+        assert_eq!(config.config_version, CONFIG_VERSION);
+    }
+
+    #[test]
+    fn a_file_from_a_newer_version_is_refused_with_an_explanation() {
+        let error = Config::from_toml("config_version = 99\n", "prueba").unwrap_err();
+
+        assert!(error.to_string().contains("esquema 99"), "{error}");
+        assert!(
+            error.to_string().contains("actualiza mh-overlay"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_newer_file_with_unknown_keys_still_says_it_is_newer() {
+        let directory = std::env::temp_dir().join(format!("mh-future-{}", std::process::id()));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&path, "config_version = 7\n[game]\nbrightness = 3\n").unwrap();
+
+        let error = Config::load_or_default(&path).unwrap_err();
+
+        assert!(error.to_string().contains("esquema 7"), "{error}");
+        assert!(!error.to_string().contains("brightness"), "{error}");
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn an_old_file_is_flagged_as_migrated_and_a_new_one_is_not() {
+        let directory = std::env::temp_dir().join(format!("mh-migrate-{}", std::process::id()));
+        let old = directory.join("old.toml");
+        let new = directory.join("new.toml");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&old, "[game]\nkind = \"rise\"\n").unwrap();
+        Config::default().save(&new).unwrap();
+
+        assert!(Config::load_or_default(&old).unwrap().migrated);
+        assert!(!Config::load_or_default(&new).unwrap().migrated);
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn a_window_size_outside_the_range_names_the_field() {
+        let mut config = Config::default();
+        config.hub.window_width = 0.0;
+
+        let error = config.validate().unwrap_err();
+
+        assert!(error.to_string().contains("hub.window_width"), "{error}");
     }
 
     #[test]
