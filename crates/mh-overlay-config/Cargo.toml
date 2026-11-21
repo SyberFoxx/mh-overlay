@@ -13,4 +13,4 @@ mh-overlay-games = { workspace = true }
 # parser propio con los mismos errores que ya resuelve la biblioteca estándar del formato.
 serde = { version = "1", features = ["derive"] }
 thiserror = { workspace = true }
-toml = "0.9"
+toml = "1.2"
