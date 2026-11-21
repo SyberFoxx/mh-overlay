@@ -100,6 +100,10 @@ struct Arguments {
     #[arg(long)]
     list_maps: bool,
 
+    /// Listar los procesos que mencionan o mapean el ejecutable del juego y salir
+    #[arg(long)]
+    ps: bool,
+
     /// Actualizar esta instalación (AppImage o paquete) y salir
     #[arg(long)]
     update: bool,
@@ -180,6 +184,13 @@ fn run(arguments: &Arguments) -> Result<(), AppError> {
         println!("published: {}", notes.published);
         println!("---");
         println!("{}", notes.body);
+        return Ok(());
+    }
+
+    // Antes de los mapas: cuando el juego no aparece, lo primero que hay que ver es qué
+    // procesos existen, y eso no depende de tener los `.map` instalados.
+    if arguments.ps {
+        list_processes();
         return Ok(());
     }
 
@@ -715,6 +726,48 @@ fn list_maps(directory: &Path) {
     }
 
     emit(&output);
+}
+
+/// Procesos que mencionan o mapean los ejecutables del juego: lo mismo que mira la detección
+/// automática, para cuando el juego corre y aun así no aparece.
+fn list_processes() {
+    let names = GameKind::ALL.map(GameKind::module);
+    let seen = mh_overlay_memory::lookalikes(&names);
+
+    let mut output = format!("procesos que mencionan o mapean {}:\n", names.join(" o "));
+
+    if seen.is_empty() {
+        output.push_str(
+            "  ninguno: el juego no está corriendo, corre con otro usuario, o /proc no deja\n  \
+             ver su línea de comandos\n",
+        );
+    }
+
+    for process in seen {
+        let state = match &process.mapping {
+            Some((module, base)) => format!("mapea {module} en 0x{base:X}"),
+            None => "sin el ejecutable mapeado".to_string(),
+        };
+
+        output.push_str(&format!(
+            "  pid {:>6}  {:<20} {state}\n",
+            process.pid, process.comm
+        ));
+
+        if !process.cmdline.is_empty() {
+            output.push_str(&format!("          {}\n", shorten(&process.cmdline, 200)));
+        }
+    }
+
+    emit(&output);
+}
+
+/// Corta una línea larga sin partir un carácter a la mitad.
+fn shorten(text: &str, limit: usize) -> String {
+    match text.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_string(),
+    }
 }
 
 /// Escribe en stdout ignorando `EPIPE`, para que `mh-overlay --list-maps | head` termine en

@@ -186,6 +186,7 @@ cargo build --release
     --watch             refresco continuo en la consola, sin ventana
     --interval <MS>     periodo de refresco; por defecto, el de la configuración
     --list-maps         muestra los address maps disponibles
+    --ps                lista los procesos que mencionan o mapean el ejecutable del juego
     --update            actualizar esta instalación (AppImage o paquete) y salir
     --check-update      comprobar si hay versión nueva y salir, sin descargar nada
     --release-notes     imprimir las notas de la última release y salir
@@ -669,6 +670,12 @@ los huecos; World las identifica por el índice que reporta el juego.
 ## Límites conocidos
 
 - **Solo lectura.** No hay escritura ni inyección; el crate no expone un writer a propósito.
+- **La detección mira el nombre del proceso, la línea de comandos y el módulo mapeado.** El
+  kernel corta `comm` a 15 bytes (`MonsterHunterRi`) y Proton puede lanzar el juego con una
+  línea de comandos que no nombra el ejecutable, así que si nada coincide se busca qué proceso
+  tiene mapeado el `.exe`, que es lo que el juego no puede esconder. Cuando el juego corre y aun
+  así no aparece, `mh-overlay --ps` lista los procesos que lo mencionan o lo mapean, con su pid,
+  su línea de comandos y si tienen el módulo; `--pid` se salta la detección por completo.
 - **El detalle del arma depende de lo que exponga cada juego.** World tiene munición,
   proyectiles de la lanza pistola, cola de la cornamusa y carga del arco a partir de los offsets
   de HunterPie legacy; Rise no publica esas estructuras en los mapas que lee HunterPie v2, así
