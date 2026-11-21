@@ -20,7 +20,7 @@ actualización probadas, y sin sorpresas en el panel ni en el hub.
       cuadrando contra la pantalla del juego durante 30 minutos seguidos.
 - [ ] World: lo mismo, en una máquina con el juego instalado.
 - [ ] Partes rotas, estados y filo con el comportamiento que se ve en partida (ya corregido,
-      pendiente de confirmar en una cacería con la 0.5.3).
+      pendiente de confirmar en una cacería con la 0.5.4).
 - [ ] Instalación limpia del AppImage y del tarball en una máquina o VM sin el proyecto.
 - [ ] Autoactualización entre dos releases publicadas, no contra un servidor local.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
@@ -33,7 +33,7 @@ actualización probadas, y sin sorpresas en el panel ni en el hub.
 
 ### 1. Cerrar la validación en juego (bloquea la 1.0)
 
-- [ ] Rise: cacería completa con la 0.5.3. Confirmar que el filo baja al atacar, que una
+- [ ] Rise: cacería completa con la 0.5.4. Confirmar que el filo baja al atacar, que una
       parte agotada muestra **Roto** y que los estados enseñan segundos o lo que falta.
 - [ ] Rise: romper una parte con el panel abierto y comprobar que no hay saltos ni un
       «roto» prematuro cuando el hielo regenera la vida de la parte.
@@ -52,7 +52,7 @@ puede sustituir con tests; hasta pasarla, el README debe seguir distinguiendo «
 ### 2. Panel y hub en Wayland
 
 - [x] El panel ya no cierra la conexión al abrirse sin tamaño (0.5.2).
-- [ ] Reiniciar el hub con la 0.5.3 y confirmar que «Abrir panel» deja la ventana en pantalla
+- [ ] Reiniciar el hub con la 0.5.4 y confirmar que «Abrir panel» deja la ventana en pantalla
       en Hyprland, Sway y un escritorio GNOME (sin layer-shell).
 - [ ] El panel vuelve tras ocultarlo y abrirlo varias veces, y al cambiar de monitor.
 - [ ] Comprobar que la vista previa del hub y el panel real muestran lo mismo.
@@ -68,7 +68,7 @@ está verificado por tests; falta verlo con el compositor real.
 
 ### 4. Distribución y actualización
 
-- [ ] Autoactualización real entre `v0.5.2` y `v0.5.3` (descarga, reemplazo en sitio,
+- [ ] Autoactualización real entre `v0.5.3` y `v0.5.4` (descarga, reemplazo en sitio,
       reinicio y configuración intacta).
 - [ ] Verificar que la release lleva README, LICENSE, NOTICE, AppStream, `.desktop`, iconos
       y las imágenes que enlaza el README.
