@@ -1,7 +1,11 @@
-# Roadmap
+# Roadmap hacia 1.0.0
 
-Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
-`mh-overlay` por terminado; el [README](README.md) cuenta lo que ya funciona.
+Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para publicar
+`mh-overlay` 1.0.0 como una app estable; el [README](README.md) cuenta lo que ya funciona.
+
+La 1.0 no es «la versión con más funciones», sino la primera que se puede recomendar sin
+advertencias: los números de los dos juegos verificados en partida real, instalación y
+actualización probadas, y sin sorpresas en el panel ni en el hub.
 
 ## Cómo se mantiene
 
@@ -10,45 +14,48 @@ Estado: 21 de noviembre de 2026. Esta es la lista viva de lo que falta para dar
   si cambia lo que el usuario ve.
 - **Ideas** no está aprobado: no se implementa nada de ahí sin pedirlo.
 
-## Criterio de «completo»
+## Criterio de 1.0.0
 
-- [ ] Una cacería real en World y otra en Rise con vida, partes, estados, arma y buffs correctos.
+- [ ] Rise: una cacería completa (vida, partes, estados, arma, buffs) con los números
+      cuadrando contra la pantalla del juego durante 30 minutos seguidos.
+- [ ] World: lo mismo, en una máquina con el juego instalado.
+- [ ] Partes rotas, estados y filo con el comportamiento que se ve en partida (ya corregido,
+      pendiente de confirmar en una cacería con la 0.5.3).
 - [ ] Instalación limpia del AppImage y del tarball en una máquina o VM sin el proyecto.
+- [ ] Autoactualización entre dos releases publicadas, no contra un servidor local.
 - [ ] Permiso de memoria concedido desde el hub con polkit, sin abrir una terminal.
-- [x] Actualización real `v0.4.0 → v0.5.0`, reinicio y configuración conservada (AppImage
-      real sobre un `HOME` aislado: el binario se reemplaza en sitio y el TOML queda idéntico).
-- [ ] 30 minutos de juego sin panics ni lecturas basura, con el diagnóstico limpio.
-- [ ] README y release alineados: misma versión, mismos artefactos y mismas capturas.
+- [ ] 30 minutos de juego sin panics, sin lecturas basura y con el diagnóstico limpio.
+- [ ] README, capturas, CHANGELOG y artefactos de la release alineados con la etiqueta.
+- [ ] Los `.map` soportados están enumerados y probados; ningún juego lee con un mapa que
+      no corresponda a su build.
 
-## Ahora
+## Lo que falta, por orden de riesgo
 
-### 1. Probar la actualización real de `v0.5.0`
+### 1. Cerrar la validación en juego (bloquea la 1.0)
 
-- [x] Actualización `v0.2.0 → v0.3.0` probada, reinicio y configuración conservada.
-- [x] Subir la versión del workspace a `0.4.0`.
-- [x] Subir la versión del workspace a `0.5.0` y publicar sus notas desde `CHANGELOG.md`.
-- [x] Publicar las notas desde `CHANGELOG.md` y comprobar la etiqueta contra `Cargo.toml` en CI.
-- [x] Workflow `v0.4.0` en 3m43s, con release, notas y cuatro artefactos verificados.
-- [x] Abrir el AppImage `v0.4.0`, detectar `v0.5.0`, instalar, reiniciar y verificar que la
-      configuración llega intacta. El permiso no aplica al AppImage, que no puede llevar
-      `cap_sys_ptrace`.
-- [x] Confirmar que la release lleva README, LICENSE, NOTICE, AppStream, `.desktop` e iconos
-      128/256/512; el tarball instala y desinstala en un prefijo propio. Las imágenes del README
-      se añaden al paquete a partir de la próxima release.
-
-**Por qué:** la autoactualización solo se probó contra un servidor local con una versión
-falsa, y los artefactos de `v0.1.0` son anteriores al acabado de distribución y al arreglo
-de cierre en Wayland.
-
-### 2. Validar los lectores con el juego real
-
-- [ ] World: una cacería con monstruo, partes rompibles, estados y arma.
-- [ ] Rise: lo mismo, incluyendo ataque, afinidad y elemento.
+- [ ] Rise: cacería completa con la 0.5.3. Confirmar que el filo baja al atacar, que una
+      parte agotada muestra **Roto** y que los estados enseñan segundos o lo que falta.
+- [ ] Rise: romper una parte con el panel abierto y comprobar que no hay saltos ni un
+      «roto» prematuro cuando el hielo regenera la vida de la parte.
+- [ ] Rise: una cacería con dos monstruos, captura y cambio de zona.
+- [ ] World: repetir todo lo anterior en una máquina con el juego.
 - [ ] Probar al menos dos builds o mapas por juego, no solo el más nuevo.
 - [ ] Repetir en X11 y en Wayland, y con una sesión de 30 minutos.
 
-**Bloqueo:** hace falta una máquina con los juegos instalados. Es la única prueba que no se
-puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escrito», no «probado».
+**Bloqueo:** World necesita una máquina con el juego instalado. Es la única prueba que no se
+puede sustituir con tests; hasta pasarla, el README debe seguir distinguiendo «escrito» de
+«probado».
+
+### 2. Panel y hub en Wayland
+
+- [x] El panel ya no cierra la conexión al abrirse sin tamaño (0.5.2).
+- [ ] Reiniciar el hub con la 0.5.3 y confirmar que «Abrir panel» deja la ventana en pantalla
+      en Hyprland, Sway y un escritorio GNOME (sin layer-shell).
+- [ ] El panel vuelve tras ocultarlo y abrirlo varias veces, y al cambiar de monitor.
+- [ ] Comprobar que la vista previa del hub y el panel real muestran lo mismo.
+
+**Por qué:** el fallo que quedaba era de ciclo de vida de la superficie, y el arreglo solo
+está verificado por tests; falta verlo con el compositor real.
 
 ### 3. Permiso de memoria sin terminal
 
@@ -56,37 +63,42 @@ puede sustituir con tests; hasta pasarla, el README debe seguir diciendo «escri
 - [ ] Decidir si se ofrece restaurar `kernel.yama.ptrace_scope=1` al terminar.
 - [ ] Documentar el flujo y sus límites en el README y en el hub.
 
-### 4. Reproducibilidad del AppImage
+### 4. Distribución y actualización
 
-- [ ] Fijar también el runtime `type2` que descarga `appimagetool` (versión y SHA-256), o
-      documentar por qué se deja en `continuous`.
-
-`appimagetool` 1.9.1 ya está fijado y verificado; el runtime es la pieza que falta.
-
-## Después
-
-### Producto
-
-- [ ] Actualización más viva: comprobar periódicamente, saltar una versión y enlazar a las notas.
-- [ ] Restaurar el permiso de memoria desde el hub tras jugar.
-
-### Distribución
-
+- [ ] Autoactualización real entre `v0.5.2` y `v0.5.3` (descarga, reemplazo en sitio,
+      reinicio y configuración intacta).
+- [ ] Verificar que la release lleva README, LICENSE, NOTICE, AppStream, `.desktop`, iconos
+      y las imágenes que enlaza el README.
+- [ ] Firmar los artefactos (minisign o GPG) además del SHA-256.
 - [ ] Publicar también para `aarch64` si hay usuarios en ARM.
-- [ ] Firma minisign o GPG de los artefactos, además del SHA-256.
-- [ ] Enviar el AppImage a AppImageHub una vez validado en juego.
-- [ ] Evaluar un paquete de distro (AUR, Flathub) solo si el proyecto lo pide.
-- [ ] Capturas reales del hub y del panel, y un GIF corto para el README.
+- [ ] Revisar que un AppImage sin `CAP_SYS_PTRACE` explica qué hacer en vez de fallar en
+      silencio.
 
-### Comunidad
-
-- [ ] `CONTRIBUTING.md`, `SECURITY.md` y plantillas de issue/PR.
-
-### Calidad
+### 5. Calidad y mantenimiento
 
 - [ ] Tests del hub: cierre, bandeja y actualización (navegación, atajos y fondo ya están
       cubiertos sin ventana).
 - [ ] Prueba de actualización contra GitHub en CI, sin publicar nada.
+- [ ] Un test por lector contra la fixture de cada `.map` soportado, para detectar un cambio
+      de offsets al añadir una versión.
+- [ ] Revisar los `unwrap`/`expect` que queden y convertir en `Err` los que el juego pueda
+      provocar.
+- [ ] Repasar avisos y mensajes para que un fallo de lectura diga qué mapa o permiso falta.
+
+### 6. Documentación de la 1.0
+
+- [ ] Capturas reales del hub y del panel, y un GIF corto para el README.
+- [ ] Página de solución de problemas: ptrace, Proton, REFramework, mapas y Wayland.
+- [ ] Enumerar en el README las builds y mapas probados, con fecha.
+- [ ] Notas de la 1.0 con lo que se congela (formato del TOML, CLI y `.map`) y lo que no.
+
+## Después de la 1.0
+
+- Compatibilidad con nuevas builds del juego sin cambiar el binario (mapas en `data/maps/`).
+- Actualización más viva: comprobar periódicamente, saltar una versión y enlazar a las notas.
+- Restaurar el permiso de memoria desde el hub tras jugar.
+- Enviar el AppImage a AppImageHub una vez validado en juego.
+- Evaluar un paquete de distro (AUR, Flathub) solo si el proyecto lo pide.
 
 ## Ideas (sin aprobar)
 
@@ -99,34 +111,36 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
-- **2026-11-21 · `v0.5.0`**: release publicada con cuatro artefactos verificados; el AppImage
-  `0.4.0` detecta, descarga e instala `0.5.0` en sitio y conserva la configuración, y el
-  tarball se instala y desinstala en un prefijo propio. Rediseño del hub (tokens, tema automático/oscuro/claro, fondo
-  ambiental), atajos, diagnóstico copiable, `--doctor`, registro con pánico, `config_version`
-  con migración y tamaño de ventana recordado.
-- **2026-11-21 · `858a125`, `fa04653`, `57a1917`, `91d398b`**: paquete de robustez 0.5.0.
-  Registro del hub en `$XDG_STATE_HOME` con rotación y hook de pánico; `--doctor` con sesión,
-  permisos, configuración, mapas, procesos y registro; `config_version = 1` con migración y
-  rechazo de esquemas futuros; tamaño de ventana recordado; y pruebas sin ventana de atajos,
-  fondo y estados del `.map`.
-- **2026-11-21 · `dcfc0ad`**: hub con tokens de color por papel, tema oscuro/claro/automático y
-  fondo ambiental generado al dibujar (desactivable e intensidad configurable), atajos
-  Ctrl+1..4 y Esc, y diagnóstico copiable con la lista de procesos que mapean el ejecutable.
-- **2026-11-21 · `58b4c7f`**: fixtures de memoria. Las lecturas viven en el trait `Reads` y un
-  test por juego recorre vida, partes, estados, captura, corona, jugador y cacería contra una
-  imagen de bytes y el `.map` más nuevo, sin ptrace ni juego abierto.
-- **2026-11-21 · `e2ae463`**: detección por el módulo mapeado (Wine corta `comm` a 15 bytes) y
-  `--ps` para ver qué procesos mencionan o mapean el ejecutable.
-- **2026-11-20 · `v0.4.0`**: guía de primera ejecución, editor visual a la resolución real del
-  monitor, arrastre sin reconstruir la vista previa en cada frame, caché de rectángulos y
-  ajustes responsivos.
-- **2026-11-20 · `v0.3.0`**: pestaña **Novedades** con las notas de GitHub, editor visual de
-  barras con imán, presets de disposición, `--release-notes`, `CHANGELOG.md` obligatorio y
-  comprobación de etiqueta contra `Cargo.toml` antes de publicar.
-- **2026-11-20 · `v0.2.0`**: medidor de espíritu como espada, barras sueltas con posición
-  propia y grupo de monstruo con partes pegadas, umbrales de rompimiento y vida de partes.
+- **2026-11-21 · 0.5.3**: el filo del arma ya baja con los golpes (el relleno era
+  `inicio_del_color + unidades`, que se clavaba al llenar un color); las partes agotadas
+  muestran **Roto** con la barra vacía en el panel y en `--print`; los estados elementales
+  (rayo, hielo, agua, fuego, draco) dejan de mostrarse como porcentaje y los estados reales
+  enseñan los segundos restantes o cuánta acumulación falta.
+- **2026-11-21 · `v0.5.2`**: el panel moría al abrirse en compositores wlroots; ahora recibe
+  tamaño antes del primer commit y el hub explica la espera. El aviso de CRC nombra a
+  REFramework/Fluffy.
+- **2026-11-21 · `v0.5.1`**: mapa inexistente ya no es un fallo en el menú; `.bak` del TOML;
+  CONTRIBUTING, SECURITY y plantillas; Dependabot; runtime `type2` y `appimagetool` fijados
+  por etiqueta y SHA-256; CI con `--doctor`; imágenes del README dentro del paquete.
+- **2026-11-21 · `v0.5.0`**: release con cuatro artefactos verificados; actualización
+  `0.4.0 → 0.5.0` en sitio y configuración conservada; rediseño del hub (tema
+  automático/oscuro/claro, fondo ambiental), atajos, diagnóstico copiable, `--doctor`,
+  registro con pánico, `config_version` y tamaño de ventana recordado.
+- **2026-11-21 · `858a125`, `fa04653`, `57a1917`, `91d398b`**: robustez 0.5.0: registro en
+  `$XDG_STATE_HOME` con rotación, hook de pánico, `--doctor`, `config_version = 1` con
+  migración y rechazo de esquemas futuros, y pruebas sin ventana.
+- **2026-11-21 · `58b4c7f`**: fixtures de memoria; un test por juego recorre vida, partes,
+  estados, captura, corona, jugador y cacería sin ptrace ni juego abierto.
+- **2026-11-21 · `e2ae463`**: detección por el módulo mapeado y `--ps`.
+- **2026-11-20 · `v0.4.0`**: guía de primera ejecución, editor visual a la resolución real,
+  arrastre sin reconstruir la vista previa, caché de rectángulos y ajustes responsivos.
+- **2026-11-20 · `v0.3.0`**: pestaña **Novedades**, editor visual de barras con imán,
+  presets de disposición, `--release-notes`, `CHANGELOG.md` obligatorio y comprobación de
+  etiqueta contra `Cargo.toml`.
+- **2026-11-20 · `v0.2.0`**: espíritu como espada, barras sueltas con posición propia,
+  grupo de monstruo con partes pegadas, umbrales de rompimiento y vida de partes.
 - **2026-11-19 · `v0.1.0`**: AppImage y tarball, checksums, autoactualización en sitio, hub,
   bandeja y lectores de World y Rise.
 - **`3299753` / `bb79c24`**: banner, wordmark y README de presentación.
 - **`0c6ee3a`**: AppStream, iconos 128/256/512, `appimagetool` fijado y CI de empaquetado.
-- **`d04564f`**: cierre con Super+Q en Wayland (pendiente de la próxima release).
+- **`d04564f`**: cierre con Super+Q en Wayland.

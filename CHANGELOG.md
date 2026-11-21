@@ -3,6 +3,26 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.5.3] - 2026-11-21
+
+### Corregido
+
+- El filo del arma nunca bajaba: el relleno sumaba el inicio del color a las unidades que
+  quedaban, así que al gastar un color entero la barra seguía llena. Ahora es
+  `unidades restantes / total`, de modo que el filo se ve bajar con los golpes.
+- Una parte agotada mostraba la vida restante o el contador de rompimientos como si aún
+  tuviera algo que romper. Ahora pone **Roto** con la barra vacía, tanto en el panel como en
+  `--print`, y deja claro que ya no hay vida que leer.
+- Los estados elementales (rayo, hielo, agua, fuego, draco) aparecían como porcentaje de
+  acumulación. No son estados que el monstruo sufra, así que se quitan de las filas de
+  estados; las acumulaciones de daño elemental no se muestran.
+
+### Mejorado
+
+- Los estados que sí importan (veneno, sueño, parálisis, aturdimiento, agotamiento) enseñan
+  los segundos que les quedan cuando están activos, o cuánta acumulación falta para
+  provocarlos cuando aún no lo están.
+
 ## [0.5.2] - 2026-11-21
 
 ### Corregido

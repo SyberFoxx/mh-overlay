@@ -46,7 +46,8 @@ tú  HP  71.2%  (712/1.000)   aguante  84.0%  (126/150)
 id 12  Tigrex  HP  74.3%  (16.420/22.100)   captura ≤ 20%
   Cabeza       vida 1.376/2.200  flinch 100.0%  romper  62.4%  cortar 100.0%
   Cola         vida 1.984/2.252  flinch  88.1%  romper  41.9%  cortar  41.9%
-  Veneno  45.2%  (120 / 265)
+  Ala izquierda         Roto
+  Veneno       faltan 145  (120 / 265)
 ```
 
 ## Instalación rápida
@@ -90,13 +91,13 @@ o [compila desde el código](#compilar-y-usar).
 | Buffs y estados del jugador | ✅ escrito | ✅ escrito |
 | Cacería: reloj y vidas del equipo | ✅ escrito | ✅ escrito |
 | Umbral de captura | ✅ escrito | ✅ escrito |
-| Partes: flinch / romper / cortar | ✅ escrito | ✅ romper y cortar |
+| Partes: flinch / romper / cortar, y **Roto** al agotarse | ✅ escrito | ✅ romper y cortar |
 | Vida de las partes en números (opcional) | ✅ escrito | ✅ escrito |
 | Vida del monstruo en números (opcional) | ✅ escrito | ✅ escrito |
 | Umbral del siguiente rompimiento (`2/3`, `roto`) | — | ✅ escrito |
 | Cola cortable y rompible en una sola fila | — | ✅ escrito |
 | Nombres de parte | ✅ escrito | ✅ escrito |
-| Estados alterados | ✅ escrito | ✅ escrito |
+| Estados alterados: segundos activos o acumulación que falta | ✅ escrito | ✅ escrito |
 | Nombres de monstruo | ✅ escrito | ✅ escrito |
 | Corona de tamaño (miniatura, plateada, dorada) | ✅ escrito | ✅ escrito |
 | Mostrar solo el monstruo fijado en el mapa | ✅ escrito (16.0.1.1+) | ✅ escrito (421652+) |
