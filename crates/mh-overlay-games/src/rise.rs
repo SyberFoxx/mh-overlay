@@ -80,7 +80,7 @@ const QUEST_TIME_LIMIT: u64 = 0x178;
 const QUEST_STATE_IN_QUEST: i32 = 2;
 /// Tipo de arma equipada, en el bloque `WEAPON_ADDRESS` + `WEAPON_OFFSETS`.
 const WEAPON_ID: u64 = 0x8C;
-/// `MHRSharpnessStructure` (Sequential): color actual, unidades gastadas y máximo del arma.
+/// `MHRSharpnessStructure` (Sequential): color actual, unidades restantes y máximo del arma.
 const SHARPNESS_LEVEL: u64 = 0x00;
 const SHARPNESS_HITS: u64 = 0x04;
 /// Todo array de Rise guarda su tamaño en +0x1C y sus datos en +0x20.
@@ -508,8 +508,14 @@ impl<'map, M: Reads> Rise<'map, M> {
                 _ => continue,
             };
             let (timer, max_timer) = match entry.max_timer {
-                // En los estados que guardan el tiempo transcurrido, el máximo es fijo.
-                Some(max_timer) => (max_timer - seconds(raw), max_timer),
+                // En los estados que guardan el tiempo transcurrido, el máximo es fijo y un
+                // cero significa que el estado no está activo, no que acabe de empezar.
+                Some(max_timer) => {
+                    if raw <= 0.0 {
+                        continue;
+                    }
+                    (max_timer - seconds(raw), max_timer)
+                }
                 None => {
                     let remaining = seconds(raw);
                     (remaining, self.remember_timer(entry.offset, remaining))

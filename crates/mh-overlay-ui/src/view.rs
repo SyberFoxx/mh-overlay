@@ -7,7 +7,7 @@
 use mh_overlay_config::{Color, Config, Direction, Monsters, StyleSection};
 use mh_overlay_games::{
     Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
-    WeaponDetail, WeaponGauge,
+    WeaponDetail, WeaponGauge, part_labels,
 };
 
 use crate::canvas::{Canvas, Rect};
@@ -129,8 +129,9 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
         y = draw_title(&mut canvas, config, text, &geometry, monster, y);
         y = draw_health_bar(&mut canvas, config, &geometry, monster, y);
 
-        for part in &visible_parts(monster) {
-            let fallback = format!("parte {:02}", part.index);
+        let parts = visible_parts(monster);
+        let labels = part_labels(&parts);
+        for (part, label) in parts.iter().zip(&labels) {
             let broken = part.is_broken();
 
             draw_row(
@@ -140,7 +141,7 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
                 &geometry,
                 y,
                 Row {
-                    label: part.name.unwrap_or(&fallback),
+                    label,
                     fraction: part_fraction(config, part),
                     color: if broken {
                         config.style.capture
@@ -384,8 +385,10 @@ fn free_plates(
         };
 
         if config.overlay.show_parts {
-            for part in &visible_parts(monster) {
-                place_part(&part_plate(config, text, &geometry, part));
+            let parts = visible_parts(monster);
+            let labels = part_labels(&parts);
+            for (part, label) in parts.iter().zip(&labels) {
+                place_part(&part_plate(config, text, &geometry, part, label));
             }
         }
 
@@ -470,8 +473,13 @@ fn row_plate(config: &Config, text: &Text, geometry: &Geometry, row: Row<'_>) ->
     canvas
 }
 
-fn part_plate(config: &Config, text: &Text, geometry: &Geometry, part: &Part) -> Canvas {
-    let fallback = format!("parte {:02}", part.index);
+fn part_plate(
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    part: &Part,
+    label: &str,
+) -> Canvas {
     let broken = part.is_broken();
 
     row_plate(
@@ -479,7 +487,7 @@ fn part_plate(config: &Config, text: &Text, geometry: &Geometry, part: &Part) ->
         text,
         geometry,
         Row {
-            label: part.name.unwrap_or(&fallback),
+            label,
             fraction: part_fraction(config, part),
             color: if broken {
                 config.style.capture
@@ -1297,21 +1305,39 @@ fn draw_weapon(
     if let Some(sharpness) = &weapon.sharpness {
         let level = sharpness.level.label();
         let level_width = text.width(level, 12.0 * scale);
-        let value = format!("filo {:.0}", sharpness.current);
+        let value = format!("filo {:.0}", sharpness.hits_left());
         let value_width = text.width(&value, 12.0 * scale);
+        let next = sharpness
+            .next_segment()
+            .map(|(level, hits)| format!("· {} {hits}", level.label()));
+        let next_width = next
+            .as_ref()
+            .map_or(0.0, |label| text.width(label, 12.0 * scale) + 6.0 * scale);
+        let mut x = right - next_width;
 
+        if let Some(next) = &next {
+            text.draw(
+                canvas,
+                next,
+                x + 6.0 * scale,
+                baseline,
+                12.0 * scale,
+                style.muted,
+            );
+        }
         text.draw(
             canvas,
             level,
-            right - level_width,
+            x - level_width,
             baseline,
             12.0 * scale,
             sharpness_color(sharpness.level),
         );
+        x -= level_width;
         text.draw(
             canvas,
             &value,
-            right - level_width - value_width - 6.0 * scale,
+            x - value_width - 6.0 * scale,
             baseline,
             12.0 * scale,
             style.muted,

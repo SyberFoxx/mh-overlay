@@ -125,6 +125,40 @@ impl Part {
     }
 }
 
+/// Nombres de parte listos para mostrar, numerando los que se repiten.
+///
+/// La tabla del juego usa el mismo nombre para partes distintas (dos cabezas, dos patas) y no
+/// dice cuál es cuál; el número de aparición es lo único honesto que se puede añadir para que
+/// dos filas iguales no parezcan un duplicado.
+pub fn part_labels(parts: &[Part]) -> Vec<String> {
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, part)| {
+            let fallback = format!("parte {:02}", part.index);
+            let Some(name) = part.name else {
+                return fallback;
+            };
+            let repeats = parts
+                .iter()
+                .filter(|other| other.name == Some(name))
+                .count();
+            if repeats < 2 {
+                return name.to_string();
+            }
+
+            let position = parts[..=index]
+                .iter()
+                .filter(|other| other.name == Some(name))
+                .count();
+            format!("{name} {position}")
+        })
+        .collect()
+}
+
+/// Acumulación mínima, en porcentaje, para que un estado ocupe una fila.
+const MIN_AILMENT_PERCENT: f32 = 1.0;
+
 /// Acumulación de un estado alterado.
 #[derive(Debug, Clone)]
 pub struct Ailment {
@@ -136,9 +170,12 @@ pub struct Ailment {
 }
 
 impl Ailment {
-    /// Estados cuya acumulación no se ha movido no aportan nada a la pantalla.
+    /// Estados con acumulación apreciable o temporizador en marcha.
+    ///
+    /// El juego deja residuos de una o dos unidades que suben y bajan; mostrarlos hacía
+    /// aparecer y desaparecer la fila y con ella la altura del panel.
     pub fn is_active(&self) -> bool {
-        self.max_buildup > 0.0 && (self.buildup > 0.0 || self.timer > 0.0)
+        self.timer > 0.0 || self.buildup_percent() >= MIN_AILMENT_PERCENT
     }
 
     /// El estado ya se disparó y corre su temporizador.
@@ -401,6 +438,41 @@ pub struct Sharpness {
 impl Sharpness {
     pub fn total(&self) -> f32 {
         self.lengths.iter().map(|length| f32::from(*length)).sum()
+    }
+
+    /// Longitud acumulada hasta el principio del color indicado.
+    fn start_of(&self, level: SharpnessLevel) -> f32 {
+        let position = SharpnessLevel::ALL
+            .iter()
+            .position(|candidate| *candidate == level)
+            .unwrap_or(0);
+
+        self.lengths
+            .iter()
+            .take(position)
+            .map(|length| f32::from(*length))
+            .sum()
+    }
+
+    /// Golpes que le quedan al color actual, que es lo que el jugador puede contar.
+    pub fn hits_left(&self) -> f32 {
+        (self.current - self.start_of(self.level)).max(0.0)
+    }
+
+    /// Color siguiente y los golpes que dura, si el arma tiene uno por encima.
+    pub fn next_segment(&self) -> Option<(SharpnessLevel, u16)> {
+        let current = SharpnessLevel::ALL
+            .iter()
+            .position(|candidate| *candidate == self.level)?;
+
+        self.lengths
+            .iter()
+            .enumerate()
+            .skip(current + 1)
+            .find(|(_, length)| **length > 0)
+            .and_then(|(index, length)| {
+                SharpnessLevel::from_index(index as i32).map(|level| (level, *length))
+            })
     }
 
     /// Fracción de 0 a 1 en la que está el filo actual.
@@ -939,6 +1011,32 @@ mod tests {
     }
 
     #[test]
+    fn sharpness_hits_are_counted_inside_the_current_color() {
+        let sharpness = Sharpness {
+            lengths: [40, 50, 90, 100, 60, 10, 0],
+            level: SharpnessLevel::Blue,
+            max_level: SharpnessLevel::White,
+            current: 332.0,
+        };
+
+        assert!((sharpness.hits_left() - 52.0).abs() < f32::EPSILON);
+        assert_eq!(sharpness.next_segment(), Some((SharpnessLevel::White, 10)));
+    }
+
+    #[test]
+    fn the_top_color_has_no_next_segment() {
+        let sharpness = Sharpness {
+            lengths: [40, 50, 90, 100, 60, 10, 0],
+            level: SharpnessLevel::White,
+            max_level: SharpnessLevel::White,
+            current: 350.0,
+        };
+
+        assert!((sharpness.hits_left() - 10.0).abs() < f32::EPSILON);
+        assert_eq!(sharpness.next_segment(), None);
+    }
+
+    #[test]
     fn a_sharpness_that_is_still_blue_does_not_fill_the_whole_bar() {
         let sharpness = Sharpness {
             lengths: [40, 50, 90, 100, 60, 10, 0],
@@ -967,6 +1065,36 @@ mod tests {
 
         assert!(part.is_broken());
         assert!(!intact.is_broken());
+    }
+
+    #[test]
+    fn repeated_part_names_are_numbered_in_order() {
+        let parts = vec![
+            Part {
+                name: Some("Cabeza"),
+                ..Part::default()
+            },
+            Part {
+                name: Some("Torso"),
+                ..Part::default()
+            },
+            Part {
+                name: Some("Cabeza"),
+                ..Part::default()
+            },
+        ];
+
+        assert_eq!(part_labels(&parts), ["Cabeza 1", "Torso", "Cabeza 2"]);
+    }
+
+    #[test]
+    fn unnamed_parts_fall_back_to_their_index() {
+        let parts = vec![Part {
+            index: 7,
+            ..Part::default()
+        }];
+
+        assert_eq!(part_labels(&parts), ["parte 07"]);
     }
 
     #[test]
@@ -1000,6 +1128,24 @@ mod tests {
         assert_eq!(active.value_label(), "12 s");
         assert!((charging.fraction() - 0.25).abs() < f32::EPSILON);
         assert_eq!(charging.value_label(), "faltan 300");
+    }
+
+    #[test]
+    fn a_trace_of_buildup_does_not_add_a_row() {
+        let trace = Ailment {
+            name: "agotamiento",
+            buildup: 0.5,
+            max_buildup: 120.0,
+            timer: 0.0,
+            max_timer: 0.0,
+        };
+        let real = Ailment {
+            buildup: 3.0,
+            ..trace.clone()
+        };
+
+        assert!(!trace.is_active());
+        assert!(real.is_active());
     }
 
     #[test]

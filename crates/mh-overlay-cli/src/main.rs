@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use mh_overlay_config::{Config, ConfigError, Layout, Loaded, Origin, Position};
-use mh_overlay_games::{GameKind, Hunt, Player, Snapshot, WeaponGauge};
+use mh_overlay_games::{GameKind, Hunt, Player, Snapshot, WeaponGauge, part_labels};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process, maps_directory};
 use mh_overlay_ui::editor::Editor;
 use mh_overlay_ui::text::Text;
@@ -605,10 +605,14 @@ fn player_line(player: &Player) -> String {
 
         if let Some(sharpness) = &weapon.sharpness {
             output.push_str(&format!(
-                "    filo   {:.0} · {}\n",
-                sharpness.current,
+                "    filo   {:.0} · {}",
+                sharpness.hits_left(),
                 sharpness.level.label()
             ));
+            if let Some((level, hits)) = sharpness.next_segment() {
+                output.push_str(&format!(" · luego {} {hits}", level.label()));
+            }
+            output.push('\n');
         }
 
         if let Some(gauge) = &weapon.gauge {
@@ -702,13 +706,9 @@ fn render(kind: GameKind, snapshot: &Snapshot) -> String {
             monster.health.label(),
         ));
 
-        for part in &monster.parts {
-            output.push_str(&format!(
-                "  {:<14}",
-                part.name
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| format!("parte {:02}", part.index))
-            ));
+        let labels = part_labels(&monster.parts);
+        for (part, label) in monster.parts.iter().zip(&labels) {
+            output.push_str(&format!("  {label:<14}"));
 
             if part.is_broken() {
                 output.push_str("  roto\n");

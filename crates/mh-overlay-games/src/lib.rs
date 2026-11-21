@@ -19,7 +19,7 @@ use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process, Reads};
 pub use model::{
     Ailment, AmmoSlot, BowState, Breaks, Buff, Crown, CrownThresholds, Extracts, GunlanceState,
     Health, HornNote, HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness,
-    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
+    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, part_labels,
 };
 
 /// Resuelve la raíz de una lista de monstruos: `None` si el juego todavía no la ha creado.
