@@ -305,10 +305,21 @@ vuelve a abrir el AppImage ya reemplazado. También se puede actualizar a mano c
 ./mh-overlay-0.5.2-linux-x86_64.AppImage --update
 ```
 
-Baja la última release, comprueba su SHA-256 y reemplaza **ese mismo archivo** de forma atómica.
-Si la release trae un `.minisig` junto al artefacto, la firma se puede verificar con la clave
-pública publicada en la release (`minisign -Vm <archivo> -P <clave>`); el SHA-256 sigue siendo
-la comprobación mínima cuando no hay firma.
+Baja la última release, comprueba su SHA-256, verifica la firma minisign con la clave pública del
+proyecto y reemplaza **ese mismo archivo** de forma atómica. La firma se comprueba en proceso, sin
+instalar `minisign`: en cuanto el binario lleva compilada la clave, una release sin `.minisig` o
+con una firma que no corresponda **no se instala**, aunque su SHA-256 cuadre. Mientras la clave no
+esté compilada el actualizador lo avisa y se queda en el SHA-256; `--doctor` dice cuál de los dos
+casos aplica. La clave pública vive en el repositorio (`packaging/minisign.pub`) y se adjunta a
+cada release.
+
+Para verificar a mano un artefacto descargado sirve la clave pública del proyecto, la misma que
+va compilada en el binario (`minisign.pub` en el repositorio):
+
+```bash
+minisign -Vm mh-overlay-<versión>-linux-x86_64.AppImage -P <clave-pública>
+```
+
 No hay que desinstalar: la configuración vive en `~/.config/mh-overlay` y se conserva, y el
 lanzador del menú sigue apuntando al AppImage actualizado. Si el archivo está en una carpeta de
 solo lectura, el actualizador lo dice y no toca nada.
@@ -759,6 +770,12 @@ invisible, mapas viejos— están resueltos paso a paso en
   `kernel.yama.ptrace_scope=0` (el hub ofrece «Conceder acceso» con polkit) o instala el tarball y
   aplica `setcap` al binario. La actualización del AppImage no pierde el permiso porque no depende
   del archivo.
+- **Actualizar exige que la release esté firmada**: el binario lleva compilada la clave pública
+  del proyecto (`PUBLIC_KEY` en `crates/mh-overlay-cli/src/update.rs`), así que un `.minisig` que
+  no corresponda o que falte impide la actualización. Si el repositorio pierde el secreto
+  `MINISIGN_SECRET_KEY`, la release sale sin firma y los binarios nuevos no la aceptan:
+  habría que instalarla a mano desde la release. `--doctor` dice si el binario que estás usando
+  lleva la clave y si se puede leer.
 - **Wilds no está soportado** todavía, aunque sus mapas están incluidos.
 - **Los nombres están solo en castellano**: la tabla se genera desde la localización `es-es`
   de HunterPie. Otra lengua es volver a generarla con ese archivo.

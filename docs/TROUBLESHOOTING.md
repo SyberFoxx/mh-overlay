@@ -91,18 +91,26 @@ leyendo con el más nuevo, pero los números pueden ser basura plausible.
 
 ## «La actualización no reemplaza el AppImage»
 
-- El actualizador comprueba el SHA-256 de la release y escribe en el mismo archivo. Si está en
-  una carpeta de solo lectura, lo dice y no toca nada.
+- El actualizador comprueba el SHA-256 de la release, verifica su firma minisign y escribe en el
+  mismo archivo. Si está en una carpeta de solo lectura, lo dice y no toca nada.
+- Cuando el binario lleva compilada la clave del proyecto, una release sin `.minisig` o con una
+  firma que no corresponda se rechaza aunque el SHA-256 cuadre; el mensaje dice cuál de las dos
+  cosas falta. `--doctor` informa si ese binario verifica firmas o se quedó en el SHA-256.
 - La configuración vive en `~/.config/mh-overlay` y se conserva; si algo se corrompe, el TOML
   anterior queda como `.bak`.
 - Con el tarball, la actualización la hace el gestor de paquetes o `install.sh`; el binario
   avisa de que hay una versión nueva pero no se reemplaza a sí mismo.
-- Las releases publican `*.sha256`. Si además hay `*.minisig`, la firma se verifica con la clave
-  pública que acompaña a la release:
+- Las releases publican `*.sha256`, `*.minisig` y la clave pública (`minisign.pub`). Para
+  verificarlas a mano hace falta el binario `minisign`, que no viene instalado por defecto:
 
   ```bash
-  minisign -Vm mh-overlay-<versión>-linux-x86_64.AppImage -P <clave-pública>
+  minisign -Vm mh-overlay-<versión>-linux-x86_64.AppImage -P "$(sed -n 2p minisign.pub)"
   ```
+
+  El actualizador no lo necesita: verifica la firma en proceso con la clave compilada.
+- Si `--update` dice que la release no publica la firma, o que la firma no verifica, no se instala
+  nada: es el comportamiento buscado. Si dice que no se pudo bajar la firma, es red o el servidor,
+  y reintentar sirve.
 
 ## «Un número no cuadra»
 

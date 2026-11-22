@@ -72,8 +72,11 @@ está verificado por tests; falta verlo con el compositor real.
       reinicio y configuración intacta).
 - [ ] Verificar que la release lleva README, LICENSE, NOTICE, AppStream, `.desktop`, iconos
       y las imágenes que enlaza el README.
-- [x] Firmar los artefactos (minisign) además del SHA-256. El paso está en el workflow;
-      falta generar el par de claves y subir `MINISIGN_SECRET_KEY` para que la release lo use.
+- [x] Firmar los artefactos (minisign) además del SHA-256 y verificarlo en el actualizador. Hecho:
+      el par de claves está generado, `MINISIGN_SECRET_KEY` subido al repositorio, la pública
+      compilada en `PUBLIC_KEY` (`crates/mh-overlay-cli/src/update.rs`), `packaging/minisign.pub`
+      adjunto a cada release y el actualizador se niega a instalar lo que no cuadre. Falta verlo
+      funcionar entre dos releases publicadas, que es la prueba de la sección 4.
 - [ ] Publicar también para `aarch64` si hay usuarios en ARM.
 - [x] Revisar que un AppImage sin `CAP_SYS_PTRACE` explica qué hacer en vez de fallar en
       silencio; CI exige que `--doctor` lo nombre.

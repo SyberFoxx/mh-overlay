@@ -19,3 +19,7 @@ mh-overlay-ui.workspace = true
 mh-overlay-app.workspace = true
 clap.workspace = true
 thiserror.workspace = true
+# minisign-verify: comprobar la firma Ed25519 de la release sin invocar el binario `minisign`,
+# que no viene en ningún escritorio base y convertiría «actualizar» en «instala un paquete
+# antes». El crate es del autor de minisign y no tiene dependencias transitivas.
+minisign-verify = "0.3"

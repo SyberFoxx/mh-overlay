@@ -1,18 +1,23 @@
 //! Actualización en sitio desde las releases de GitHub.
 //!
 //! La instalación no se desinstala: `--update` baja el paquete de la última release, comprueba su
-//! SHA-256, y reemplaza lo que haya en su sitio. Si el programa corre desde un AppImage
-//! (`$APPIMAGE` lo dice), el archivo que se reemplaza es la imagen entera; si corre desde el
-//! tarball instalado, el binario y los mapas que están junto a él. El archivo de configuración
-//! vive en `$XDG_CONFIG_HOME`, fuera de la instalación, así que se conserva tal cual.
+//! SHA-256, verifica la firma minisign con la clave del proyecto y reemplaza lo que haya en su
+//! sitio. Si el programa corre desde un AppImage (`$APPIMAGE` lo dice), el archivo que se
+//! reemplaza es la imagen entera; si corre desde el tarball instalado, el binario y los mapas que
+//! están junto a él. El archivo de configuración vive en `$XDG_CONFIG_HOME`, fuera de la
+//! instalación, así que se conserva tal cual.
 //!
 //! No se añade un cliente HTTP: `curl`, `tar` y `sha256sum` están en cualquier escritorio Linux y
-//! evitan meter TLS y un analizador de JSON en el binario del overlay.
+//! evitan meter TLS y un analizador de JSON en el binario del overlay. La firma sí se verifica en
+//! proceso: `minisign` no viene instalado en ningún escritorio base, y pedirle al usuario que lo
+//! instale antes de actualizar convertiría la comprobación en opcional.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use minisign_verify::{PublicKey, Signature};
 
 /// Repositorio del que se publican los paquetes.
 pub const REPOSITORY: &str = "SyberFoxx/mh-overlay";
@@ -24,6 +29,14 @@ const DOWNLOADS_OVERRIDE: &str = "MH_OVERLAY_UPDATE_DOWNLOADS";
 /// Versión del binario que está ejecutando la actualización.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
+/// Clave pública minisign del proyecto, tal cual se publica en `minisign.pub`.
+///
+/// Se puede pegar el archivo entero (con su línea `untrusted comment:`) o solo el base64. Mientras
+/// esté vacía no hay con qué saber quién publicó el paquete, así que la actualización se queda en
+/// el SHA-256 y lo avisa; en cuanto tenga valor la firma pasa a ser obligatoria y una release sin
+/// `.minisig`, o con una firma que no corresponda, no se instala.
+const PUBLIC_KEY: &str = "RWSiP1TP7hUZZxIX34xkvP/goq0S6gAVkbrY1M2r31zs9sV5mG2bW6ap";
+
 #[derive(Debug, thiserror::Error)]
 pub enum UpdateError {
     #[error("no se pudo consultar las releases de {REPOSITORY}: {0}")]
@@ -34,6 +47,14 @@ pub enum UpdateError {
     NoPackage { arch: String, name: String },
     #[error("el SHA-256 del paquete no coincide; no se instala nada")]
     Checksum,
+    #[error(
+        "la release {tag} no publica la firma de {name}; no se instala nada sin poder comprobarla"
+    )]
+    SignatureMissing { tag: String, name: String },
+    #[error("no se pudo bajar la firma del paquete; reintenta la actualización: {0}")]
+    SignatureDownload(String),
+    #[error("la firma del paquete no verifica: {0}")]
+    Signature(String),
     #[error("no se pudo descomprimir el paquete: {0}")]
     Unpack(String),
     #[error(
@@ -150,14 +171,42 @@ pub fn run() -> Result<(), UpdateError> {
     let name = install.asset_name(&version, &arch);
     println!("actualizando de {CURRENT} a {version}…");
 
-    let temporary = staging_dir()?;
+    let staging = Staging::new()?;
+    let temporary = staging.path();
     let archive = temporary.join(&name);
     let checksum = temporary.join(format!("{name}.sha256"));
 
     let downloads = endpoint(DOWNLOADS_OVERRIDE, DOWNLOADS);
     curl_file(&format!("{downloads}/{tag}/{name}"), &archive)?;
     curl_file(&format!("{downloads}/{tag}/{name}.sha256"), &checksum)?;
-    verify_checksum(&temporary, &checksum)?;
+    verify_checksum(temporary, &checksum)?;
+
+    match configured_key() {
+        Some(public_key) => {
+            let signature = temporary.join(format!("{name}.minisig"));
+            let fetched = curl_signature(&format!("{downloads}/{tag}/{name}.minisig"), &signature)?;
+
+            match fetched {
+                SignatureFetch::Published => {}
+                SignatureFetch::NotPublished => {
+                    return Err(UpdateError::SignatureMissing {
+                        tag: tag.clone(),
+                        name: name.clone(),
+                    });
+                }
+                SignatureFetch::Failed(reason) => {
+                    return Err(UpdateError::SignatureDownload(reason));
+                }
+            }
+
+            verify_file(&archive, &signature, public_key)?;
+            println!("firma del paquete verificada con la clave del proyecto");
+        }
+        None => println!(
+            "aviso: este binario se compiló sin la clave pública del proyecto, así que el paquete \
+             se comprueba por SHA-256 pero no por quién lo publicó."
+        ),
+    }
 
     match &install {
         Install::AppImage(target) => {
@@ -170,7 +219,7 @@ pub fn run() -> Result<(), UpdateError> {
                 .arg("-xzf")
                 .arg(&archive)
                 .arg("-C")
-                .arg(&temporary)
+                .arg(temporary)
                 .status()?;
             if !status.success() {
                 return Err(UpdateError::Unpack("`tar` terminó con error".into()));
@@ -203,7 +252,6 @@ pub fn run() -> Result<(), UpdateError> {
         }
     }
 
-    let _ = fs::remove_dir_all(&temporary);
     Ok(())
 }
 
@@ -351,6 +399,28 @@ fn staging_dir() -> Result<PathBuf, UpdateError> {
     Ok(directory)
 }
 
+/// Carpeta temporal de la actualización, que se borra sola.
+///
+/// Sin esto, un fallo después de bajar el paquete dejaba el artefacto descargado (y rechazado)
+/// en `$TMPDIR` hasta la siguiente ejecución, porque el `return` se saltaba la limpieza.
+struct Staging(PathBuf);
+
+impl Staging {
+    fn new() -> Result<Self, UpdateError> {
+        Ok(Self(staging_dir()?))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 fn curl_text(url: &str) -> Result<String, UpdateError> {
     let output = Command::new("curl")
         .args([
@@ -400,6 +470,62 @@ fn curl_file(url: &str, destination: &Path) -> Result<(), UpdateError> {
     Ok(())
 }
 
+/// Qué pasó al intentar bajar la firma. Una release que no la publica es un caso distinto de
+/// una descarga que falló: el primero se arregla esperando otra release, el segundo reintentando.
+#[derive(Debug)]
+enum SignatureFetch {
+    Published,
+    NotPublished,
+    Failed(String),
+}
+
+fn curl_signature(url: &str, destination: &Path) -> Result<SignatureFetch, UpdateError> {
+    // Sin `-f` a propósito: con `-f`, un 404 (la release no publica la firma) y un 500 (el
+    // servidor está roto) salen con el mismo código, y confundirlos manda a buscar el problema
+    // donde no está.
+    let output = Command::new("curl")
+        .args([
+            "-sSL",
+            "-H",
+            "User-Agent: mh-overlay",
+            "-o",
+            &destination.display().to_string(),
+            "-w",
+            "%{http_code}",
+            url,
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        // Con `file://` (el espejo de pruebas) no hay código HTTP: si curl no puede abrir el
+        // archivo, es que no está.
+        return Ok(if url.starts_with("file://") {
+            SignatureFetch::NotPublished
+        } else {
+            SignatureFetch::Failed(reason)
+        });
+    }
+
+    // `000` es la respuesta de los esquemas sin HTTP (`file://`).
+    Ok(classify_status(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
+}
+
+/// Traduce el código HTTP que devuelve `curl -w` a lo que hay que hacer con la firma.
+///
+/// Separado de la descarga para poder fijarlo con un test: confundir «no está publicada» con
+/// «no se pudo bajar» manda a diagnosticar el problema en el sitio equivocado.
+fn classify_status(status: &str) -> SignatureFetch {
+    match status {
+        "404" | "410" => SignatureFetch::NotPublished,
+        "200" | "000" => SignatureFetch::Published,
+        other => SignatureFetch::Failed(format!("HTTP {other}")),
+    }
+}
+
 fn verify_checksum(directory: &Path, checksum: &Path) -> Result<(), UpdateError> {
     let status = Command::new("sha256sum")
         .arg("-c")
@@ -413,6 +539,63 @@ fn verify_checksum(directory: &Path, checksum: &Path) -> Result<(), UpdateError>
     } else {
         Err(UpdateError::Checksum)
     }
+}
+
+/// Clave pública compilada en el binario, si la hay.
+fn configured_key() -> Option<&'static str> {
+    compiled_key(PUBLIC_KEY)
+}
+
+/// Normaliza lo que haya en [`PUBLIC_KEY`]: espacios de más y una clave sin pegar dan `None`.
+fn compiled_key(raw: &'static str) -> Option<&'static str> {
+    let key = raw.trim();
+
+    (!key.is_empty()).then_some(key)
+}
+
+/// Lee la clave pública escrita como `minisign.pub` o como su base64 suelto.
+///
+/// Se aceptan las dos formas porque quien la pega no va a mirar el formato.
+fn parse_key(raw: &str) -> Result<PublicKey, minisign_verify::Error> {
+    PublicKey::decode(raw).or_else(|_| PublicKey::from_base64(raw))
+}
+
+/// Estado de la firma en el binario que se está ejecutando, para `--doctor`.
+pub enum SignatureKey {
+    /// No lleva clave: la actualización se queda en el SHA-256 y lo avisa.
+    Missing,
+    /// La clave se lee: la firma es obligatoria al actualizar.
+    Ready,
+    /// Hay algo pegado, pero no es una clave: la actualización fallaría, así que se dice antes.
+    Unreadable(String),
+}
+
+/// Lo que puede comprobar este binario al actualizarse.
+pub fn signature_key() -> SignatureKey {
+    let Some(raw) = configured_key() else {
+        return SignatureKey::Missing;
+    };
+
+    match parse_key(raw) {
+        Ok(_) => SignatureKey::Ready,
+        Err(error) => SignatureKey::Unreadable(error.to_string()),
+    }
+}
+
+/// Comprueba que `signature` corresponde a `archive` con la clave pública del proyecto.
+///
+/// `minisign -S` firma con pre-hash desde hace años, así que las firmas en el formato antiguo se
+/// rechazan: aceptarlas solo amplía la superficie sin cubrir ningún caso real de la release.
+fn verify_file(archive: &Path, signature: &Path, public_key: &str) -> Result<(), UpdateError> {
+    let key = parse_key(public_key).map_err(|error| {
+        UpdateError::Signature(format!("la clave pública no se pudo leer: {error}"))
+    })?;
+    let signature = Signature::from_file(signature)
+        .map_err(|error| UpdateError::Signature(format!("la firma no se pudo leer: {error}")))?;
+    let content = fs::read(archive)?;
+
+    key.verify(&content, &signature, false)
+        .map_err(|error| UpdateError::Signature(error.to_string()))
 }
 
 /// Capacidades del binario actual (`cap_sys_ptrace` es la que se necesita para leer la memoria).
@@ -558,5 +741,215 @@ mod tests {
         assert_eq!(mode & 0o777, 0o755);
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Vector publicado por `minisign-verify`: una clave, una firma y su contenido reales, así
+    /// que el test recorre Ed25519 de verdad y no un doble.
+    const SAMPLE_KEY: &str = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+    const SAMPLE_SIGNATURE: &str = concat!(
+        "untrusted comment: signature from minisign secret key\n",
+        "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/",
+        "z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\n",
+        "trusted comment: timestamp:1633700835\tfile:test\tprehashed\n",
+        "wLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ==\n",
+    );
+    /// Lo que firma ese vector.
+    const SAMPLE_PAYLOAD: &[u8] = b"test";
+
+    fn signature_dir(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("mh-overlay-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn a_package_signed_with_the_project_key_verifies() {
+        let root = signature_dir("firma-ok");
+        let archive = root.join("paquete.AppImage");
+        let signature = root.join("paquete.AppImage.minisig");
+
+        fs::write(&archive, SAMPLE_PAYLOAD).unwrap();
+        fs::write(&signature, SAMPLE_SIGNATURE).unwrap();
+
+        assert!(verify_file(&archive, &signature, SAMPLE_KEY).is_ok());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_package_that_does_not_match_the_signature_is_rejected() {
+        let root = signature_dir("firma-manipulada");
+        let archive = root.join("paquete.AppImage");
+        let signature = root.join("paquete.AppImage.minisig");
+
+        // Un byte distinto es todo lo que hace falta para que la firma deje de cubrir el archivo.
+        fs::write(&archive, b"tesT").unwrap();
+        fs::write(&signature, SAMPLE_SIGNATURE).unwrap();
+
+        assert!(verify_file(&archive, &signature, SAMPLE_KEY).is_err());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_signature_that_was_altered_is_rejected() {
+        let root = signature_dir("firma-alterada");
+        let archive = root.join("paquete.AppImage");
+        let signature = root.join("paquete.AppImage.minisig");
+
+        fs::write(&archive, SAMPLE_PAYLOAD).unwrap();
+        fs::write(&signature, SAMPLE_SIGNATURE.replace("RUQf6LRC", "RUQf6LRD")).unwrap();
+
+        assert!(verify_file(&archive, &signature, SAMPLE_KEY).is_err());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_whole_minisign_pub_file_is_accepted_as_the_key() {
+        let root = signature_dir("clave-con-comentario");
+        let archive = root.join("paquete.AppImage");
+        let signature = root.join("paquete.AppImage.minisig");
+        let pasted = format!("untrusted comment: minisign public key 1\n{SAMPLE_KEY}\n");
+
+        fs::write(&archive, SAMPLE_PAYLOAD).unwrap();
+        fs::write(&signature, SAMPLE_SIGNATURE).unwrap();
+
+        assert!(verify_file(&archive, &signature, &pasted).is_ok());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_empty_key_means_there_is_nothing_to_verify_with() {
+        assert_eq!(compiled_key(""), None);
+        assert_eq!(compiled_key("  \n\t "), None);
+        assert_eq!(compiled_key(SAMPLE_KEY), Some(SAMPLE_KEY));
+    }
+
+    #[test]
+    fn a_missing_signature_is_reported_as_such() {
+        let error = UpdateError::SignatureMissing {
+            tag: "v9.9.9".to_string(),
+            name: "mh-overlay-9.9.9-linux-x86_64.AppImage".to_string(),
+        }
+        .to_string();
+
+        assert!(error.contains("no publica la firma"), "{error}");
+        assert!(error.contains("v9.9.9"), "{error}");
+    }
+
+    /// Misma clave y mismo contenido, pero firmado sin pre-hash: el formato que `minisign -S` ya
+    /// no produce. Aceptarlo ampliaría la superficie sin cubrir ninguna release real.
+    const LEGACY_SIGNATURE: &str = concat!(
+        "untrusted comment: signature from minisign secret key\n",
+        "RWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=\n",
+        "trusted comment: timestamp:1555779966\tfile:test\n",
+        "QtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==\n",
+    );
+    /// La firma del vector con el identificador de clave alterado: la matemática Ed25519 ni
+    /// siquiera llega a ejecutarse, así que solo un chequeo explícito del identificador la para.
+    const OTHER_KEY_ID_SIGNATURE: &str = concat!(
+        "untrusted comment: signature from minisign secret key\n",
+        "RUTg6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/",
+        "z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\n",
+        "trusted comment: timestamp:1633700835\tfile:test\tprehashed\n",
+        "wLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ==\n",
+    );
+
+    fn signed_pair(name: &str, signature: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = signature_dir(name);
+        let archive = root.join("paquete.AppImage");
+        let file = root.join("paquete.AppImage.minisig");
+
+        fs::write(&archive, SAMPLE_PAYLOAD).unwrap();
+        fs::write(&file, signature).unwrap();
+
+        (root, archive, file)
+    }
+
+    #[test]
+    fn a_legacy_signature_is_rejected() {
+        let (root, archive, signature) = signed_pair("firma-legacy", LEGACY_SIGNATURE);
+        let error = verify_file(&archive, &signature, SAMPLE_KEY)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.to_lowercase().contains("algorithm"), "{error}");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_signature_with_another_key_id_is_rejected_as_such() {
+        let (root, archive, signature) = signed_pair("otro-key-id", OTHER_KEY_ID_SIGNATURE);
+        let error = verify_file(&archive, &signature, SAMPLE_KEY)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("different key"), "{error}");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_published_signature_is_fetched_and_a_missing_one_is_told_apart() {
+        let (root, _archive, signature) = signed_pair("curl", SAMPLE_SIGNATURE);
+        let destination = root.join("descargada.minisig");
+
+        let fetched = curl_signature(&format!("file://{}", signature.display()), &destination);
+        assert!(matches!(fetched, Ok(SignatureFetch::Published)));
+        assert_eq!(fs::read(&destination).unwrap(), SAMPLE_SIGNATURE.as_bytes());
+
+        let missing = curl_signature(
+            &format!("file://{}", root.join("no-existe").display()),
+            &root.join("otra.minisig"),
+        );
+        assert!(matches!(missing, Ok(SignatureFetch::NotPublished)));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_signature_that_cannot_be_downloaded_is_not_reported_as_missing() {
+        let root = signature_dir("curl-roto");
+        let result = curl_signature("esquema-invalido://x.minisig", &root.join("x.minisig"));
+
+        // Un fallo de transporte no es «la release no la publica»: reintentar sí sirve y el
+        // mensaje tiene que decir eso.
+        assert!(
+            matches!(result, Ok(SignatureFetch::Failed(_))),
+            "{result:?}"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_key_that_is_not_a_key_is_reported_instead_of_silently_failing_later() {
+        assert!(parse_key("no es una clave").is_err());
+        assert!(parse_key("RWSiP1TP7hUZZxIX34xkvP/goq0S6gAVkbrY1M2r31zs9sV5mG2bW6ap").is_ok());
+        assert!(
+            parse_key("untrusted comment: minisign public key 1\nRWSiP1TP7hUZZxIX34xkvP/goq0S6gAVkbrY1M2r31zs9sV5mG2bW6ap").is_ok()
+        );
+    }
+
+    #[test]
+    fn a_missing_signature_and_a_broken_server_are_told_apart() {
+        // 404 y 410 son «la release no la publica»; 500 y el resto son «reintenta».
+        assert!(matches!(
+            classify_status("404"),
+            SignatureFetch::NotPublished
+        ));
+        assert!(matches!(
+            classify_status("410"),
+            SignatureFetch::NotPublished
+        ));
+        assert!(matches!(classify_status("500"), SignatureFetch::Failed(_)));
+        assert!(matches!(classify_status("502"), SignatureFetch::Failed(_)));
+        assert!(matches!(classify_status("200"), SignatureFetch::Published));
+        // `file://` no tiene código HTTP y curl informa `000`.
+        assert!(matches!(classify_status("000"), SignatureFetch::Published));
     }
 }

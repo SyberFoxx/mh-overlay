@@ -77,6 +77,12 @@ jobs:
           done
           rm -f "$key"
 
+      # La clave pública viaja con la release para que cualquiera pueda verificar a mano lo que
+      # el actualizador verifica solo: `minisign -Vm <archivo> -P <clave>`.
+      - name: Publicar la clave pública
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cp packaging/minisign.pub dist/minisign.pub
+
       - name: Publicar artefacto
         uses: actions/upload-artifact@v4
         with:
@@ -86,6 +92,7 @@ jobs:
             dist/*.AppImage
             dist/*.sha256
             dist/*.minisig
+            dist/minisign.pub
 
       - name: Adjuntar a la release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -97,3 +104,4 @@ jobs:
             dist/*.AppImage
             dist/*.sha256
             dist/*.minisig
+            dist/minisign.pub

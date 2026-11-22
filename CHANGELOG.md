@@ -7,6 +7,13 @@ de la versión etiquetada como cuerpo de la release de GitHub y falla si no exis
 
 ### Añadido
 
+- El actualizador verifica la firma minisign de la release en proceso, sin necesidad de tener
+  `minisign` instalado. El binario lleva compilada la clave pública del proyecto, así que un
+  paquete sin `.minisig` o con una firma que no corresponda no se instala aunque su SHA-256
+  cuadre, que es el caso que el SHA-256 solo no cubre: quien puede publicar la release puede
+  publicar también su checksum. `--doctor` avisa si la clave compilada falta o no se puede leer.
+- La clave pública se adjunta a cada release (`packaging/minisign.pub`) para poder verificar a
+  mano lo que el actualizador verifica solo.
 - Firma opcional de los artefactos con minisign: si el repositorio define
   `MINISIGN_SECRET_KEY`, la release publica un `.minisig` por AppImage y tarball. Sin ese
   secreto la release sigue saliendo con su SHA-256, igual que antes.
@@ -17,6 +24,8 @@ de la versión etiquetada como cuerpo de la release de GitHub y falla si no exis
 
 ### Mejorado
 
+- `--doctor` informa si el binario lleva la clave pública del proyecto y por tanto puede verificar
+  la firma de las actualizaciones, o si se quedó en el SHA-256.
 - Los tests recorren cada `.map` de Rise y World que tiene las claves del lector, no solo el más
   nuevo: un mapa añadido que pierda `QUEST_OFFSETS` o `MONSTER_LIST_ADDRESS` falla al instante.
 - El diagnóstico del AppImage en CI exige que `--doctor` nombre `CAP_SYS_PTRACE`, para que el

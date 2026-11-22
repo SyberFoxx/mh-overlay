@@ -32,8 +32,9 @@ El proyecto lee memoria de otro proceso, así que su superficie real es esa cade
   fallo de seguridad.
 - **La configuración.** Un `config.toml` que consiga salir del directorio, sobrescribir otro
   archivo o provocar un pánico al leerlo.
-- **La actualización.** Cómo se descarga, verifica (SHA-256) y reemplaza el binario en sitio,
-  tanto en el AppImage como en una instalación con `install.sh`.
+- **La actualización.** Cómo se descarga, se verifica (SHA-256 y la firma minisign con la clave
+  del proyecto) y se reemplaza el binario en sitio, tanto en el AppImage como en una instalación
+  con `install.sh`.
 - **El empaquetado.** Permisos de archivo, contenido del AppImage y del tarball, y el runtime
   fijado con el que se construye.
 

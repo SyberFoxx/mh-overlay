@@ -871,6 +871,18 @@ fn doctor(config_path: &Path) {
         );
     }
 
+    output.push_str("\nactualizaciones\n");
+    let signature = match update::signature_key() {
+        update::SignatureKey::Ready => {
+            "clave del proyecto compilada (obligatoria al actualizar)".to_string()
+        }
+        update::SignatureKey::Missing => "sin clave del proyecto: solo SHA-256".to_string(),
+        update::SignatureKey::Unreadable(error) => {
+            format!("clave del proyecto ilegible, la actualización fallaría: {error}")
+        }
+    };
+    output.push_str(&format!("  firma de los paquetes: {signature}\n"));
+
     output.push_str("\nconfiguración\n");
     output.push_str(&format!("  archivo: {}\n", config_path.display()));
 
