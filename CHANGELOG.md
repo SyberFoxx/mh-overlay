@@ -24,6 +24,14 @@ de la versión etiquetada como cuerpo de la release de GitHub y falla si no exis
 
 ### Mejorado
 
+- El hub deja de cortar y superponer texto: los ajustes ocupan el ancho completo y la vista
+  previa pasa al final cuando la ventana no da para dos columnas, las cifras del diagnóstico son
+  cuatro cajas del mismo tamaño, las viñetas de las notas alinean las líneas con el texto y la
+  navegación recorta con puntos suspensivos en vez de pisar el borde.
+- La release comprueba formato, avisos y tests antes de empaquetar, y verifica cada artefacto
+  firmado con la clave del proyecto antes de publicarlo.
+- La carpeta temporal de la actualización es aleatoria y privada (0700, en `$XDG_RUNTIME_DIR`
+  cuando existe), y si falla el reemplazo de los mapas se restaura la carpeta anterior.
 - `--doctor` informa si el binario lleva la clave pública del proyecto y por tanto puede verificar
   la firma de las actualizaciones, o si se quedó en el SHA-256.
 - Los tests recorren cada `.map` de Rise y World que tiene las claves del lector, no solo el más

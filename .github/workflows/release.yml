@@ -17,6 +17,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Un tag puede apuntar a un commit que nunca pasó por CI. Publicar sin comprobarlo es
+      # además firmar un artefacto que no se sabe si funciona.
+      - name: Formato, avisos y tests
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
 
       - name: Dependencias gráficas
         run: |
@@ -76,6 +86,20 @@ jobs:
             minisign -S -s "$key" -m "$file" -x "$file.minisig"
           done
           rm -f "$key"
+
+      # Lo que se publica tiene que verificar con la clave que va compilada en el binario; si el
+      # paso de firma se rompe, se ve aquí y no en la máquina de quien actualiza.
+      - name: Comprobar que los artefactos firmados verifican
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ ! -f packaging/minisign.pub ]; then
+            echo "::error::falta packaging/minisign.pub"
+            exit 1
+          fi
+          for file in dist/*.AppImage dist/*.tar.gz; do
+            minisign -V -q -m "$file" -x "$file.minisig" -p packaging/minisign.pub
+            echo "verifica: $file"
+          done
 
       # La clave pública viaja con la release para que cualquiera pueda verificar a mano lo que
       # el actualizador verifica solo: `minisign -Vm <archivo> -P <clave>`.

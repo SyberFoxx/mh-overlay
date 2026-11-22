@@ -383,7 +383,12 @@ fn install_from_dir(staged: &Path, directory: &Path) -> Result<(), UpdateError> 
         if target.is_dir() {
             fs::rename(&target, &previous)?;
         }
-        fs::rename(&maps, &target)?;
+        if let Err(error) = fs::rename(&maps, &target) {
+            // El binario nuevo ya está en su sitio: sin los mapas la instalación queda coja, así
+            // que se devuelve la carpeta anterior antes de propagar el error.
+            let _ = fs::rename(&previous, &target);
+            return Err(UpdateError::Io(error));
+        }
         let _ = fs::remove_dir_all(&previous);
     }
 
@@ -391,12 +396,51 @@ fn install_from_dir(staged: &Path, directory: &Path) -> Result<(), UpdateError> 
 }
 
 fn staging_dir() -> Result<PathBuf, UpdateError> {
-    let directory = std::env::temp_dir().join(format!("mh-overlay-update-{}", std::process::id()));
+    // `$XDG_RUNTIME_DIR` es privado del usuario y vive en memoria; `/tmp` es compartido con todo
+    // el sistema y ahí una carpeta con nombre predecible es una invitación a un symlink.
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
 
-    let _ = fs::remove_dir_all(&directory);
-    fs::create_dir_all(&directory)?;
+    for _ in 0..16 {
+        let directory = base.join(format!("mh-overlay-update-{}", random_suffix()));
 
-    Ok(directory)
+        // `create_dir` falla si ya existe: no se reutiliza nunca una carpeta que puso otro.
+        match fs::create_dir(&directory) {
+            Ok(()) => {
+                let _ = fs::set_permissions(&directory, fs::Permissions::from_mode(0o700));
+                return Ok(directory);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(UpdateError::Io(error)),
+        }
+    }
+
+    Err(UpdateError::Io(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no quedó ningún nombre libre para la carpeta temporal",
+    )))
+}
+
+/// Sufijo aleatorio de 8 bytes en hexadecimal.
+fn random_suffix() -> String {
+    use std::io::Read;
+
+    let mut bytes = [0u8; 8];
+    if let Ok(mut source) = fs::File::open("/dev/urandom")
+        && source.read_exact(&mut bytes).is_ok()
+    {
+        return bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    }
+
+    // Sin `/dev/urandom` queda el pid y el reloj; en Linux no debería hacer falta.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos())
+        .unwrap_or(0);
+
+    format!("{:x}{:x}", std::process::id(), nanos)
 }
 
 /// Carpeta temporal de la actualización, que se borra sola.

@@ -96,7 +96,9 @@ está verificado por tests; falta verlo con el compositor real.
 
 ### 6. Documentación de la 1.0
 
-- [ ] Capturas reales del hub y del panel, y un GIF corto para el README.
+- [x] Capturas reales del hub en `docs/captures/` (diagnóstico, novedades y ajustes), enlazadas
+      desde el README. Queda el panel sobre el juego en cacería y un GIF corto: los dos necesitan
+      el juego corriendo.
 - [x] Página de solución de problemas: ptrace, Proton, REFramework, mapas y Wayland
       (`docs/TROUBLESHOOTING.md`).
 - [x] Enumerar en el README las builds y mapas probados, con fecha.
@@ -120,6 +122,15 @@ está verificado por tests; falta verlo con el compositor real.
 No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
+
+- **2026-11-22 · sin publicar**: el hub ya no corta texto ni superpone nada: los ajustes usan el
+  ancho completo y la vista previa pasa al final cuando la ventana es estrecha (por debajo de
+  1180 px), las cifras del diagnóstico son cuatro cajas iguales, las viñetas de las notas tienen
+  sangría francesa y la navegación recorta con puntos suspensivos en vez de pisar el borde.
+  Capturas reales del hub en el README. El workflow de release corre fmt, clippy y tests antes de
+  empaquetar y comprueba que cada artefacto firmado verifique con la clave del proyecto.
+  Endurecido el actualizador: la carpeta temporal es aleatoria y 0700 dentro de
+  `$XDG_RUNTIME_DIR`, y un fallo al mover los mapas devuelve la carpeta anterior.
 
 - **2026-11-21 · sin publicar**: tests por cada mapa con el esquema del lector (Rise y World),
   firma opcional con minisign en la release, diagnóstico de `CAP_SYS_PTRACE` exigido en CI,
