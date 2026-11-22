@@ -10,8 +10,8 @@ use std::sync::Mutex;
 
 use crate::buffs::{RISE_BUFFS, RiseGroup};
 use crate::model::{
-    Ailment, Buff, Crown, Extracts, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
-    Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
+    Ailment, Buff, Crown, Extracts, Health, Hunt, MAX_WIREBUGS, Monster, Part, Player, Sharpness,
+    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, Wirebugs,
 };
 use crate::optional_chain;
 
@@ -144,6 +144,22 @@ const IG_DEFENSE_MAX_KEY: u32 = 0x20003;
 const KINSECT_STAMINA_CURRENT: u64 = 0x00;
 const KINSECT_STAMINA_MAX: u64 = 0x04;
 
+// `MHRWirebugStructure` (Sequential, 16.0.2.0): el long del ref, dos enteros y, desde +0x10,
+// los tics que le faltan al cordóptero, la duración completa de su recarga y el extra de los
+// temporales de entorno o habilidad. Son los `Cooldown`, `MaxCooldown` y `ExtraCooldown` de
+// HunterPie, también en tics de 60 por segundo.
+//
+// Sondeo sobre 16.0.2.0: con el cordóptero cargado el contador queda en 0; al gastarlo salta a
+// la duración completa (960 tics = 16 s) y baja mientras se recupera. La duración varía por
+// cordóptero (se observaron 360 y 600 tics además de 960), así que el máximo se lee de cada
+// estructura y no se asume constante.
+const WIREBUG_COOLDOWN: u64 = 0x10;
+const WIREBUG_MAX_COOLDOWN: u64 = 0x14;
+const WIREBUG_EXTRA_COOLDOWN: u64 = 0x18;
+/// `MHRWirebugCountStructure`: ranuras base, de entorno y de habilidad.
+const WIREBUG_COUNT_ENVIRONMENT: u64 = 0x04;
+const WIREBUG_COUNT_SKILL: u64 = 0x08;
+
 /// Los temporizadores de Rise vienen en tics de 60 Hz y el panel los dibuja en segundos.
 fn seconds(ticks: f32) -> f32 {
     if ticks.is_finite() {
@@ -237,10 +253,140 @@ impl<'map, M: Reads> Rise<'map, M> {
             ),
             recoverable: None,
             weapon: self.weapon(),
+            wirebugs: self.wirebugs(),
             buffs: self.buffs(),
         };
 
         Ok(player.is_plausible().then_some(player))
+    }
+
+    /// Cordópteros: cuántos lleva el jugador, cuántos están cargados y cuánto falta para el
+    /// siguiente.
+    ///
+    /// Las claves `WIREBUG_*` faltan en los mapas anteriores a 15.0.0.0 y el bloqueo no está en
+    /// los más viejos: cualquier pieza ausente deja la fila fuera del panel en vez de romperlo.
+    fn wirebugs(&self) -> Option<Wirebugs> {
+        let abnormalities = self.map.absolute("ABNORMALITIES_ADDRESS").ok()?;
+        let array = self
+            .memory
+            .deref_chain(
+                abnormalities,
+                self.map.offsets("WIREBUG_DATA_OFFSETS").ok()?,
+            )
+            .ok()?;
+        if array == 0 {
+            return None;
+        }
+
+        let length = self.memory.read_i32(array + ARRAY_LENGTH).ok()?;
+        let count = usize::try_from(length).ok()?.min(usize::from(MAX_WIREBUGS));
+        if count == 0 {
+            return None;
+        }
+
+        let mut entries = Vec::with_capacity(count);
+        for pointer in self.memory.read_pointers(array + ARRAY_DATA, count).ok()? {
+            entries.push(self.wirebug_entry(pointer));
+        }
+
+        // `WIREBUG_COUNT_OFFSETS` dice cuántas ranuras usa el jugador; en los mapas viejos que
+        // no la traen, las ranuras con recarga completa son las disponibles.
+        let total = self
+            .wirebug_total(abnormalities)
+            .map(|total| total.min(count))
+            .unwrap_or_else(|| {
+                entries
+                    .iter()
+                    .flatten()
+                    .filter(|(_, max)| *max > 0.0)
+                    .count()
+            });
+        if total == 0 {
+            return None;
+        }
+
+        let loaded = entries
+            .iter()
+            .take(total)
+            .flatten()
+            .filter(|(remaining, _)| remaining.is_finite() && *remaining <= 0.0)
+            .count();
+
+        // El siguiente en completarse es el que menos tics tiene por delante.
+        let recharging = entries
+            .iter()
+            .take(total)
+            .flatten()
+            .filter(|(remaining, max)| {
+                remaining.is_finite() && max.is_finite() && *remaining > 0.0 && *max > 0.0
+            })
+            .min_by(|left, right| left.0.total_cmp(&right.0))
+            .and_then(|(remaining, max)| Wirebugs::recharge_fraction(*remaining, *max));
+
+        Some(Wirebugs::new(
+            u8::try_from(total).unwrap_or(MAX_WIREBUGS),
+            u8::try_from(loaded).unwrap_or(MAX_WIREBUGS),
+            recharging,
+            self.wirebug_blocked(),
+        ))
+    }
+
+    /// Tics que le faltan a una ranura y duración completa de su recarga, ya con el extra de
+    /// los cordópteros temporales. `None` para una ranura vacía o ilegible.
+    fn wirebug_entry(&self, pointer: u64) -> Option<(f32, f32)> {
+        if pointer == 0 {
+            return None;
+        }
+
+        let remaining = self.memory.read_f32(pointer + WIREBUG_COOLDOWN).ok()?;
+        let max = self.memory.read_f32(pointer + WIREBUG_MAX_COOLDOWN).ok()?;
+        let extra = self
+            .memory
+            .read_f32(pointer + WIREBUG_EXTRA_COOLDOWN)
+            .ok()?;
+
+        Some((remaining + extra, max + extra))
+    }
+
+    /// `MHRWirebugCountStructure`: ranuras base, de entorno y de habilidad que el jugador lleva.
+    fn wirebug_total(&self, abnormalities: u64) -> Option<usize> {
+        let offsets = self.map.offsets("WIREBUG_COUNT_OFFSETS").ok()?;
+        let address = self.memory.deref_chain(abnormalities, offsets).ok()?;
+        if address == 0 {
+            return None;
+        }
+
+        let base = self.memory.read_i32(address).ok()?.max(0);
+        let environment = self
+            .memory
+            .read_i32(address + WIREBUG_COUNT_ENVIRONMENT)
+            .ok()?
+            .max(0);
+        let skill = self
+            .memory
+            .read_i32(address + WIREBUG_COUNT_SKILL)
+            .ok()?
+            .max(0);
+
+        usize::try_from(base + environment + skill).ok()
+    }
+
+    /// `IS_WIREBUG_BLOCKED_OFFSETS` vive en la UI. Un mapa sin la clave no bloquea nada.
+    fn wirebug_blocked(&self) -> bool {
+        let (Ok(base), Ok(offsets)) = (
+            self.map.absolute("UI_ADDRESS"),
+            self.map.offsets("IS_WIREBUG_BLOCKED_OFFSETS"),
+        ) else {
+            return false;
+        };
+        let Ok(slot) = self.memory.deref_chain(base, offsets) else {
+            return false;
+        };
+
+        self.memory
+            .read_i32(slot)
+            .ok()
+            .is_some_and(|value| value != 0)
     }
 
     /// Arma equipada, su filo y el medidor de su clase.
@@ -1057,5 +1203,57 @@ mod tests {
             60.0,
             "cada esencia aprende su propio máximo"
         );
+    }
+
+    #[test]
+    fn wirebugs_read_the_shared_chain_array_and_cooldowns() {
+        let map = map();
+        let abnormalities = map
+            .absolute("ABNORMALITIES_ADDRESS")
+            .expect("el mapa trae ABNORMALITIES_ADDRESS");
+        let mut fixture = crate::fixtures::Fixture::new();
+
+        // `WIREBUG_COUNT_OFFSETS` y `WIREBUG_DATA_OFFSETS` comparten los dos primeros saltos de
+        // `deref_chain`: el segundo nodo es el contenedor del array y, 0x2D8 más allá, los
+        // contadores. Van fuera del tramo que reparte `Fixture::allocate` para que ningún
+        // `write` posterior los pise.
+        let root = crate::fixtures::BASE + 0x4000_0000;
+        let second = crate::fixtures::BASE + 0x4000_1000;
+        let array = crate::fixtures::BASE + 0x4000_2000;
+        fixture.write_u64(abnormalities, root);
+        fixture.write_u64(root + 0xE0, second);
+        fixture.write_u64(second + 0x410, array);
+        fixture.write_i32(second + 0x2D8, 2);
+        fixture.write_i32(second + 0x2D8 + 4, 0);
+        fixture.write_i32(second + 0x2D8 + 8, 0);
+
+        fixture.write_i32(array + 0x1C, 4);
+        for (index, (remaining, max)) in [(0.0, 960.0), (240.0, 960.0), (0.0, 0.0), (0.0, 0.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let entry = fixture.allocate();
+            fixture.write_u64(array + 0x20 + index as u64 * 8, entry);
+            fixture.write_f32(entry + 0x10, remaining);
+            fixture.write_f32(entry + 0x14, max);
+            fixture.write_f32(entry + 0x18, 0.0);
+        }
+
+        let blocked = fixture.allocate();
+        fixture.seed_deref(
+            map.absolute("UI_ADDRESS").expect("el mapa trae UI_ADDRESS"),
+            map.offsets("IS_WIREBUG_BLOCKED_OFFSETS")
+                .expect("el mapa trae el bloqueo"),
+            blocked,
+        );
+        fixture.write_i32(blocked, 1);
+
+        let rise = Rise::new(fixture, &map);
+        let wirebugs = rise.wirebugs().expect("la cadena da cordópteros");
+
+        assert_eq!(wirebugs.max, 2);
+        assert_eq!(wirebugs.loaded, 1);
+        assert_eq!(wirebugs.recharging, Some(0.75));
+        assert!(wirebugs.blocked, "el flag de la UI se lee como bloqueo");
     }
 }

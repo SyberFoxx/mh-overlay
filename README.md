@@ -95,6 +95,7 @@ o [compila desde el código](#compilar-y-usar).
 | Adjuntar al proceso y resolver la base del módulo | ✅ probado | ✅ probado |
 | Vida actual / máxima y porcentaje | ✅ escrito | ✅ escrito |
 | Jugador: vida y aguante | ✅ escrito | ✅ escrito |
+| Jugador: cordópteros (cargados, total y recarga) | ✅ escrito | — |
 | Jugador: arma y filo | ✅ escrito | ✅ escrito |
 | Medidores de clase (espíritu, frascos, hacha, demonio, kinsecto) | ✅ escrito | ✅ escrito |
 | Espíritu como espada, con color por nivel | ✅ escrito | ✅ escrito |
@@ -266,7 +267,9 @@ modo demonio, esencias y kinsecto). En World las fichas añaden munición cargad
 cargados de la lanza pistola, dragón de fuego y estaca, notas en cola de la cornamusa y carga
 del arco. En Rise se añaden ataque, afinidad y elemento calculados por el juego. Cada ficha
 lleva su icono, su valor y una línea fina cuando el dato es una carga. La
-vida —con la parte recuperable en rojo— y el aguante van debajo. Los buffs y estados ya no son
+vida —con la parte recuperable en rojo— y el aguante van debajo. En Rise, entre el aguante y
+los buffs, una fila de **cordópteros** con un tramo por unidad: las cargadas llenas, la que se
+está recuperando a medio llenar y el aviso cuando el juego bloquea su uso. Los buffs y estados ya no son
 rayas: son una cuadrícula compacta de iconos con el tiempo restante; los negativos llevan borde
 rojo y las familias (ataque, defensa, vida, aguante, elemento, filo, comida, canción…) tienen
 dibujo y color propios. Por

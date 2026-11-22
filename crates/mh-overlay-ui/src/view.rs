@@ -7,7 +7,7 @@
 use mh_overlay_config::{BarStyle, Color, Config, Direction, Monsters, PanelTheme, StyleSection};
 use mh_overlay_games::{
     Buff, Crown, Extracts, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
-    WeaponDetail, WeaponGauge, part_labels,
+    WeaponDetail, WeaponGauge, Wirebugs, part_labels,
 };
 
 use crate::canvas::{Canvas, Rect};
@@ -1268,6 +1268,10 @@ fn player_height(
 
     height += geometry.row * 2.0;
 
+    if player.wirebugs.is_some_and(|wirebugs| wirebugs.max > 0) {
+        height += geometry.small + geometry.row;
+    }
+
     if !player.buffs.is_empty() {
         let rows = buff_rows(player.buffs.len());
         height += geometry.small
@@ -1427,12 +1431,52 @@ fn draw_player(
 
     y += geometry.row * 2.0;
 
+    if let Some(wirebugs) = player.wirebugs.filter(|wirebugs| wirebugs.max > 0) {
+        y += geometry.small;
+        y = draw_wirebugs(canvas, config, text, geometry, wirebugs, y);
+    }
+
     if !player.buffs.is_empty() {
         y += geometry.small;
         y = draw_buffs(canvas, config, text, geometry, y, &player.buffs);
     }
 
     y
+}
+
+/// Fila de los cordópteros: una barra con un tramo por cordóptero, las cargadas llenas y la
+/// que se está recuperando a medio llenar. El bloqueo cambia el color y el valor lo dice.
+fn draw_wirebugs(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    wirebugs: Wirebugs,
+    y: f32,
+) -> f32 {
+    let style = &config.style;
+
+    draw_row(
+        canvas,
+        config,
+        text,
+        geometry,
+        y,
+        Row {
+            label: "Cordópteros",
+            fraction: wirebugs.fraction(),
+            segments: Some(u32::from(wirebugs.max)),
+            value: Some(wirebugs.label()),
+            color: if wirebugs.blocked {
+                style.low_health
+            } else {
+                style.capture
+            },
+            recoverable: 0.0,
+        },
+    );
+
+    y + geometry.row
 }
 
 /// Cabecera del arma: icono de la clase, nombre y, a la derecha, el filo actual.
@@ -3044,6 +3088,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: None,
             buffs: Vec::new(),
         });
@@ -3064,6 +3109,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: None,
             buffs: Vec::new(),
         };
@@ -3092,6 +3138,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: Some(Weapon {
                 kind: WeaponKind::Longsword,
                 sharpness: None,
@@ -3129,6 +3176,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: Some(Weapon {
                 kind: WeaponKind::Longsword,
                 sharpness: None,
@@ -3172,6 +3220,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: None,
             buffs: Vec::new(),
         };
@@ -3200,6 +3249,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: None,
             buffs: Vec::new(),
         };
@@ -3233,6 +3283,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: Some(40.0),
+            wirebugs: Some(Wirebugs::new(2, 1, Some(0.5), false)),
             weapon: Some(Weapon {
                 kind: WeaponKind::ChargeBlade,
                 sharpness: Some(Sharpness {
@@ -3278,12 +3329,44 @@ mod tests {
     }
 
     #[test]
+    fn wirebugs_add_a_row_and_the_blocked_state_changes_it() {
+        let (config, text) = config();
+        let mut player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: None,
+            wirebugs: None,
+            buffs: Vec::new(),
+        };
+        let without = render(&config, &text, &preview(&player), None);
+
+        player.wirebugs = Some(Wirebugs::new(2, 1, Some(0.5), false));
+        let with = render(&config, &text, &preview(&player), None);
+        assert!(
+            with.height() > without.height(),
+            "la fila de cordópteros no añadió alto"
+        );
+
+        player.wirebugs = Some(Wirebugs::new(2, 1, Some(0.5), true));
+        let blocked = render(&config, &text, &preview(&player), None);
+        let changed = with
+            .pixels()
+            .iter()
+            .zip(blocked.pixels())
+            .filter(|(left, right)| left != right)
+            .count();
+        assert!(changed > 0, "el bloqueo no cambió ningún píxel");
+    }
+
+    #[test]
     fn the_sharpness_colors_are_drawn_in_the_bar() {
         let (config, text) = config();
         let player = Player {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: Some(Weapon {
                 kind: WeaponKind::Longsword,
                 sharpness: Some(Sharpness {
@@ -3604,6 +3687,7 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
+            wirebugs: None,
             weapon: Some(glaive(
                 Extracts {
                     attack: true,

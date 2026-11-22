@@ -123,6 +123,11 @@ No se implementa nada de esta lista sin hablarlo antes.
 
 ## Hecho
 
+- **2026-11-22 · sin publicar**: el panel de Rise enseña los **cordópteros** junto al jugador,
+  con un tramo por unidad, las cargadas llenas, la recarga del siguiente a medio llenar y el
+  aviso de bloqueo. El layout de `MHRWirebugStructure` se confirmó contra el código de HunterPie
+  y con un sondeo del proceso vivo.
+
 - **2026-11-22 · sin publicar**: el hub ya no corta texto ni superpone nada: los ajustes usan el
   ancho completo y la vista previa pasa al final cuando la ventana es estrecha (por debajo de
   1180 px), las cifras del diagnóstico son cuatro cajas iguales, las viñetas de las notas tienen

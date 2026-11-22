@@ -350,6 +350,8 @@ impl<'map, M: Reads> World<'map, M> {
             ),
             recoverable: recoverable.filter(|value| value.is_finite() && *value >= 0.0),
             weapon: self.weapon(),
+            // World no tiene cordópteros: el campo queda vacío y el panel no dibuja la fila.
+            wirebugs: None,
             buffs: self.buffs(),
         };
 

@@ -3,6 +3,15 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.9.0] - 2026-11-22
+
+### Añadido
+
+- **Cordópteros (wirebugs)** en el panel de Rise: una fila con los que llevás cargados sobre el
+  total, una barra por cordóptero con el que se está recargando a medio llenar, y el aviso
+  cuando el juego bloquea su uso. La duración de recarga se lee por cordóptero, porque no todas
+  tardan lo mismo (6, 10 y 16 s según el que sea).
+
 ## [0.8.1] - 2026-11-22
 
 ### Cambiado

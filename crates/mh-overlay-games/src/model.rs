@@ -773,6 +773,76 @@ impl Buff {
     }
 }
 
+/// Cordópteros de Rise: el recurso de los movimientos de seda.
+///
+/// `max` es lo que el jugador puede llevar (base, entorno y habilidad), `loaded` los que ya
+/// están cargados y `recharging` la fracción del siguiente en completarse. El juego guarda un
+/// contador por cordóptero con los tics que le **faltan**: cuando está listo vale 0 y sube
+/// hasta la duración completa al gastarlo. La fracción que se muestra es la inversa, de 0
+/// (recién gastado) a 1 (listo).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Wirebugs {
+    pub max: u8,
+    pub loaded: u8,
+    /// Fracción de recarga del siguiente cordóptero, de 0 a 1; `None` con todo cargado o sin
+    /// una recarga legible.
+    pub recharging: Option<f32>,
+    /// El juego bloquea el uso (animación, montura, caída).
+    pub blocked: bool,
+}
+
+/// Rise lleva como máximo cuatro cordópteros (dos base, uno de entorno y uno de habilidad).
+pub const MAX_WIREBUGS: u8 = 4;
+
+impl Wirebugs {
+    /// Estado ya saneado: nunca hay más cargados que disponibles y la fracción vive en `0..=1`.
+    pub fn new(max: u8, loaded: u8, recharging: Option<f32>, blocked: bool) -> Self {
+        let max = max.min(MAX_WIREBUGS);
+        let loaded = loaded.min(max);
+        let recharging = recharging
+            .filter(|value| value.is_finite())
+            .map(|value| value.clamp(0.0, 1.0))
+            .filter(|_| loaded < max);
+
+        Self {
+            max,
+            loaded,
+            recharging,
+            blocked,
+        }
+    }
+
+    /// Fracción cargada del cordóptero que se está recargando: `remaining` y `max` son los tics
+    /// que faltan y los que dura la recarga completa.
+    pub fn recharge_fraction(remaining: f32, max: f32) -> Option<f32> {
+        if !remaining.is_finite() || !max.is_finite() || max <= 0.0 {
+            return None;
+        }
+
+        Some((1.0 - remaining / max).clamp(0.0, 1.0))
+    }
+
+    /// Relleno de la fila: las cargadas y, si hay una en curso, la parte ya recargada de la
+    /// siguiente.
+    pub fn fraction(&self) -> f32 {
+        if self.max == 0 {
+            return 0.0;
+        }
+
+        let recharging = self.recharging.unwrap_or(0.0).clamp(0.0, 1.0);
+        ((f32::from(self.loaded) + recharging) / f32::from(self.max)).clamp(0.0, 1.0)
+    }
+
+    /// `1/2`, con el aviso de bloqueo cuando el juego no deja gastarlos.
+    pub fn label(&self) -> String {
+        if self.blocked {
+            format!("{}/{} · bloqueado", self.loaded, self.max)
+        } else {
+            format!("{}/{}", self.loaded, self.max)
+        }
+    }
+}
+
 /// Vida y aguante del jugador local.
 #[derive(Debug, Clone, Default)]
 pub struct Player {
@@ -781,6 +851,8 @@ pub struct Player {
     /// Vida recuperable (la parte roja de la barra); el HUD no siempre la expone.
     pub recoverable: Option<f32>,
     pub weapon: Option<Weapon>,
+    /// Cordópteros; solo Rise los expone.
+    pub wirebugs: Option<Wirebugs>,
     /// Buffs y estados activos, ya filtrados y ordenados por tiempo restante.
     pub buffs: Vec<Buff>,
 }
@@ -970,6 +1042,7 @@ mod tests {
             stamina: Health::new(0.0, 0.0),
             recoverable: None,
             weapon: None,
+            wirebugs: None,
             buffs: Vec::new(),
         };
         let player = Player {
@@ -977,6 +1050,7 @@ mod tests {
             stamina: Health::new(100.0, 150.0),
             recoverable: None,
             weapon: None,
+            wirebugs: None,
             buffs: Vec::new(),
         };
 
@@ -1272,5 +1346,39 @@ mod tests {
         monster.capture_percent = Some(20.0);
 
         assert!(monster.is_capturable());
+    }
+
+    #[test]
+    fn a_wirebug_recharge_fills_as_the_remaining_cooldown_drops() {
+        assert_eq!(Wirebugs::recharge_fraction(960.0, 960.0), Some(0.0));
+        assert_eq!(Wirebugs::recharge_fraction(480.0, 960.0), Some(0.5));
+        assert_eq!(Wirebugs::recharge_fraction(0.0, 960.0), Some(1.0));
+        assert_eq!(Wirebugs::recharge_fraction(-10.0, 960.0), Some(1.0));
+        assert_eq!(Wirebugs::recharge_fraction(1_200.0, 960.0), Some(0.0));
+        assert_eq!(Wirebugs::recharge_fraction(10.0, 0.0), None);
+        assert_eq!(Wirebugs::recharge_fraction(f32::NAN, 960.0), None);
+    }
+
+    #[test]
+    fn absurd_wirebug_counts_are_clamped() {
+        let clamped = Wirebugs::new(9, 7, Some(1.4), false);
+        assert_eq!(clamped.max, MAX_WIREBUGS);
+        assert_eq!(clamped.loaded, MAX_WIREBUGS);
+        assert_eq!(clamped.recharging, None, "sin huecos no hay recarga");
+
+        let partial = Wirebugs::new(2, 1, Some(0.5), false);
+        assert_eq!(partial.fraction(), 0.75);
+        assert_eq!(Wirebugs::new(2, 2, None, false).fraction(), 1.0);
+        assert_eq!(Wirebugs::new(0, 0, None, false).fraction(), 0.0);
+        assert_eq!(Wirebugs::new(2, 1, Some(f32::NAN), false).recharging, None);
+    }
+
+    #[test]
+    fn the_wirebug_row_reads_loaded_over_total_and_flags_the_block() {
+        let ready = Wirebugs::new(2, 2, None, false);
+        let blocked = Wirebugs::new(2, 1, Some(0.5), true);
+
+        assert_eq!(ready.label(), "2/2");
+        assert_eq!(blocked.label(), "1/2 · bloqueado");
     }
 }

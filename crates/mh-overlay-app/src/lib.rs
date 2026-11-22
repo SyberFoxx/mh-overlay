@@ -21,7 +21,7 @@ use mh_overlay_config::{
 };
 use mh_overlay_games::{
     Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
-    Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind,
+    Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, Wirebugs,
 };
 use mh_overlay_memory::{
     AddressMap, Lookalike, MapValidation, Memory, MemoryError, Process, SelectedMap, lookalikes,
@@ -3997,6 +3997,7 @@ fn sample() -> Snapshot {
             health: Health::new(712.0, 1000.0),
             stamina: Health::new(126.0, 150.0),
             recoverable: Some(90.0),
+            wirebugs: Some(Wirebugs::new(2, 1, Some(0.5), false)),
             weapon: Some(Weapon {
                 kind: WeaponKind::Longsword,
                 sharpness: Some(Sharpness {

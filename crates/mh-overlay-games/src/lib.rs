@@ -20,7 +20,7 @@ use mh_overlay_memory::{AddressMap, Memory, MemoryError, Process, Reads};
 pub use model::{
     Ailment, AmmoSlot, BowState, Breaks, Buff, Crown, CrownThresholds, Extracts, GunlanceState,
     Health, HornNote, HornSong, HornState, Hunt, Monster, Part, Player, RangedState, Sharpness,
-    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, part_labels,
+    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, Wirebugs, part_labels,
 };
 
 /// Resuelve la raíz de una lista de monstruos: `None` si el juego todavía no la ha creado.
@@ -173,6 +173,9 @@ mod tests {
             "MONSTER_FLINCH_HEALTH_COMPONENT_OFFSETS",
             "MONSTER_BREAK_HEALTH_COMPONENT_OFFSETS",
             "MONSTER_SEVER_HEALTH_COMPONENT_OFFSETS",
+            "WIREBUG_COUNT_OFFSETS",
+            "WIREBUG_DATA_OFFSETS",
+            "IS_WIREBUG_BLOCKED_OFFSETS",
         ] {
             assert!(
                 rise.address(key).is_ok() || rise.offsets(key).is_ok(),
