@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use crate::buffs::{RISE_BUFFS, RiseGroup};
 use crate::model::{
     Ailment, Buff, Crown, Extracts, Health, Hunt, MAX_WIREBUGS, Monster, Part, Player, Sharpness,
-    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, Wirebugs,
+    SharpnessLevel, Snapshot, Weapon, WeaponDetail, WeaponGauge, WeaponKind, WirebugRecharge,
+    Wirebugs,
 };
 use crate::optional_chain;
 
@@ -325,6 +326,26 @@ impl<'map, M: Reads> Rise<'map, M> {
             .min_by(|left, right| left.0.total_cmp(&right.0))
             .and_then(|(remaining, max)| Wirebugs::recharge_fraction(*remaining, *max));
 
+        // Cada ranura conserva su propio tiempo, no solo la próxima en completarse.
+        let mut recharge_slots = [None; MAX_WIREBUGS as usize];
+        for (index, entry) in entries.iter().take(total).enumerate() {
+            let Some((remaining, max)) = entry else {
+                continue;
+            };
+            if !remaining.is_finite() || !max.is_finite() || *remaining <= 0.0 || *max <= 0.0 {
+                continue;
+            }
+            let Some(fraction) = Wirebugs::recharge_fraction(*remaining, *max) else {
+                continue;
+            };
+            if let Some(slot) = recharge_slots.get_mut(index) {
+                *slot = Some(WirebugRecharge {
+                    seconds: seconds(*remaining),
+                    fraction,
+                });
+            }
+        }
+
         Some(
             Wirebugs::new(
                 u8::try_from(total).unwrap_or(MAX_WIREBUGS),
@@ -332,7 +353,8 @@ impl<'map, M: Reads> Rise<'map, M> {
                 recharging,
                 self.wirebug_blocked(),
             )
-            .with_sources(environment, skill),
+            .with_sources(environment, skill)
+            .with_recharge_slots(recharge_slots),
         )
     }
 
@@ -1273,5 +1295,12 @@ mod tests {
             }),
             "la ranura de entorno se conserva para el panel"
         );
+        assert_eq!(
+            wirebugs.recharging_slots[0], None,
+            "la cargada no lleva tiempo"
+        );
+        let slot = wirebugs.recharging_slots[1].expect("la segunda ranura recarga");
+        assert_eq!(slot.fraction, 0.75);
+        assert_eq!(slot.seconds_left(), 4, "240 tics son 4 s");
     }
 }

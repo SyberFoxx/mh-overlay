@@ -779,7 +779,8 @@ impl Buff {
 /// están cargados y `recharging` la fracción del siguiente en completarse. El juego guarda un
 /// contador por cordóptero con los tics que le **faltan**: cuando está listo vale 0 y sube
 /// hasta la duración completa al gastarlo. La fracción que se muestra es la inversa, de 0
-/// (recién gastado) a 1 (listo).
+/// (recién gastado) a 1 (listo). `recharging_slots` lleva lo mismo ranura por ranura, con los
+/// segundos que restan, para poder mostrar el tiempo de cada una.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Wirebugs {
     pub max: u8,
@@ -791,6 +792,30 @@ pub struct Wirebugs {
     pub blocked: bool,
     /// Ranuras que no son base (entorno y habilidad), solo cuando el juego las reporta.
     pub sources: Option<WirebugSources>,
+    /// Estado de cada ranura que sigue recargando, en el orden del array del juego. `None` en
+    /// las cargadas y en las que quedan fuera de `max`.
+    pub recharging_slots: [Option<WirebugRecharge>; MAX_WIREBUGS as usize],
+}
+
+/// Ranura de cordóptero que todavía no está lista.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WirebugRecharge {
+    /// Segundos que le faltan para estar disponible.
+    pub seconds: f32,
+    /// Fracción ya recargada, de 0 a 1.
+    pub fraction: f32,
+}
+
+impl WirebugRecharge {
+    /// Segundos enteros redondeando hacia arriba: nunca se enseña un decimal y un número no
+    /// cambia de valor entre frames por una décima.
+    pub fn seconds_left(&self) -> u32 {
+        if !self.seconds.is_finite() {
+            return 1;
+        }
+
+        self.seconds.max(0.0).ceil().clamp(1.0, u32::MAX as f32) as u32
+    }
 }
 
 /// Ranuras extra que suman los cordópteros del entorno y los de la habilidad.
@@ -819,6 +844,7 @@ impl Wirebugs {
             recharging,
             blocked,
             sources: None,
+            recharging_slots: [None; MAX_WIREBUGS as usize],
         }
     }
 
@@ -829,6 +855,36 @@ impl Wirebugs {
         let skill = skill.min(self.max.saturating_sub(environment));
         self.sources =
             (environment > 0 || skill > 0).then_some(WirebugSources { environment, skill });
+
+        self
+    }
+
+    /// Declara el estado de cada ranura que sigue recargando. Se descartan las que caen fuera
+    /// de `max` y los tiempos imposibles; una ranura con cero segundos ya está cargada.
+    pub fn with_recharge_slots(
+        mut self,
+        slots: [Option<WirebugRecharge>; MAX_WIREBUGS as usize],
+    ) -> Self {
+        for (index, slot) in slots.into_iter().enumerate() {
+            if index >= usize::from(self.max) {
+                break;
+            }
+
+            self.recharging_slots[index] = slot.and_then(|slot| {
+                let seconds = slot.seconds;
+                if !seconds.is_finite() || seconds <= 0.0 {
+                    return None;
+                }
+
+                let fraction = if slot.fraction.is_finite() {
+                    slot.fraction.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+
+                Some(WirebugRecharge { seconds, fraction })
+            });
+        }
 
         self
     }
@@ -1447,5 +1503,56 @@ mod tests {
             Wirebugs::new(2, 2, None, false).with_sources(0, 0).sources,
             None
         );
+    }
+
+    #[test]
+    fn each_wirebug_slot_keeps_its_own_recharge_seconds() {
+        let slots = [
+            Some(WirebugRecharge {
+                seconds: 4.31,
+                fraction: 0.2,
+            }),
+            None,
+            Some(WirebugRecharge {
+                seconds: 12.0,
+                fraction: 0.0,
+            }),
+            Some(WirebugRecharge {
+                seconds: 2.0,
+                fraction: 0.8,
+            }),
+        ];
+        let wirebugs = Wirebugs::new(3, 1, Some(0.2), false).with_recharge_slots(slots);
+
+        assert_eq!(
+            wirebugs.recharging_slots[0].map(|slot| slot.seconds_left()),
+            Some(5),
+            "4,31 s se redondea hacia arriba"
+        );
+        assert_eq!(
+            wirebugs.recharging_slots[1], None,
+            "la cargada no lleva tiempo"
+        );
+        assert_eq!(
+            wirebugs.recharging_slots[2].map(|slot| slot.seconds_left()),
+            Some(12)
+        );
+        assert_eq!(
+            wirebugs.recharging_slots[3], None,
+            "fuera de max no se copia la ranura"
+        );
+    }
+
+    #[test]
+    fn recharge_seconds_round_up_and_never_show_zero() {
+        let slot = |seconds| WirebugRecharge {
+            seconds,
+            fraction: 0.5,
+        };
+
+        assert_eq!(slot(4.0).seconds_left(), 4);
+        assert_eq!(slot(4.01).seconds_left(), 5);
+        assert_eq!(slot(0.2).seconds_left(), 1);
+        assert_eq!(slot(f32::NAN).seconds_left(), 1);
     }
 }

@@ -3,6 +3,14 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.9.3] - 2026-11-22
+
+### Añadido
+
+- Los cordópteros muestran **cuánto falta** para cada uno: los segundos restantes bajo cada marca
+  que se está recargando, en segundos enteros para que no parpadeen. El estado que los afecta
+  sigue siendo el bloqueo del juego.
+
 ## [0.9.2] - 2026-11-22
 
 ### Mejorado

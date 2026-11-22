@@ -42,14 +42,16 @@ const FREE_HUNT_WIDTH: f32 = 240.0;
 const FREE_PADDING: f32 = 9.0;
 /// Lado del icono del arma en la cabecera del jugador.
 const WEAPON_ICON: f32 = 22.0;
-/// Alto de la fila de cordópteros: el glifo y su anillo de recarga.
-const WIREBUG_ROW: f32 = 27.0;
+/// Alto de la fila de cordópteros: el glifo, su anillo y los segundos debajo.
+const WIREBUG_ROW: f32 = 38.0;
 /// Lado del glifo del cordóptero dentro de la fila.
 const WIREBUG_GLYPH: f32 = 20.0;
 /// Paso de cada marca de cordóptero, para que el anillo no toque al vecino.
 const WIREBUG_SLOT: f32 = 28.0;
 /// Radio del anillo de recarga desde el centro de la marca.
 const WIREBUG_RING: f32 = 12.5;
+/// Tamaño del tiempo que se dibuja bajo la marca que recarga.
+const WIREBUG_TIME: f32 = 11.0;
 /// Fichas de datos del arma por fila; se reparten en varias filas si no caben.
 const CHIP_HEIGHT: f32 = 21.0;
 /// Iconos de buff por fila: la cuadrícula sustituye a una lista de barras.
@@ -1511,9 +1513,9 @@ fn draw_player(
 
 /// Fila de los cordópteros: una marca por ranura en vez de una barra.
 ///
-/// Las cargadas van a color pleno, la que se recupera queda atenuada dentro de un anillo que
-/// se llena con `recharge_fraction()` y las vacías se insinúan apenas. El bloqueo pinta todo
-/// con el color de aviso y el valor lo dice.
+/// Las cargadas van a color pleno, las que recargan quedan atenuadas dentro de un anillo que se
+/// llena con su fracción y debajo llevan los segundos que faltan; las vacías se insinúan apenas.
+/// El bloqueo pinta todo con el color de aviso y el valor lo dice.
 fn draw_wirebugs(
     canvas: &mut Canvas,
     config: &Config,
@@ -1527,18 +1529,7 @@ fn draw_wirebugs(
     let blocky = is_blocky(theme, style.bar_style);
     let scale = geometry.scale;
     let size = 12.0 * scale;
-    let center_y = y + geometry.wirebug * 0.5;
-    let baseline = center_y - text.height(size) * 0.5 + text.ascent(size);
     let label = fit_label(text, "Cordópteros", size, LABEL_WIDTH * scale);
-
-    text.draw(
-        canvas,
-        &label,
-        geometry.padding,
-        baseline,
-        size,
-        style.muted,
-    );
 
     let value = wirebugs.label();
     let value_width = text.width(&value, size);
@@ -1553,6 +1544,10 @@ fn draw_wirebugs(
         .min(slot * 0.46)
         .max(glyph * 0.5)
         .max(1.0);
+    let center_y = y + radius;
+    let baseline = center_y - text.height(size) * 0.5 + text.ascent(size);
+    let time_size = (WIREBUG_TIME * scale).min(slot * 0.42).max(1.0);
+    let time_baseline = y + radius * 2.0 + 2.0 * scale + text.ascent(time_size);
     let frame = if wirebugs.blocked {
         style.low_health
     } else {
@@ -1561,12 +1556,23 @@ fn draw_wirebugs(
     let track = track_fill(style, theme, 0.18);
     let ring_thickness = (1.6 * scale).max(0.7);
 
+    text.draw(
+        canvas,
+        &label,
+        geometry.padding,
+        baseline,
+        size,
+        style.muted,
+    );
+
     for (index, state) in wirebug_slots(wirebugs).into_iter().enumerate() {
         let center = (marks_start + slot * (index as f32 + 0.5), center_y);
-        let (glyph_color, ring_fraction) = match state {
-            WirebugSlot::Loaded => (frame, 1.0),
-            WirebugSlot::Recharging(fraction) => (frame.with_alpha(130), fraction),
-            WirebugSlot::Empty => (style.muted.with_alpha(50), 0.0),
+        let (glyph_color, ring_fraction, seconds) = match state {
+            WirebugSlot::Loaded => (frame, 1.0, None),
+            WirebugSlot::Recharging { fraction, seconds } => {
+                (frame.with_alpha(130), fraction, seconds)
+            }
+            WirebugSlot::Empty => (style.muted.with_alpha(50), 0.0, None),
         };
 
         // El anillo es el mismo en todas las ranuras; lo único que cambia es cuánto se llena.
@@ -1587,6 +1593,18 @@ fn draw_wirebugs(
             glyph,
             glyph_color,
         );
+
+        if let Some(seconds) = seconds {
+            let time = format!("{seconds}s");
+            text.draw(
+                canvas,
+                &time,
+                center.0 - text.width(&time, time_size) * 0.5,
+                time_baseline,
+                time_size,
+                style.muted,
+            );
+        }
     }
 
     text.draw(canvas, &value, value_x, baseline, size, style.muted);
@@ -1598,20 +1616,41 @@ fn draw_wirebugs(
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WirebugSlot {
     Loaded,
-    Recharging(f32),
+    Recharging {
+        fraction: f32,
+        /// Segundos ya redondeados; `None` si la ranura no trae tiempo legible.
+        seconds: Option<u32>,
+    },
     Empty,
 }
 
-/// Una marca por ranura: las cargadas, después la que se está recargando y el resto vacías.
+/// Una marca por ranura: las cargadas, las que recargan con su tiempo y el resto vacías.
 fn wirebug_slots(wirebugs: Wirebugs) -> Vec<WirebugSlot> {
     (0..wirebugs.max)
         .map(|index| {
             if index < wirebugs.loaded {
-                WirebugSlot::Loaded
-            } else if index == wirebugs.loaded {
+                return WirebugSlot::Loaded;
+            }
+
+            if let Some(slot) = wirebugs
+                .recharging_slots
+                .get(usize::from(index))
+                .copied()
+                .flatten()
+            {
+                return WirebugSlot::Recharging {
+                    fraction: slot.fraction,
+                    seconds: Some(slot.seconds_left()),
+                };
+            }
+
+            if index == wirebugs.loaded {
                 wirebugs
                     .recharging
-                    .map_or(WirebugSlot::Empty, WirebugSlot::Recharging)
+                    .map_or(WirebugSlot::Empty, |fraction| WirebugSlot::Recharging {
+                        fraction,
+                        seconds: None,
+                    })
             } else {
                 WirebugSlot::Empty
             }
@@ -3069,6 +3108,7 @@ mod tests {
     use mh_overlay_config::Layout;
     use mh_overlay_games::{
         Ailment, Breaks, Buff, Extracts, Health, Sharpness, WeaponGauge, WeaponKind,
+        WirebugRecharge,
     };
 
     fn monster(percent: f32) -> Monster {
@@ -3512,7 +3552,15 @@ mod tests {
             health: Health::new(800.0, 1000.0),
             stamina: Health::new(100.0, 150.0),
             recoverable: Some(40.0),
-            wirebugs: Some(Wirebugs::new(2, 1, Some(0.5), false)),
+            wirebugs: Some(Wirebugs::new(2, 1, Some(0.5), false).with_recharge_slots([
+                None,
+                Some(WirebugRecharge {
+                    seconds: 12.7,
+                    fraction: 0.5,
+                }),
+                None,
+                None,
+            ])),
             weapon: Some(Weapon {
                 kind: WeaponKind::ChargeBlade,
                 sharpness: Some(Sharpness {
@@ -3594,7 +3642,10 @@ mod tests {
             wirebug_slots(Wirebugs::new(3, 1, Some(0.5), false)),
             vec![
                 WirebugSlot::Loaded,
-                WirebugSlot::Recharging(0.5),
+                WirebugSlot::Recharging {
+                    fraction: 0.5,
+                    seconds: None,
+                },
                 WirebugSlot::Empty,
             ]
         );
@@ -3604,7 +3655,39 @@ mod tests {
         );
         assert_eq!(
             wirebug_slots(Wirebugs::new(2, 0, Some(0.25), false)),
-            vec![WirebugSlot::Recharging(0.25), WirebugSlot::Empty]
+            vec![
+                WirebugSlot::Recharging {
+                    fraction: 0.25,
+                    seconds: None,
+                },
+                WirebugSlot::Empty,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_recharging_slot_carries_its_rounded_seconds_and_a_loaded_one_does_not() {
+        let wirebugs = Wirebugs::new(2, 1, Some(1.0 / 3.0), false).with_recharge_slots([
+            None,
+            Some(WirebugRecharge {
+                seconds: 12.7,
+                fraction: 1.0 / 3.0,
+            }),
+            None,
+            None,
+        ]);
+
+        assert_eq!(wirebugs.label(), "1/2");
+        assert_eq!(
+            wirebug_slots(wirebugs),
+            vec![
+                WirebugSlot::Loaded,
+                WirebugSlot::Recharging {
+                    fraction: 1.0 / 3.0,
+                    seconds: Some(13),
+                },
+            ],
+            "la cargada no lleva número y la que recarga redondea 12,7 a 13"
         );
     }
 
@@ -3627,7 +3710,7 @@ mod tests {
         let marks_start = geometry.padding + LABEL_WIDTH * geometry.scale;
         let available = 400.0 - geometry.padding - value_width - 6.0 - marks_start;
         let slot = (available / 2.0).min(geometry.wirebug_slot);
-        let center_y = geometry.wirebug * 0.5;
+        let center_y = geometry.wirebug_ring;
 
         for index in 0..2 {
             let center_x = marks_start + slot * (index as f32 + 0.5);
