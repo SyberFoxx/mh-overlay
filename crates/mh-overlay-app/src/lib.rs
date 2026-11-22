@@ -37,6 +37,24 @@ use tray::Tray;
 /// Versión que enseña el hub, la misma que `--version`.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Alto aproximado del pie de la barra lateral; solo se usa para separarlo de la navegación.
+const FOOTER_HEIGHT: f32 = 178.0;
+
+/// Hueco entre la navegación y el pie de la barra lateral. Nunca negativo, para que una ventana
+/// baja no empuje el pie fuera de la vista.
+fn footer_space(available: f32, footer: f32) -> f32 {
+    (available - footer).max(0.0)
+}
+
+/// Ancho a partir del cual la vista previa cabe al lado de los ajustes sin apretar el formulario.
+const PREVIEW_NEXT_TO_SETTINGS: f32 = 1180.0;
+
+/// Si la ventana no da para las dos columnas, la vista previa pasa debajo en vez de robarle
+/// ancho a los controles (que es lo que cortaba los textos a media palabra).
+fn packed_preview(window_width: f32) -> bool {
+    window_width < PREVIEW_NEXT_TO_SETTINGS
+}
+
 /// Icono de la ventana: el mismo dibujo de la bandeja, pasado de ARGB a RGBA.
 /// Tamaño recordado, dentro de lo que la ventana admite; un TOML editado a mano no la encoge
 /// hasta hacerla inutilizable.
@@ -788,7 +806,7 @@ impl Hub {
         let active = self.tab == tab;
         let width = ui.available_width();
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(width, 44.0), egui::Sense::click());
+            ui.allocate_exact_size(egui::vec2(width, 50.0), egui::Sense::click());
 
         let fill = if active {
             self.palette.accent.gamma_multiply(0.14)
@@ -808,36 +826,40 @@ impl Hub {
             );
         }
 
-        let x = rect.left() + 12.0;
-        ui.painter().text(
-            egui::pos2(x, rect.top() + 7.0),
-            egui::Align2::LEFT_TOP,
-            title,
-            egui::FontId::proportional(15.0),
-            if active {
-                self.palette.accent
-            } else {
-                self.palette.text
-            },
+        // El texto se coloca con un layout de verdad, no pintado a mano: así el atajo reserva su
+        // hueco y el subtítulo se recorta con puntos suspensivos en vez de pisar el borde.
+        let inner = rect.shrink2(egui::vec2(12.0, 7.0));
+        let mut face = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        ui.painter().text(
-            egui::pos2(x, rect.top() + 26.0),
-            egui::Align2::LEFT_TOP,
-            subtitle,
-            egui::FontId::proportional(11.5),
-            self.palette.muted,
-        );
-        ui.painter().text(
-            egui::pos2(rect.right() - 10.0, rect.top() + 8.0),
-            egui::Align2::RIGHT_TOP,
-            hint,
-            egui::FontId::proportional(10.5),
-            if active {
-                self.palette.accent.gamma_multiply(0.8)
-            } else {
-                self.palette.muted.gamma_multiply(0.7)
-            },
-        );
+        {
+            let ui = &mut face;
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(title).size(15.0).color(if active {
+                    self.palette.accent
+                } else {
+                    self.palette.text
+                }));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(hint).size(10.5).color(if active {
+                        self.palette.accent.gamma_multiply(0.8)
+                    } else {
+                        self.palette.muted.gamma_multiply(0.7)
+                    }));
+                });
+            });
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(subtitle)
+                        .size(11.0)
+                        .color(self.palette.muted),
+                )
+                .truncate(),
+            );
+        }
 
         if response.clicked() {
             self.set_tab(tab);
@@ -888,135 +910,140 @@ impl Hub {
         self.nav_item(ui, Tab::Weapon, "Arma", "Filo, medidores y datos", "Ctrl+3");
         self.nav_item(ui, Tab::Settings, "Ajustes", "Panel y colores", "Ctrl+4");
 
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            // En un layout de abajo arriba, lo primero que se añade queda más abajo.
-            ui.add_space(2.0);
-            ui.label(
-                egui::RichText::new(format!(
-                    "v{VERSION} · {}",
-                    if running_as_appimage() {
-                        "AppImage"
-                    } else {
-                        "instalado"
-                    }
-                ))
-                .small()
-                .color(self.palette.muted),
-            );
+        // El pie se ancla al fondo con un hueco calculado y se escribe de arriba abajo: así el
+        // orden del código es el orden en pantalla y ningún texto queda pisado por el botón que
+        // tiene debajo.
+        ui.add_space(footer_space(ui.available_height(), FOOTER_HEIGHT));
 
-            if let Some(version) = &self.available {
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(format!("Actualización {version} disponible"))
-                        .small()
-                        .color(self.palette.accent),
-                );
-            }
-
-            ui.add_space(6.0);
-            let checking = self.check.is_some();
-            let updating = self.update.is_some();
-            let busy = checking || updating;
-            let (label, hint, enabled) = if self.restart_ready {
-                (
-                    "Reiniciar ahora",
-                    "Cierra y vuelve a abrir mh-overlay con la versión nueva",
-                    true,
-                )
-            } else if self.available.is_some() {
-                (
-                    "Instalar actualización",
-                    "Descarga y reemplaza esta instalación sin desinstalar nada",
-                    !updating,
-                )
-            } else if checking {
-                (
-                    "Buscando actualización…",
-                    "Consultando la última release",
-                    false,
-                )
-            } else {
-                (
-                    "Buscar actualización",
-                    "Comprueba si hay una versión nueva, sin descargar nada",
-                    !busy,
-                )
-            };
-
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(label).min_size(egui::vec2(ui.available_width(), 30.0)),
-                )
-                .on_hover_text(hint)
-                .clicked()
-            {
-                if self.restart_ready {
-                    self.restart(ui.ctx());
-                } else if self.available.is_some() {
-                    self.start_update();
-                } else {
-                    self.start_check(true);
-                }
-            }
-
-            if let Some((ok, message)) = &self.update_note {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(message).small().color(if *ok {
-                    self.palette.good
-                } else {
-                    self.palette.bad
-                }));
-            }
-
-            ui.add_space(10.0);
-            let running = self.overlay_running();
-            let (label, fill, color) = if running {
-                ("Cerrar panel", self.palette.surface_3, self.palette.text)
-            } else {
-                ("Abrir panel", self.palette.accent, self.palette.bg)
-            };
-            if ui
-                .add(
-                    egui::Button::new(egui::RichText::new(label).color(color).strong())
-                        .fill(fill)
-                        .min_size(egui::vec2(ui.available_width(), 34.0)),
-                )
-                .on_hover_text("Abre el overlay sobre el juego como proceso aparte")
-                .clicked()
-            {
-                self.toggle_overlay();
-            }
-
-            // Con el panel abierto y sin monstruos no hay nada que enseñar: el panel se oculta a
-            // propósito, y sin decirlo parece que «Abrir panel» no hace nada.
-            if running
-                && self.status.snapshot.monsters.is_empty()
-                && self.config.overlay.hide_on_empty
-            {
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new("en espera: el panel aparece al entrar en una cacería")
-                        .small()
-                        .color(self.palette.muted),
-                );
-            }
-
-            ui.add_space(10.0);
-            let (title, detail, color) = self.connection_state();
-            ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 9.0), egui::Sense::hover());
-                ui.painter().circle_filled(rect.center(), 4.0, color);
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(title).small().color(color).strong());
-                    ui.label(
+        let (title, detail, color) = self.connection_state();
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 9.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 4.0, color);
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(title).small().color(color).strong());
+                ui.add(
+                    egui::Label::new(
                         egui::RichText::new(detail)
                             .size(10.5)
                             .color(self.palette.muted),
-                    );
-                });
+                    )
+                    .wrap(),
+                );
             });
         });
+
+        ui.add_space(14.0);
+        let running = self.overlay_running();
+        let (label, fill, color) = if running {
+            ("Cerrar panel", self.palette.surface_3, self.palette.text)
+        } else {
+            ("Abrir panel", self.palette.accent, self.palette.bg)
+        };
+        if ui
+            .add(
+                egui::Button::new(egui::RichText::new(label).color(color).strong())
+                    .fill(fill)
+                    .min_size(egui::vec2(ui.available_width(), 34.0)),
+            )
+            .on_hover_text("Abre el overlay sobre el juego como proceso aparte")
+            .clicked()
+        {
+            self.toggle_overlay();
+        }
+
+        // Con el panel abierto y sin monstruos no hay nada que enseñar: el panel se oculta a
+        // propósito, y sin decirlo parece que «Abrir panel» no hace nada.
+        if running && self.status.snapshot.monsters.is_empty() && self.config.overlay.hide_on_empty
+        {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new("en espera: el panel aparece al entrar en una cacería")
+                    .small()
+                    .color(self.palette.muted),
+            );
+        }
+
+        ui.add_space(10.0);
+        let checking = self.check.is_some();
+        let updating = self.update.is_some();
+        let busy = checking || updating;
+        let (label, hint, enabled) = if self.restart_ready {
+            (
+                "Reiniciar ahora",
+                "Cierra y vuelve a abrir mh-overlay con la versión nueva",
+                true,
+            )
+        } else if self.available.is_some() {
+            (
+                "Instalar actualización",
+                "Descarga y reemplaza esta instalación sin desinstalar nada",
+                !updating,
+            )
+        } else if checking {
+            (
+                "Buscando actualización…",
+                "Consultando la última release",
+                false,
+            )
+        } else {
+            (
+                "Buscar actualización",
+                "Comprueba si hay una versión nueva, sin descargar nada",
+                !busy,
+            )
+        };
+
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new(label).min_size(egui::vec2(ui.available_width(), 30.0)),
+            )
+            .on_hover_text(hint)
+            .clicked()
+        {
+            if self.restart_ready {
+                self.restart(ui.ctx());
+            } else if self.available.is_some() {
+                self.start_update();
+            } else {
+                self.start_check(true);
+            }
+        }
+
+        if let Some((ok, message)) = &self.update_note {
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(egui::RichText::new(message).small().color(if *ok {
+                    self.palette.good
+                } else {
+                    self.palette.bad
+                }))
+                .wrap(),
+            );
+        }
+
+        if let Some(version) = &self.available {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(format!("Actualización {version} disponible"))
+                    .small()
+                    .color(self.palette.accent),
+            );
+        }
+
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "v{VERSION} · {}",
+                if running_as_appimage() {
+                    "AppImage"
+                } else {
+                    "instalado"
+                }
+            ))
+            .small()
+            .color(self.palette.muted),
+        );
     }
 
     fn page_header(ui: &mut egui::Ui, title: &str, subtitle: &str) {
@@ -2469,11 +2496,19 @@ impl Hub {
         );
 
         card(ui, Some("JUEGO"), |ui| {
+            ui.label(egui::RichText::new("Juego").color(self.palette.muted));
+            ui.add_space(5.0);
+            // Dos opciones del mismo ancho: con la tarjeta estrecha, dos etiquetas seguidas se
+            // salían del borde y «Monster Hunter World» aparecía cortado a media palabra.
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let option = ((ui.available_width() - 6.0) / 2.0).max(90.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Título").color(self.palette.muted));
                 for kind in [GameKind::Rise, GameKind::World] {
                     if ui
-                        .selectable_label(self.game() == kind, display_game(kind))
+                        .add_sized(
+                            [option, 30.0],
+                            egui::Button::new(display_game(kind)).selected(self.game() == kind),
+                        )
                         .clicked()
                     {
                         self.set_game(kind);
@@ -2550,13 +2585,16 @@ impl Hub {
                 }
             });
 
-            ui.label(
-                egui::RichText::new(
-                    "El fondo se genera al dibujar: no es una imagen, así que acompaña al tema y \
-                     no pesa nada en el paquete.",
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(
+                        "El fondo se genera al dibujar: no es una imagen, así que acompaña al tema \
+                         y no pesa nada en el paquete.",
+                    )
+                    .small()
+                    .color(self.palette.muted),
                 )
-                .small()
-                .color(self.palette.muted),
+                .wrap(),
             );
         });
 
@@ -2963,6 +3001,17 @@ impl Hub {
             self.preview_stale = true;
         }
 
+        // En una ventana estrecha la vista previa va al final y con un ancho contenido: arriba
+        // empujaba todos los ajustes fuera de la vista, que es justo lo que se viene a hacer aquí.
+        if packed_preview(ui.ctx().content_rect().width()) {
+            ui.add_space(6.0);
+            ui.scope(|ui| {
+                ui.set_max_width(560.0);
+                self.preview(ui);
+            });
+            ui.add_space(12.0);
+        }
+
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| match (&self.save_error, self.last_saved) {
             (Some(error), _) => {
@@ -3324,11 +3373,12 @@ impl eframe::App for Hub {
             )
             .show(ui, |ui| self.sidebar(ui));
 
-        if self.tab == Tab::Settings {
+        if self.tab == Tab::Settings && !packed_preview(ctx.content_rect().width()) {
             egui::Panel::right("preview")
                 .resizable(true)
                 .default_size(360.0)
                 .min_size(240.0)
+                .max_size(420.0)
                 .show_separator_line(false)
                 .frame(
                     egui::Frame::new()
@@ -3416,19 +3466,51 @@ fn card(ui: &mut egui::Ui, title: Option<&str>, add: impl FnOnce(&mut egui::Ui))
     ui.add_space(10.0);
 }
 
+/// Tamaño fijo de los resúmenes: cuatro cifras seguidas no cambian de tamaño según el texto y
+/// caben cuatro en una fila a la anchura mínima de la ventana.
+const TILE_WIDTH: f32 = 144.0;
+const TILE_HEIGHT: f32 = 76.0;
+
+/// Tamaño de la cifra; una cadena larga baja un escalón en vez de salirse del recuadro.
+fn stat_size(value: &str) -> f32 {
+    if value.chars().count() > 8 {
+        15.0
+    } else {
+        19.0
+    }
+}
+
 /// Cifra grande con su etiqueta debajo, para los resúmenes de la pestaña de diagnóstico.
 fn stat_tile(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
     let palette = Palette::current();
 
-    egui::Frame::new()
-        .fill(palette.surface_2)
-        .corner_radius(egui::CornerRadius::same(10))
-        .inner_margin(egui::Margin::same(12))
-        .show(ui, |ui| {
-            ui.set_min_width(120.0);
-            ui.label(egui::RichText::new(value).size(19.0).strong().color(color));
-            ui.label(egui::RichText::new(label).size(11.0).color(palette.muted));
-        });
+    // Caja de tamaño exacto: el fondo se pinta primero y el texto va dentro con un rect fijo, así
+    // las cuatro cifras quedan alineadas aunque una sea más larga que las demás.
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(TILE_WIDTH, TILE_HEIGHT), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(10), palette.surface_2);
+
+    // `new_child` en vez de `scope_builder`: el rect ya está reservado arriba y volver a
+    // reservarlo desde un hijo descoloca la fila entera.
+    let mut tile = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(12.0, 11.0)))
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    tile.spacing_mut().item_spacing.y = 4.0;
+    tile.add(
+        egui::Label::new(
+            egui::RichText::new(value)
+                .size(stat_size(value))
+                .strong()
+                .color(color),
+        )
+        .truncate(),
+    );
+    tile.add(
+        egui::Label::new(egui::RichText::new(label).size(11.0).color(palette.muted)).truncate(),
+    );
 }
 
 /// Aviso con color propio: error de lectura, mapa desajustado, permiso pendiente.
@@ -3583,7 +3665,17 @@ fn release_body(ui: &mut egui::Ui, body: &str) {
                     .color(palette.text),
             );
         } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
-            ui.label(format!("  •  {}", clean_inline_markdown(item)));
+            // Viñeta en su propia columna: así las líneas que envuelven quedan alineadas con el
+            // texto y no con el punto, que es lo que hacía ilegible una lista larga.
+            ui.horizontal_top(|ui| {
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new("•").color(palette.accent));
+                ui.add_space(4.0);
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(clean_inline_markdown(item)).wrap());
+                });
+            });
+            ui.add_space(3.0);
         } else {
             ui.label(clean_inline_markdown(line));
         }
@@ -3957,6 +4049,31 @@ fn ailment(name: &'static str, buildup: f32, max: f32, timer: f32, max_timer: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_preview_only_sits_beside_the_form_when_there_is_room() {
+        // Por debajo del umbral la vista previa va debajo: al lado dejaba el formulario sin ancho
+        // y los párrafos se cortaban a media palabra.
+        assert!(packed_preview(920.0));
+        assert!(packed_preview(1179.0));
+        assert!(!packed_preview(1180.0));
+        assert!(!packed_preview(1920.0));
+    }
+
+    #[test]
+    fn the_sidebar_footer_never_leaves_negative_space() {
+        assert_eq!(footer_space(600.0, 178.0), 422.0);
+        assert_eq!(footer_space(178.0, 178.0), 0.0);
+        assert_eq!(footer_space(120.0, 178.0), 0.0);
+    }
+
+    #[test]
+    fn a_long_stat_keeps_its_box() {
+        // La cifra baja de tamaño antes que salirse del recuadro.
+        assert_eq!(stat_size("0"), 19.0);
+        assert_eq!(stat_size("1.600/2.056"), 15.0);
+        assert_eq!(stat_size("menos de 1 s"), 15.0);
+    }
 
     /// Pulsa una tecla en un contexto egui sin ventana y devuelve la pestaña que resolvería.
     fn pressed_key(key: egui::Key, modifiers: egui::Modifiers) -> Option<Tab> {

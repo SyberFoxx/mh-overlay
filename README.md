@@ -35,7 +35,7 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
   desde el hub o con `--update`, sin desinstalar ni perder la configuración.
 - **Solo lectura** — el crate de memoria no expone un writer a propósito.
 
-**Ir a:** [instalación rápida](#instalación-rápida) · [estado](#estado) · [requisitos](#requisitos) ·
+**Ir a:** [capturas](#capturas) · [instalación rápida](#instalación-rápida) · [estado](#estado) · [requisitos](#requisitos) ·
 [uso](#compilar-y-usar) · [actualizar](#actualizar) · [configuración](#configuración) ·
 [arquitectura](#arquitectura) · [límites](#límites-conocidos) · [roadmap](ROADMAP.md)
 
@@ -52,6 +52,18 @@ id 12  Tigrex  HP  74.3%  (16.420/22.100)   captura ≤ 20%
   Ala izquierda         Roto
   Veneno       faltan 145  (120 / 265)
 ```
+
+## Capturas
+
+Del hub real, con la 0.5.4. El panel sobre el juego necesita una cacería en curso, y el entorno
+donde se preparó esto no tiene ninguno de los dos títulos instalados, así que esas capturas
+siguen pendientes (ver [`docs/captures/`](docs/captures/)).
+
+| Diagnóstico | Ajustes con vista previa |
+| --- | --- |
+| ![Pestaña Diagnóstico: juego, proceso y mapa](docs/captures/hub-diagnostico.png) | ![Ajustes del hub con la vista previa del panel](docs/captures/hub-ajustes.png) |
+
+![Pestaña Novedades con las notas de la última release](docs/captures/hub-novedades.png)
 
 ## Instalación rápida
 

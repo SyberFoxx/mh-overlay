@@ -27,6 +27,11 @@ install -m644 README.md LICENSE NOTICE "$stage/"
 # El README enlaza estas dos imágenes; sin ellas, el que llega dentro del paquete las ve rotas.
 install -d "$stage/docs"
 install -m644 docs/banner.jpeg docs/title.png "$stage/docs/"
+# Las capturas que enlaza el README, para que el que llega dentro del paquete las vea.
+if [ -d docs/captures ]; then
+    install -d "$stage/docs/captures"
+    install -m644 docs/captures/*.png "$stage/docs/captures/"
+fi
 install -m755 packaging/install.sh "$stage/install.sh"
 install -m644 packaging/mh-overlay.desktop \
     "$stage/io.github.syberfoxx.mh_overlay.desktop"
