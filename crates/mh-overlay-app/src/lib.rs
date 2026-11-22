@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use mh_overlay_config::{
-    Backdrop, BarPlacement, Color, Config, Direction, Layout, LayoutPreset, Monsters,
+    Backdrop, BarPlacement, BarStyle, Color, Config, Direction, Layout, LayoutPreset, Monsters,
     OverlaySection, Position, StylePreset, StyleSection, Theme,
 };
 use mh_overlay_games::{
@@ -2962,6 +2962,18 @@ impl Hub {
                         .clicked()
                     {
                         self.config.style = preset.style();
+                    }
+                }
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Barras").color(self.palette.muted));
+                for bars in BarStyle::ALL {
+                    if ui
+                        .selectable_label(self.config.style.bar_style == bars, bars.label())
+                        .clicked()
+                    {
+                        self.config.style.bar_style = bars;
                     }
                 }
             });

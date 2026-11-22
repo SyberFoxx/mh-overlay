@@ -119,6 +119,22 @@ mod tests {
     }
 
     #[test]
+    fn every_bar_style_has_a_name_and_round_trips_through_the_toml() {
+        for (style, name) in [
+            (crate::BarStyle::Rounded, "rounded"),
+            (crate::BarStyle::Blocks, "blocks"),
+            (crate::BarStyle::Pill, "pill"),
+        ] {
+            let config: crate::Config =
+                crate::Config::from_toml(&format!("[style]\nbar_style = \"{name}\"\n"), "prueba")
+                    .unwrap();
+
+            assert_eq!(config.style.bar_style, style);
+            assert!(!style.label().is_empty());
+        }
+    }
+
+    #[test]
     fn the_theme_names_accept_spanish_and_english() {
         assert_eq!("auto".parse::<Theme>().unwrap(), Theme::Auto);
         assert_eq!("Sistema".parse::<Theme>().unwrap(), Theme::Auto);

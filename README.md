@@ -27,8 +27,9 @@ inyectar DLLs ni escribir un solo byte en el proceso. Es la alternativa a
   flinch/romper/cortar y aviso **Roto**; estados alterados con su duración; filo en golpes del
   color actual, medidores de clase, munición y buffs con temporizador. Las 14 armas tienen
   icono propio.
-- **Hub de escritorio** — diagnóstico de la conexión, selección de mapa, vista previa en vivo y
-  todos los ajustes con selector de color, sin editar el TOML a mano.
+- **Hub de escritorio** — diagnóstico de la conexión, selección de mapa, vista previa en vivo,
+  cinco fondos, tres presets de color, selector por color y tres formas de barra, sin editar el
+  TOML a mano.
 - **Novedades y disposición** — el hub enseña qué cambió en la última release, deja arrastrar
   las placas con imán sobre una pantalla esquemática y guardar presets de disposición.
 - **Un solo archivo** — el AppImage se integra en el menú la primera vez y se actualiza solo,

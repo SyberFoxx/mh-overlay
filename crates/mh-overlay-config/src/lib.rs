@@ -246,6 +246,35 @@ pub struct StyleSection {
     pub capture: Color,
     pub part: Color,
     pub severable: Color,
+    /// Forma de las barras del panel.
+    pub bar_style: BarStyle,
+}
+
+/// Forma de las barras del panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BarStyle {
+    /// Redondeada, con degradado y marcas cada 10 %: la de siempre.
+    #[default]
+    Rounded,
+    /// Recta y plana, partida en tramos por las marcas: se lee como una regla.
+    Blocks,
+    /// Muy redondeada, sin marcas: el relleno manda.
+    Pill,
+}
+
+impl BarStyle {
+    /// Las formas en el orden en que se ofrecen.
+    pub const ALL: [Self; 3] = [Self::Rounded, Self::Blocks, Self::Pill];
+
+    /// Nombre corto para la interfaz.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rounded => "Redondeada",
+            Self::Blocks => "Tramos",
+            Self::Pill => "Cápsula",
+        }
+    }
 }
 
 /// Juegos de colores listos para el panel.
@@ -316,6 +345,7 @@ impl Default for StyleSection {
             capture: Color::rgb(0xe6, 0xb4, 0x5e),
             part: Color::rgb(0x4f, 0x8d, 0xd6),
             severable: Color::rgb(0xd6, 0x9a, 0x4f),
+            bar_style: BarStyle::default(),
         }
     }
 }

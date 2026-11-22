@@ -4,7 +4,7 @@
 //! dominante con la marca del umbral de captura y, debajo, barras finas de partes y estados.
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
-use mh_overlay_config::{Color, Config, Direction, Monsters, StyleSection};
+use mh_overlay_config::{BarStyle, Color, Config, Direction, Monsters, StyleSection};
 use mh_overlay_games::{
     Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
     WeaponDetail, WeaponGauge, part_labels,
@@ -1000,7 +1000,11 @@ fn draw_health_bar(
         geometry.inner_width(canvas).max(1.0) as u32,
         geometry.bar.max(4.0) as u32,
     );
-    let radius = 3.0 * scale;
+    let radius = match style.bar_style {
+        BarStyle::Rounded => 3.0 * scale,
+        BarStyle::Blocks => 0.0,
+        BarStyle::Pill => bar.height as f32 / 2.0,
+    };
 
     // El borde claro separa la barra del panel y la pista queda hundida un píxel.
     canvas.fill_rounded(bar, radius, lighten(style.panel, 0.26));
@@ -1025,18 +1029,34 @@ fn draw_health_bar(
             filled - 2,
             bar.height.saturating_sub(2),
         );
-        canvas.fill_rounded_gradient(fill, (radius - 1.0).max(0.0), lighten(base, 0.34), base);
+        let inner_radius = (radius - 1.0).max(0.0);
+        // En tramos el relleno va plano: el degradado suaviza los cortes y aquí se busca lo
+        // contrario, que cada tramo se lea como un bloque.
+        if style.bar_style == BarStyle::Blocks {
+            canvas.fill_rounded(fill, inner_radius, base);
+        } else {
+            canvas.fill_rounded_gradient(fill, inner_radius, lighten(base, 0.34), base);
+        }
     }
 
     // Marcas cada 10 %: la barra se lee como una escala y no como una mancha de color.
-    let tick = lighten(style.panel, 0.5).with_alpha(60);
+    let tick = if style.bar_style == BarStyle::Blocks {
+        style.panel
+    } else {
+        lighten(style.panel, 0.5).with_alpha(60)
+    };
+    let tick_width = if style.bar_style == BarStyle::Blocks {
+        (scale * 2.0).max(2.0)
+    } else {
+        scale.max(1.0)
+    };
     for step in 1..10 {
         let x = bar.x as f32 + bar.width as f32 * (step as f32 / 10.0);
         canvas.fill_rect(
             Rect::new(
                 x.round() as i32,
                 bar.y + 1,
-                scale.round().max(1.0) as u32,
+                tick_width.round() as u32,
                 bar.height.saturating_sub(2),
             ),
             tick,
@@ -2269,7 +2289,10 @@ fn draw_row(
         (inner - LABEL_WIDTH * geometry.scale - value_width).max(1.0) as u32,
         bar_height as u32,
     );
-    let radius = bar.height as f32 / 2.0;
+    let radius = match style.bar_style {
+        BarStyle::Rounded | BarStyle::Pill => bar.height as f32 / 2.0,
+        BarStyle::Blocks => 0.0,
+    };
 
     canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
 

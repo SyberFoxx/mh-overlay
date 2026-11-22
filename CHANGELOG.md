@@ -3,6 +3,16 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.7.0] - 2026-11-22
+
+### Añadido
+
+- Icono nuevo: una placa dorada con dos cuernos y tres zarpazos, vectorial, en 128, 256 y 512 px
+  más el SVG. Se ve igual de bien a 16 px que a 512.
+- Dos formas de barra más para el panel, además de la redondeada: **Tramos** (recta, plana y
+  partida cada 10 %) y **Cápsula** (muy redondeada, sin marcas). Se eligen en **Ajustes** y se
+  aplican a la vida del monstruo y a las barras de partes y estados.
+
 ## [0.6.0] - 2026-11-22
 
 ### Añadido
