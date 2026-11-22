@@ -132,7 +132,9 @@ const IG_EXTRACTS: u64 = 0xA08;
 const IG_ATTACK_TIMER: u64 = 0xA44;
 const IG_SPEED_TIMER: u64 = 0xA48;
 const IG_DEFENSE_TIMER: u64 = 0xA4C;
-const IG_EXTRACTS_COUNT: usize = 2;
+/// El array trae tres huecos (rojo, blanco y naranja). Leer dos dejaba fuera la tercera
+/// esencia, que es justo la que da el bonus completo del glaive.
+const IG_EXTRACTS_COUNT: usize = 3;
 /// `MHRKinsectStaminaStructure` (Sequential): actual y máximo, en la cadena del kinsecto.
 const KINSECT_STAMINA_CURRENT: u64 = 0x00;
 const KINSECT_STAMINA_MAX: u64 = 0x04;
