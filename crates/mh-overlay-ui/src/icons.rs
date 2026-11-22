@@ -442,6 +442,42 @@ pub fn buff(canvas: &mut Canvas, glyph: BuffGlyph, x: f32, y: f32, size: f32, co
     }
 }
 
+/// Dibuja un cordóptero en un cuadrado de `size` píxeles con origen en `(x, y)`.
+///
+/// La silueta lo distingue de una barra: cuerpo alargado con cabeza y tórax, dos pares de alas
+/// abiertas y el cable curvo que suelta por la cola.
+pub fn wirebug(canvas: &mut Canvas, x: f32, y: f32, size: f32, color: Color) {
+    let mut pen = Pen::new(canvas, x, y, size, color);
+
+    // Cable fino: sale de la cola y cae hacia la izquierda.
+    pen.line(11.5, 19.4, 6.2, 22.6, 1.2);
+    pen.line(6.2, 22.6, 2.4, 20.8, 1.1);
+
+    // Cuerpo y cabeza.
+    pen.rounded(10.6, 7.0, 2.8, 12.0, 1.4);
+    pen.diamond(12.0, 5.2, 1.8);
+
+    // Antenas.
+    pen.line(11.3, 4.6, 9.6, 2.0, 0.8);
+    pen.line(12.7, 4.6, 14.4, 2.0, 0.8);
+
+    // Alas plegadas que se abren un poco a los costados del abdomen.
+    pen.line(10.8, 9.4, 8.0, 17.6, 1.8);
+    pen.line(13.2, 9.4, 16.0, 17.6, 1.8);
+
+    // Tres pares de patas.
+    for (from, to) in [
+        ((10.6, 9.4), (6.2, 7.0)),
+        ((13.4, 9.4), (17.8, 7.0)),
+        ((10.4, 12.0), (5.5, 12.5)),
+        ((13.6, 12.0), (18.5, 12.5)),
+        ((10.6, 15.2), (6.8, 18.4)),
+        ((13.4, 15.2), (17.2, 18.4)),
+    ] {
+        pen.line(from.0, from.1, to.0, to.1, 0.9);
+    }
+}
+
 /// Icono de bandeja: un cuadrado redondeado oscuro con la espada del panel, en ARGB32 con
 /// orden de red (A, R, G, B), que es lo que espera StatusNotifierItem.
 ///
@@ -593,6 +629,27 @@ mod tests {
 
             assert!(painted(&canvas) > 8, "«{name}» no dibujó icono");
         }
+    }
+
+    #[test]
+    fn the_wirebug_glyph_paints_inside_its_box() {
+        let mut canvas = Canvas::transparent(60, 60);
+        wirebug(&mut canvas, 20.0, 20.0, 16.0, Color::rgb(255, 255, 255));
+
+        let bounds = canvas
+            .content_bounds()
+            .expect("el glifo tiene que pintar algo");
+        assert!(
+            bounds.x >= 20 && bounds.y >= 20,
+            "el glifo se sale por arriba o por la izquierda: {bounds:?}"
+        );
+        assert!(
+            bounds.right() <= 36 && bounds.bottom() <= 36,
+            "el glifo se sale del cuadrado: {bounds:?}"
+        );
+
+        let painted = canvas.pixels().iter().filter(|pixel| **pixel != 0).count();
+        assert!(painted > 12, "el glifo dibujó muy pocos píxeles: {painted}");
     }
 
     #[test]

@@ -3,6 +3,14 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.9.2] - 2026-11-22
+
+### Mejorado
+
+- Los cordópteros se dibujan como el bicho: una marca por unidad con el insecto dentro de un
+  anillo, lleno en las cargadas, parcial en la que se recarga y vacío en las que faltan. Se
+  agrega de dónde viene cada extra (`+1 entorno`, `+1 habilidad`) cuando el juego lo dice.
+
 ## [0.9.1] - 2026-11-22
 
 ### Corregido

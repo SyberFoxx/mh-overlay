@@ -42,6 +42,14 @@ const FREE_HUNT_WIDTH: f32 = 240.0;
 const FREE_PADDING: f32 = 9.0;
 /// Lado del icono del arma en la cabecera del jugador.
 const WEAPON_ICON: f32 = 22.0;
+/// Alto de la fila de cordópteros: el glifo y su anillo de recarga.
+const WIREBUG_ROW: f32 = 27.0;
+/// Lado del glifo del cordóptero dentro de la fila.
+const WIREBUG_GLYPH: f32 = 20.0;
+/// Paso de cada marca de cordóptero, para que el anillo no toque al vecino.
+const WIREBUG_SLOT: f32 = 28.0;
+/// Radio del anillo de recarga desde el centro de la marca.
+const WIREBUG_RING: f32 = 12.5;
 /// Fichas de datos del arma por fila; se reparten en varias filas si no caben.
 const CHIP_HEIGHT: f32 = 21.0;
 /// Iconos de buff por fila: la cuadrícula sustituye a una lista de barras.
@@ -333,23 +341,7 @@ fn free_plates(
         if let Some(wirebugs) = player.wirebugs {
             // En layout libre cada pieza se coloca sola: sin esta entrada, los cordópteros solo
             // existirían en el panel completo y quien usa barras sueltas no los vería.
-            let plate = row_plate(
-                config,
-                text,
-                &geometry,
-                Row {
-                    label: "Cordópteros",
-                    fraction: wirebugs.fraction(),
-                    color: if wirebugs.blocked {
-                        config.style.low_health
-                    } else {
-                        config.style.text
-                    },
-                    recoverable: 0.0,
-                    segments: Some(u32::from(wirebugs.max)),
-                    value: Some(wirebugs.label()),
-                },
-            );
+            let plate = wirebug_plate(config, text, &geometry, wirebugs);
             let origin = bar_origin(config, "player.wirebugs").unwrap_or(cursor);
             place("player.wirebugs", &plate, origin.0, origin.1);
             cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
@@ -567,6 +559,27 @@ fn row_plate(config: &Config, text: &Text, geometry: &Geometry, row: Row<'_>) ->
     canvas
 }
 
+/// Placa libre de los cordópteros: misma fila de marcas que el panel, con ancho suficiente
+/// para que el valor y la procedencia no pisen los glifos.
+fn wirebug_plate(config: &Config, text: &Text, geometry: &Geometry, wirebugs: Wirebugs) -> Canvas {
+    let local = plate_geometry(geometry);
+    let size = 12.0 * geometry.scale;
+    let needed = local.padding * 2.0
+        + LABEL_WIDTH * geometry.scale
+        + f32::from(wirebugs.max) * geometry.wirebug_slot
+        + text.width(&wirebugs.label(), size)
+        + 8.0 * geometry.scale;
+    let height = geometry.wirebug + local.padding * 2.0;
+    let mut canvas = plate_canvas(
+        (FREE_ROW_WIDTH * geometry.scale).max(needed),
+        height,
+        geometry,
+        &config.style,
+    );
+    draw_wirebugs(&mut canvas, config, text, &local, wirebugs, local.padding);
+    canvas
+}
+
 fn part_plate(
     config: &Config,
     text: &Text,
@@ -777,6 +790,10 @@ struct Geometry {
     chip_gap: f32,
     buff: f32,
     buff_gap: f32,
+    wirebug: f32,
+    wirebug_glyph: f32,
+    wirebug_slot: f32,
+    wirebug_ring: f32,
 }
 
 impl Geometry {
@@ -798,6 +815,10 @@ impl Geometry {
             chip_gap: 4.0 * scale,
             buff: BUFF_TILE * scale,
             buff_gap: 4.0 * scale,
+            wirebug: WIREBUG_ROW * scale,
+            wirebug_glyph: WIREBUG_GLYPH * scale,
+            wirebug_slot: WIREBUG_SLOT * scale,
+            wirebug_ring: WIREBUG_RING * scale,
         }
     }
 
@@ -848,6 +869,25 @@ impl Geometry {
             let label = text.width("Cacería", size);
             let value = text.width(&hunt_label(&hunt), size);
             logical = logical.max((label + value + 60.0) / self.scale);
+        }
+
+        // La fila de cordópteros lleva una marca por ranura y el valor a la derecha; con
+        // cuatro ranuras y dos extras el texto no entra en el ancho base.
+        if let Some(wirebugs) = snapshot
+            .player
+            .as_ref()
+            .and_then(|player| player.wirebugs)
+            .filter(|wirebugs| wirebugs.max > 0)
+        {
+            let size = 12.0 * self.scale;
+            let label = text
+                .width("Cordópteros", size)
+                .max(LABEL_WIDTH * self.scale);
+            let value = text
+                .width(&wirebugs.label(), size)
+                .max(VALUE_WIDTH * self.scale);
+            let marks = f32::from(wirebugs.max) * WIREBUG_SLOT * self.scale;
+            logical = logical.max((label + marks + value + 56.0 * self.scale) / self.scale);
         }
 
         (logical * self.scale).round() as u32
@@ -1294,7 +1334,7 @@ fn player_height(
     height += geometry.row * 2.0;
 
     if player.wirebugs.is_some_and(|wirebugs| wirebugs.max > 0) {
-        height += geometry.small + geometry.row;
+        height += geometry.small + geometry.wirebug;
     }
 
     if !player.buffs.is_empty() {
@@ -1469,8 +1509,11 @@ fn draw_player(
     y
 }
 
-/// Fila de los cordópteros: una barra con un tramo por cordóptero, las cargadas llenas y la
-/// que se está recuperando a medio llenar. El bloqueo cambia el color y el valor lo dice.
+/// Fila de los cordópteros: una marca por ranura en vez de una barra.
+///
+/// Las cargadas van a color pleno, la que se recupera queda atenuada dentro de un anillo que
+/// se llena con `recharge_fraction()` y las vacías se insinúan apenas. El bloqueo pinta todo
+/// con el color de aviso y el valor lo dice.
 fn draw_wirebugs(
     canvas: &mut Canvas,
     config: &Config,
@@ -1480,28 +1523,189 @@ fn draw_wirebugs(
     y: f32,
 ) -> f32 {
     let style = &config.style;
+    let theme = style.panel_theme;
+    let blocky = is_blocky(theme, style.bar_style);
+    let scale = geometry.scale;
+    let size = 12.0 * scale;
+    let center_y = y + geometry.wirebug * 0.5;
+    let baseline = center_y - text.height(size) * 0.5 + text.ascent(size);
+    let label = fit_label(text, "Cordópteros", size, LABEL_WIDTH * scale);
 
-    draw_row(
+    text.draw(
         canvas,
-        config,
-        text,
-        geometry,
-        y,
-        Row {
-            label: "Cordópteros",
-            fraction: wirebugs.fraction(),
-            segments: Some(u32::from(wirebugs.max)),
-            value: Some(wirebugs.label()),
-            color: if wirebugs.blocked {
-                style.low_health
-            } else {
-                style.capture
-            },
-            recoverable: 0.0,
-        },
+        &label,
+        geometry.padding,
+        baseline,
+        size,
+        style.muted,
     );
 
-    y + geometry.row
+    let value = wirebugs.label();
+    let value_width = text.width(&value, size);
+    let value_x = canvas.width() as f32 - geometry.padding - value_width;
+    let marks_start = geometry.padding + LABEL_WIDTH * scale;
+    let available = (value_x - 6.0 * scale - marks_start).max(0.0);
+    let count = f32::from(wirebugs.max).max(1.0);
+    let slot = (available / count).min(geometry.wirebug_slot);
+    let glyph = geometry.wirebug_glyph.min(slot * 0.78).max(1.0);
+    let radius = geometry
+        .wirebug_ring
+        .min(slot * 0.46)
+        .max(glyph * 0.5)
+        .max(1.0);
+    let frame = if wirebugs.blocked {
+        style.low_health
+    } else {
+        style.capture
+    };
+    let track = track_fill(style, theme, 0.18);
+    let ring_thickness = (1.6 * scale).max(0.7);
+
+    for (index, state) in wirebug_slots(wirebugs).into_iter().enumerate() {
+        let center = (marks_start + slot * (index as f32 + 0.5), center_y);
+        let (glyph_color, ring_fraction) = match state {
+            WirebugSlot::Loaded => (frame, 1.0),
+            WirebugSlot::Recharging(fraction) => (frame.with_alpha(130), fraction),
+            WirebugSlot::Empty => (style.muted.with_alpha(50), 0.0),
+        };
+
+        // El anillo es el mismo en todas las ranuras; lo único que cambia es cuánto se llena.
+        draw_charge_ring(
+            canvas,
+            center,
+            radius,
+            ring_thickness,
+            track,
+            frame,
+            ring_fraction,
+            blocky,
+        );
+        icons::wirebug(
+            canvas,
+            center.0 - glyph * 0.5,
+            center.1 - glyph * 0.5,
+            glyph,
+            glyph_color,
+        );
+    }
+
+    text.draw(canvas, &value, value_x, baseline, size, style.muted);
+
+    y + geometry.wirebug
+}
+
+/// Estado de cada marca de la fila: cargada, recargándose o todavía vacía.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum WirebugSlot {
+    Loaded,
+    Recharging(f32),
+    Empty,
+}
+
+/// Una marca por ranura: las cargadas, después la que se está recargando y el resto vacías.
+fn wirebug_slots(wirebugs: Wirebugs) -> Vec<WirebugSlot> {
+    (0..wirebugs.max)
+        .map(|index| {
+            if index < wirebugs.loaded {
+                WirebugSlot::Loaded
+            } else if index == wirebugs.loaded {
+                wirebugs
+                    .recharging
+                    .map_or(WirebugSlot::Empty, WirebugSlot::Recharging)
+            } else {
+                WirebugSlot::Empty
+            }
+        })
+        .collect()
+}
+
+/// Anillo de progreso alrededor de una marca; el tramo lleno arranca arriba y va en sentido
+/// horario. En los estilos de bloque es cuadrado, para no meter un círculo donde no va.
+#[allow(clippy::too_many_arguments)]
+fn draw_charge_ring(
+    canvas: &mut Canvas,
+    center: (f32, f32),
+    radius: f32,
+    thickness: f32,
+    track: Color,
+    color: Color,
+    fraction: f32,
+    blocky: bool,
+) {
+    draw_ring_arc(canvas, center, radius, thickness, track, 1.0, blocky);
+
+    if fraction > 0.0 {
+        draw_ring_arc(
+            canvas,
+            center,
+            radius,
+            thickness,
+            color,
+            fraction.clamp(0.0, 1.0),
+            blocky,
+        );
+    }
+}
+
+/// Perímetro del anillo hasta `fraction`; con `1.0` cierra la vuelta completa.
+fn draw_ring_arc(
+    canvas: &mut Canvas,
+    center: (f32, f32),
+    radius: f32,
+    thickness: f32,
+    color: Color,
+    fraction: f32,
+    blocky: bool,
+) {
+    let fraction = fraction.clamp(0.0, 1.0);
+
+    if fraction <= 0.0 {
+        return;
+    }
+
+    let steps = (28.0 * fraction).ceil().max(2.0) as usize;
+    let mut previous = ring_point(center, radius, 0.0, blocky);
+
+    for step in 1..=steps {
+        let point = ring_point(
+            center,
+            radius,
+            fraction * step as f32 / steps as f32,
+            blocky,
+        );
+        canvas.fill_line(previous, point, thickness.max(0.7), color);
+        previous = point;
+    }
+}
+
+/// Punto del perímetro del anillo a una fracción `t` (0 arriba, 1 la vuelta completa).
+fn ring_point(center: (f32, f32), radius: f32, t: f32, blocky: bool) -> (f32, f32) {
+    let t = t.clamp(0.0, 1.0);
+
+    if blocky {
+        let side = 2.0 * radius;
+        let mut distance = t * side * 4.0;
+
+        // Desde la esquina superior izquierda, en sentido horario.
+        if distance <= side {
+            (center.0 - radius + distance, center.1 - radius)
+        } else if distance <= side * 2.0 {
+            distance -= side;
+            (center.0 + radius, center.1 - radius + distance)
+        } else if distance <= side * 3.0 {
+            distance -= side * 2.0;
+            (center.0 + radius - distance, center.1 + radius)
+        } else {
+            distance -= side * 3.0;
+            (center.0 - radius, center.1 + radius - distance)
+        }
+    } else {
+        let angle = -std::f32::consts::FRAC_PI_2 + t * std::f32::consts::TAU;
+        (
+            center.0 + radius * angle.cos(),
+            center.1 + radius * angle.sin(),
+        )
+    }
 }
 
 /// Cabecera del arma: icono de la clase, nombre y, a la derecha, el filo actual.
@@ -3382,6 +3586,125 @@ mod tests {
             .filter(|(left, right)| left != right)
             .count();
         assert!(changed > 0, "el bloqueo no cambió ningún píxel");
+    }
+
+    #[test]
+    fn wirebug_marks_show_loaded_recharging_and_empty_slots() {
+        assert_eq!(
+            wirebug_slots(Wirebugs::new(3, 1, Some(0.5), false)),
+            vec![
+                WirebugSlot::Loaded,
+                WirebugSlot::Recharging(0.5),
+                WirebugSlot::Empty,
+            ]
+        );
+        assert_eq!(
+            wirebug_slots(Wirebugs::new(2, 2, None, false)),
+            vec![WirebugSlot::Loaded, WirebugSlot::Loaded]
+        );
+        assert_eq!(
+            wirebug_slots(Wirebugs::new(2, 0, Some(0.25), false)),
+            vec![WirebugSlot::Recharging(0.25), WirebugSlot::Empty]
+        );
+    }
+
+    #[test]
+    fn every_wirebug_slot_keeps_the_same_ring() {
+        let (config, text) = config();
+        let geometry = Geometry::new(1.0);
+        let mut canvas = Canvas::new(400, 60);
+
+        draw_wirebugs(
+            &mut canvas,
+            &config,
+            &text,
+            &geometry,
+            Wirebugs::new(2, 2, None, false),
+            0.0,
+        );
+
+        let value_width = text.width("2/2", 12.0);
+        let marks_start = geometry.padding + LABEL_WIDTH * geometry.scale;
+        let available = 400.0 - geometry.padding - value_width - 6.0 - marks_start;
+        let slot = (available / 2.0).min(geometry.wirebug_slot);
+        let center_y = geometry.wirebug * 0.5;
+
+        for index in 0..2 {
+            let center_x = marks_start + slot * (index as f32 + 0.5);
+            let ring_x = (center_x - geometry.wirebug_ring).round() as i32;
+            let painted = (-2..=2).any(|dy| {
+                (-2..=2).any(|dx| {
+                    canvas
+                        .pixel(ring_x + dx, center_y.round() as i32 + dy)
+                        .is_some_and(|pixel| pixel != 0xff00_0000)
+                })
+            });
+
+            assert!(
+                painted,
+                "la ranura {index} no dibujó el anillo que comparten todas"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wirebug_row_draws_with_the_height_it_reports() {
+        let (config, text) = config();
+        let geometry = Geometry::new(1.0);
+        let mut canvas = Canvas::new(400, 60);
+
+        let drawn = draw_wirebugs(
+            &mut canvas,
+            &config,
+            &text,
+            &geometry,
+            Wirebugs::new(2, 1, Some(0.5), false),
+            4.0,
+        );
+
+        assert_eq!((drawn - 4.0).round(), geometry.wirebug.round());
+        assert!(
+            canvas.pixels().iter().any(|pixel| *pixel != 0xff00_0000),
+            "la fila de marcas no pintó nada"
+        );
+    }
+
+    #[test]
+    fn wirebug_provenance_does_not_appear_without_an_extra() {
+        let (config, text) = config();
+        let geometry = Geometry::new(1.0);
+        let mut plain = Canvas::new(400, 60);
+        let mut with_extra = Canvas::new(400, 60);
+
+        draw_wirebugs(
+            &mut plain,
+            &config,
+            &text,
+            &geometry,
+            Wirebugs::new(3, 1, Some(0.5), false),
+            0.0,
+        );
+        draw_wirebugs(
+            &mut with_extra,
+            &config,
+            &text,
+            &geometry,
+            Wirebugs::new(3, 1, Some(0.5), false).with_sources(1, 0),
+            0.0,
+        );
+
+        assert_eq!(Wirebugs::new(2, 1, Some(0.5), false).label(), "1/2");
+        assert_eq!(
+            Wirebugs::new(3, 1, Some(0.5), false)
+                .with_sources(1, 0)
+                .label(),
+            "1/3 · +1 entorno"
+        );
+        assert_ne!(
+            plain.pixels(),
+            with_extra.pixels(),
+            "el extra de entorno tiene que cambiar la fila"
+        );
     }
 
     #[test]

@@ -789,6 +789,15 @@ pub struct Wirebugs {
     pub recharging: Option<f32>,
     /// El juego bloquea el uso (animación, montura, caída).
     pub blocked: bool,
+    /// Ranuras que no son base (entorno y habilidad), solo cuando el juego las reporta.
+    pub sources: Option<WirebugSources>,
+}
+
+/// Ranuras extra que suman los cordópteros del entorno y los de la habilidad.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WirebugSources {
+    pub environment: u8,
+    pub skill: u8,
 }
 
 /// Rise lleva como máximo cuatro cordópteros (dos base, uno de entorno y uno de habilidad).
@@ -809,7 +818,19 @@ impl Wirebugs {
             loaded,
             recharging,
             blocked,
+            sources: None,
         }
+    }
+
+    /// Declara de dónde salen las ranuras extra. Se recortan a las que caben y nunca dejan
+    /// `sources` con dos ceros: sin extra no hay procedencia que enseñar.
+    pub fn with_sources(mut self, environment: u8, skill: u8) -> Self {
+        let environment = environment.min(self.max);
+        let skill = skill.min(self.max.saturating_sub(environment));
+        self.sources =
+            (environment > 0 || skill > 0).then_some(WirebugSources { environment, skill });
+
+        self
     }
 
     /// Fracción cargada del cordóptero que se está recargando: `remaining` y `max` son los tics
@@ -833,13 +854,24 @@ impl Wirebugs {
         ((f32::from(self.loaded) + recharging) / f32::from(self.max)).clamp(0.0, 1.0)
     }
 
-    /// `1/2`, con el aviso de bloqueo cuando el juego no deja gastarlos.
+    /// `1/2`, con el aviso de bloqueo y la procedencia de las ranuras extra cuando existe.
     pub fn label(&self) -> String {
+        let mut label = format!("{}/{}", self.loaded, self.max);
+
         if self.blocked {
-            format!("{}/{} · bloqueado", self.loaded, self.max)
-        } else {
-            format!("{}/{}", self.loaded, self.max)
+            label.push_str(" · bloqueado");
         }
+
+        if let Some(sources) = self.sources {
+            if sources.environment > 0 {
+                label.push_str(&format!(" · +{} entorno", sources.environment));
+            }
+            if sources.skill > 0 {
+                label.push_str(&format!(" · +{} habilidad", sources.skill));
+            }
+        }
+
+        label
     }
 }
 
@@ -1380,5 +1412,40 @@ mod tests {
 
         assert_eq!(ready.label(), "2/2");
         assert_eq!(blocked.label(), "1/2 · bloqueado");
+    }
+
+    #[test]
+    fn wirebug_provenance_only_appears_when_there_is_an_extra() {
+        let plain = Wirebugs::new(2, 1, Some(0.5), false);
+        assert_eq!(plain.sources, None);
+        assert_eq!(plain.label(), "1/2", "sin extras no se agrega ruido");
+
+        let environment = Wirebugs::new(3, 1, Some(0.5), false).with_sources(1, 0);
+        assert_eq!(
+            environment.sources,
+            Some(WirebugSources {
+                environment: 1,
+                skill: 0,
+            })
+        );
+        assert_eq!(environment.label(), "1/3 · +1 entorno");
+
+        let both = Wirebugs::new(4, 2, Some(0.25), true).with_sources(1, 1);
+        assert_eq!(both.label(), "2/4 · bloqueado · +1 entorno · +1 habilidad");
+    }
+
+    #[test]
+    fn wirebug_sources_never_exceed_the_available_slots() {
+        let sources = Wirebugs::new(2, 2, None, false)
+            .with_sources(9, 9)
+            .sources
+            .expect("dos ranuras extra caben en el máximo");
+        assert_eq!(sources.environment, 2);
+        assert_eq!(sources.skill, 0, "el extra se recorta al total disponible");
+
+        assert_eq!(
+            Wirebugs::new(2, 2, None, false).with_sources(0, 0).sources,
+            None
+        );
     }
 }

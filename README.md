@@ -268,8 +268,9 @@ cargados de la lanza pistola, dragón de fuego y estaca, notas en cola de la cor
 del arco. En Rise se añaden ataque, afinidad y elemento calculados por el juego. Cada ficha
 lleva su icono, su valor y una línea fina cuando el dato es una carga. La
 vida —con la parte recuperable en rojo— y el aguante van debajo. En Rise, entre el aguante y
-los buffs, una fila de **cordópteros** con un tramo por unidad: las cargadas llenas, la que se
-está recuperando a medio llenar y el aviso cuando el juego bloquea su uso. Los buffs y estados ya no son
+los buffs, una fila de **cordópteros** con el bicho dibujado, una marca por unidad dentro de un
+anillo: lleno en las cargadas, parcial en la que se recupera y vacío en las que faltan; el aviso
+cuando el juego bloquea su uso y de dónde viene cada extra (`+1 entorno`, `+1 habilidad`). Los buffs y estados ya no son
 rayas: son una cuadrícula compacta de iconos con el tiempo restante; los negativos llevan borde
 rojo y las familias (ataque, defensa, vida, aguante, elemento, filo, comida, canción…) tienen
 dibujo y color propios. Por

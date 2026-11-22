@@ -289,17 +289,19 @@ impl<'map, M: Reads> Rise<'map, M> {
             entries.push(self.wirebug_entry(pointer));
         }
 
-        // `WIREBUG_COUNT_OFFSETS` dice cuántas ranuras usa el jugador; en los mapas viejos que
-        // no la traen, las ranuras con recarga completa son las disponibles.
-        let total = self
-            .wirebug_total(abnormalities)
-            .map(|total| total.min(count))
+        // `WIREBUG_COUNT_OFFSETS` dice cuántas ranuras usa el jugador y cuántas son extra; en
+        // los mapas viejos que no la traen, las ranuras con recarga completa son las
+        // disponibles.
+        let (total, environment, skill) = self
+            .wirebug_counts(abnormalities)
+            .map(|(total, environment, skill)| (total.min(count), environment, skill))
             .unwrap_or_else(|| {
-                entries
+                let total = entries
                     .iter()
                     .flatten()
                     .filter(|(_, max)| *max > 0.0)
-                    .count()
+                    .count();
+                (total, 0, 0)
             });
         if total == 0 {
             return None;
@@ -323,12 +325,15 @@ impl<'map, M: Reads> Rise<'map, M> {
             .min_by(|left, right| left.0.total_cmp(&right.0))
             .and_then(|(remaining, max)| Wirebugs::recharge_fraction(*remaining, *max));
 
-        Some(Wirebugs::new(
-            u8::try_from(total).unwrap_or(MAX_WIREBUGS),
-            u8::try_from(loaded).unwrap_or(MAX_WIREBUGS),
-            recharging,
-            self.wirebug_blocked(),
-        ))
+        Some(
+            Wirebugs::new(
+                u8::try_from(total).unwrap_or(MAX_WIREBUGS),
+                u8::try_from(loaded).unwrap_or(MAX_WIREBUGS),
+                recharging,
+                self.wirebug_blocked(),
+            )
+            .with_sources(environment, skill),
+        )
     }
 
     /// Tics que le faltan a una ranura y duración completa de su recarga, ya con el extra de
@@ -349,7 +354,8 @@ impl<'map, M: Reads> Rise<'map, M> {
     }
 
     /// `MHRWirebugCountStructure`: ranuras base, de entorno y de habilidad que el jugador lleva.
-    fn wirebug_total(&self, abnormalities: u64) -> Option<usize> {
+    /// Devuelve el total y los dos extras, para poder explicar de dónde salen.
+    fn wirebug_counts(&self, abnormalities: u64) -> Option<(usize, u8, u8)> {
         let offsets = self.map.offsets("WIREBUG_COUNT_OFFSETS").ok()?;
         let address = self.memory.deref_chain(abnormalities, offsets).ok()?;
         if address == 0 {
@@ -368,7 +374,11 @@ impl<'map, M: Reads> Rise<'map, M> {
             .ok()?
             .max(0);
 
-        usize::try_from(base + environment + skill).ok()
+        let total = usize::try_from(base + environment + skill).ok()?;
+        let environment = u8::try_from(environment).unwrap_or(MAX_WIREBUGS);
+        let skill = u8::try_from(skill).unwrap_or(MAX_WIREBUGS);
+
+        Some((total, environment, skill))
     }
 
     /// `IS_WIREBUG_BLOCKED_OFFSETS` vive en la UI. Un mapa sin la clave no bloquea nada.
@@ -1223,8 +1233,8 @@ mod tests {
         fixture.write_u64(abnormalities, root);
         fixture.write_u64(root + 0xE0, second);
         fixture.write_u64(second + 0x410, array);
-        fixture.write_i32(second + 0x2D8, 2);
-        fixture.write_i32(second + 0x2D8 + 4, 0);
+        fixture.write_i32(second + 0x2D8, 1);
+        fixture.write_i32(second + 0x2D8 + 4, 1);
         fixture.write_i32(second + 0x2D8 + 8, 0);
 
         fixture.write_i32(array + 0x1C, 4);
@@ -1255,5 +1265,13 @@ mod tests {
         assert_eq!(wirebugs.loaded, 1);
         assert_eq!(wirebugs.recharging, Some(0.75));
         assert!(wirebugs.blocked, "el flag de la UI se lee como bloqueo");
+        assert_eq!(
+            wirebugs.sources,
+            Some(crate::model::WirebugSources {
+                environment: 1,
+                skill: 0,
+            }),
+            "la ranura de entorno se conserva para el panel"
+        );
     }
 }
