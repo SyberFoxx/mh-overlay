@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "mh-overlay-app"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "eframe",
  "ksni",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "mh-overlay-cli"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "clap",
  "mh-overlay-app",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "mh-overlay-config"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "mh-overlay-games",
  "serde",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "mh-overlay-games"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "mh-overlay-memory",
  "thiserror 2.0.21",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "mh-overlay-memory"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "libc",
  "thiserror 2.0.21",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "mh-overlay-ui"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "fontdue",
  "libc",

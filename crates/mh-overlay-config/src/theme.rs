@@ -45,14 +45,43 @@ impl fmt::Display for Theme {
 
 /// Fondo de la ventana del hub.
 ///
-/// `ambient` es un degradado generado al dibujar: no trae ninguna imagen ni licencia que
-/// repartir y escala a cualquier tamaño de ventana.
+/// Todos los fondos se generan al dibujar: no traen ninguna imagen ni licencia que repartir y
+/// escalan a cualquier tamaño de ventana. Cambian el par de focos y su color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Backdrop {
+    /// El del proyecto: dos focos con el acento y el color frío de la paleta.
     #[default]
     Ambient,
+    /// Verde y azul, como una aurora.
+    Aurora,
+    /// Naranja y rojo de brasa.
+    Ember,
+    /// Grises fríos, casi sin color.
+    Mist,
     None,
+}
+
+impl Backdrop {
+    /// Nombre corto para la interfaz, en castellano.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ambient => "Ambiente",
+            Self::Aurora => "Aurora",
+            Self::Ember => "Brasa",
+            Self::Mist => "Niebla",
+            Self::None => "Sin fondo",
+        }
+    }
+
+    /// Todos los fondos, en el orden en que se ofrecen.
+    pub const ALL: [Self; 5] = [
+        Self::Ambient,
+        Self::Aurora,
+        Self::Ember,
+        Self::Mist,
+        Self::None,
+    ];
 }
 
 #[cfg(test)]
@@ -68,6 +97,25 @@ mod tests {
         let config: crate::Config =
             crate::Config::from_toml("[hub]\nbackdrop = \"ambient\"\n", "prueba").unwrap();
         assert_eq!(config.hub.backdrop, Backdrop::Ambient);
+    }
+
+    #[test]
+    fn every_backdrop_has_a_name_and_round_trips_through_the_toml() {
+        for backdrop in Backdrop::ALL {
+            let name = backdrop.label().to_lowercase();
+            let style = match backdrop {
+                Backdrop::Ambient => "ambient",
+                Backdrop::Aurora => "aurora",
+                Backdrop::Ember => "ember",
+                Backdrop::Mist => "mist",
+                Backdrop::None => "none",
+            };
+            let config: crate::Config =
+                crate::Config::from_toml(&format!("[hub]\nbackdrop = \"{style}\"\n"), "prueba")
+                    .unwrap();
+
+            assert_eq!(config.hub.backdrop, backdrop, "{name}");
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use eframe::egui;
-use mh_overlay_config::Theme;
+use mh_overlay_config::{Backdrop, Theme};
 
 /// Radio de las tarjetas del hub, en puntos.
 pub const RADIUS: u8 = 12;
@@ -201,7 +201,7 @@ fn style_for(ctx: &egui::Context, theme: egui::Theme, dark: bool, palette: Palet
 ///
 /// Se calcula al dibujar, así que no viaja ninguna imagen ni licencia, sigue a la paleta y
 /// escala con la ventana. `opacity` a cero lo apaga sin cambiar de modo.
-pub fn paint_backdrop(ui: &mut egui::Ui, palette: Palette, opacity: f32) {
+pub fn paint_backdrop(ui: &mut egui::Ui, palette: Palette, backdrop: Backdrop, opacity: f32) {
     let opacity = if opacity.is_finite() {
         opacity.clamp(0.0, 1.0)
     } else {
@@ -218,20 +218,49 @@ pub fn paint_backdrop(ui: &mut egui::Ui, palette: Palette, opacity: f32) {
     painter.rect_filled(rect, egui::CornerRadius::ZERO, palette.bg);
 
     let short = rect.width().min(rect.height());
+    let (warm, cool) = backdrop_foci(palette, backdrop);
+    // El ambiente sigue a la paleta y se queda discreto; los fondos con nombre propio tienen que
+    // notarse, que es para lo que se eligen.
+    let strength = if backdrop == Backdrop::Ambient {
+        1.0
+    } else {
+        2.2
+    };
+
     glow(
         painter,
         rect.right_top() + egui::vec2(-short * 0.12, short * 0.10),
         short * 0.85,
-        palette.accent,
-        0.10 * opacity,
+        warm,
+        0.10 * strength * opacity,
     );
     glow(
         painter,
         rect.left_bottom() + egui::vec2(short * 0.08, -short * 0.18),
         short * 1.05,
-        palette.glow,
-        0.12 * opacity,
+        cool,
+        0.12 * strength * opacity,
     );
+}
+
+/// Par de colores de los dos focos de cada fondo. `Ambiente` sigue a la paleta del tema; los
+/// demás son fijos para que se distingan de un vistazo.
+fn backdrop_foci(palette: Palette, backdrop: Backdrop) -> (egui::Color32, egui::Color32) {
+    match backdrop {
+        Backdrop::Ambient | Backdrop::None => (palette.accent, palette.glow),
+        Backdrop::Aurora => (
+            egui::Color32::from_rgb(0x3a, 0xd6, 0xa0),
+            egui::Color32::from_rgb(0x4f, 0x8d, 0xd6),
+        ),
+        Backdrop::Ember => (
+            egui::Color32::from_rgb(0xe6, 0x86, 0x3a),
+            egui::Color32::from_rgb(0xd6, 0x4f, 0x6a),
+        ),
+        Backdrop::Mist => (
+            egui::Color32::from_rgb(0x8f, 0xa3, 0xc0),
+            egui::Color32::from_rgb(0x5a, 0x6b, 0x85),
+        ),
+    }
 }
 
 /// Halo radial: círculos concéntricos con el alfa repartido para que el centro sume `peak`.

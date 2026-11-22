@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use mh_overlay_config::{
     Backdrop, BarPlacement, Color, Config, Direction, Layout, LayoutPreset, Monsters,
-    OverlaySection, Position, StyleSection, Theme,
+    OverlaySection, Position, StylePreset, StyleSection, Theme,
 };
 use mh_overlay_games::{
     Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
@@ -1792,6 +1792,9 @@ impl Hub {
             self.config.hub.theme,
             match self.config.hub.backdrop {
                 Backdrop::Ambient => "ambiente",
+                Backdrop::Aurora => "aurora",
+                Backdrop::Ember => "brasa",
+                Backdrop::Mist => "niebla",
                 Backdrop::None => "ninguno",
             }
         ));
@@ -2568,15 +2571,16 @@ impl Hub {
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new("Fondo").color(self.palette.muted));
 
-                let ambient = self.config.hub.backdrop == Backdrop::Ambient;
-                if ui.selectable_label(ambient, "Ambiente").clicked() {
-                    self.config.hub.backdrop = Backdrop::Ambient;
-                }
-                if ui.selectable_label(!ambient, "Sin fondo").clicked() {
-                    self.config.hub.backdrop = Backdrop::None;
+                for backdrop in Backdrop::ALL {
+                    if ui
+                        .selectable_label(self.config.hub.backdrop == backdrop, backdrop.label())
+                        .clicked()
+                    {
+                        self.config.hub.backdrop = backdrop;
+                    }
                 }
 
-                if ambient {
+                if self.config.hub.backdrop != Backdrop::None {
                     ui.add(
                         egui::Slider::new(&mut self.config.hub.backdrop_opacity, 0.0..=1.0)
                             .fixed_decimals(2),
@@ -2949,6 +2953,20 @@ impl Hub {
         }
 
         card(ui, Some("ESTILO"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Preset").color(self.palette.muted));
+                for preset in StylePreset::ALL {
+                    if ui
+                        .button(preset.label())
+                        .on_hover_text("Reemplaza los colores de abajo; no toca el umbral")
+                        .clicked()
+                    {
+                        self.config.style = preset.style();
+                    }
+                }
+            });
+
+            ui.add_space(8.0);
             egui::Grid::new("estilo")
                 .num_columns(2)
                 .spacing([24.0, 7.0])
@@ -3397,8 +3415,13 @@ impl eframe::App for Hub {
                     .inner_margin(egui::Margin::same(26)),
             )
             .show(ui, |ui| {
-                if self.config.hub.backdrop == Backdrop::Ambient {
-                    theme::paint_backdrop(ui, self.palette, self.config.hub.backdrop_opacity);
+                if self.config.hub.backdrop != Backdrop::None {
+                    theme::paint_backdrop(
+                        ui,
+                        self.palette,
+                        self.config.hub.backdrop,
+                        self.config.hub.backdrop_opacity,
+                    );
                 }
 
                 let tab = match self.tab {

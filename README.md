@@ -55,7 +55,7 @@ id 12  Tigrex  HP  74.3%  (16.420/22.100)   captura ≤ 20%
 
 ## Capturas
 
-Del hub real, con la 0.5.4. El panel sobre el juego necesita una cacería en curso, y el entorno
+Del hub real, con la 0.6.0. El panel sobre el juego necesita una cacería en curso, y el entorno
 donde se preparó esto no tiene ninguno de los dos títulos instalados, así que esas capturas
 siguen pendientes (ver [`docs/captures/`](docs/captures/)).
 
@@ -839,7 +839,10 @@ invisible, mapas viejos— están resueltos paso a paso en
   panel a la derecha o abajo usa el tamaño del primer monitor.
 - **El panel es opaco**: la translucidez del TOML se compone sobre negro en vez de dejar ver el
   juego a través, porque debajo de un juego a pantalla completa no hay compositor garantizado.
-- **Los colores se editan solo en el TOML**: el editor cubre posición, tamaño y visibilidad.
+- **El fondo del hub y los colores del panel se eligen en Ajustes**: cinco fondos (ambiente,
+  aurora, brasa, niebla y sin fondo) con su opacidad, tres presets de color y un selector por
+  color. Lo que **no** se edita desde el hub es el tema del escritorio ni la tipografía, que
+  siguen a la paleta incluida.
 - **Online**: leer memoria no modifica el juego, pero ningún método de este tipo tiene garantía
   del publisher. Úsalo bajo tu criterio.
 

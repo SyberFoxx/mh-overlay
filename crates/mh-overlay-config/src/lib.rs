@@ -248,6 +248,62 @@ pub struct StyleSection {
     pub severable: Color,
 }
 
+/// Juegos de colores listos para el panel.
+///
+/// No tocan `low_health_percent`: un preset cambia colores, no umbrales.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StylePreset {
+    /// El del proyecto, pensado para leerse sobre cualquier escena.
+    Dark,
+    /// Claro, para escenas claras donde el panel oscuro se come el contraste.
+    Light,
+    /// Texto y barras al máximo contraste.
+    HighContrast,
+}
+
+impl StylePreset {
+    /// Los presets en el orden en que se ofrecen.
+    pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::HighContrast];
+
+    /// Nombre corto para la interfaz.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Oscuro",
+            Self::Light => "Claro",
+            Self::HighContrast => "Alto contraste",
+        }
+    }
+
+    /// Colores del preset, listos para reemplazar `[style]`.
+    pub fn style(self) -> StyleSection {
+        match self {
+            Self::Dark => StyleSection::default(),
+            Self::Light => StyleSection {
+                panel: Color::rgb(0xf4, 0xf6, 0xfa).with_alpha(0xee),
+                text: Color::rgb(0x10, 0x13, 0x1a),
+                muted: Color::rgb(0x4a, 0x55, 0x66),
+                health: Color::rgb(0x2e, 0x9e, 0x4f),
+                low_health: Color::rgb(0xc8, 0x32, 0x3a),
+                capture: Color::rgb(0xa5, 0x74, 0x1c),
+                part: Color::rgb(0x2f, 0x6f, 0xbf),
+                severable: Color::rgb(0xb0, 0x7a, 0x2a),
+                ..StyleSection::default()
+            },
+            Self::HighContrast => StyleSection {
+                panel: Color::rgb(0x00, 0x00, 0x00).with_alpha(0xf2),
+                text: Color::rgb(0xff, 0xff, 0xff),
+                muted: Color::rgb(0xc8, 0xd0, 0xdc),
+                health: Color::rgb(0x00, 0xff, 0x88),
+                low_health: Color::rgb(0xff, 0x3b, 0x47),
+                capture: Color::rgb(0xff, 0xd2, 0x4a),
+                part: Color::rgb(0x4a, 0xa8, 0xff),
+                severable: Color::rgb(0xff, 0xb1, 0x4a),
+                ..StyleSection::default()
+            },
+        }
+    }
+}
+
 impl Default for StyleSection {
     fn default() -> Self {
         Self {

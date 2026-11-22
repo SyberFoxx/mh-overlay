@@ -3,10 +3,14 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
-## [Unreleased]
+## [0.6.0] - 2026-11-22
 
 ### Añadido
 
+- Cuatro fondos para el hub, generados al dibujar y con opacidad propia: **Aurora**, **Brasa**,
+  **Niebla** y el ambiente de siempre, además de «sin fondo». Se eligen desde **Ajustes**.
+- Tres presets de color del panel —Oscuro, Claro y Alto contraste— que reemplazan `[style]` de
+  una vez; los ocho colores siguen editándose uno a uno desde el hub.
 - El actualizador verifica la firma minisign de la release en proceso, sin necesidad de tener
   `minisign` instalado. El binario lleva compilada la clave pública del proyecto, así que un
   paquete sin `.minisig` o con una firma que no corresponda no se instala aunque su SHA-256
