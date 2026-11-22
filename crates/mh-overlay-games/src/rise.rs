@@ -726,11 +726,15 @@ impl<'map, M: Reads> Rise<'map, M> {
     fn target(&self) -> Option<u64> {
         let base = self.map.absolute("QUEST_GUI_ADDRESS").ok()?;
         let offsets = self.map.offsets("QUEST_AUTOMATIC_TARGET").ok()?;
+        // `deref_chain` termina en la dirección del campo, no en su contenido: el puntero al
+        // monstruo está guardado ahí. Sin esta lectura se comparaba un puntero del montón con
+        // una dirección del bloque de la cacería y el objetivo no coincidía nunca.
+        let slot = self.memory.deref_chain(base, offsets).ok()?;
 
         self.memory
-            .deref_chain(base, offsets)
+            .read_u64(slot)
             .ok()
-            .filter(|address| *address != 0)
+            .filter(|pointer| *pointer != 0)
     }
 
     fn monster(&self, address: u64) -> Result<Monster, MemoryError> {

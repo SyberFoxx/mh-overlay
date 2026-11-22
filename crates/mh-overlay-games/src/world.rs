@@ -1044,11 +1044,14 @@ impl<'map, M: Reads> World<'map, M> {
     fn quest_target(&self) -> Option<u64> {
         let base = self.map.absolute("MONSTER_QUEST_TARGET_ADDRESS").ok()?;
         let offsets = self.map.offsets("MONSTER_QUEST_TARGET_OFFSETS").ok()?;
+        // Igual que en Rise: la cadena deja la dirección del campo y el puntero al monstruo se
+        // lee de ahí.
+        let slot = self.memory.deref_chain(base, offsets).ok()?;
 
         self.memory
-            .deref_chain(base, offsets)
+            .read_u64(slot)
             .ok()
-            .filter(|address| *address != 0)
+            .filter(|pointer| *pointer != 0)
     }
 
     /// El mapa solo cuenta como fijado cuando el juego dibuja el radar y el insecto guía: con
