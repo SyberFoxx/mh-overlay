@@ -3,6 +3,21 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.8.1] - 2026-11-22
+
+### Cambiado
+
+- Las esencias del glaive insecto pasan de fichas sueltas a un **medidor**: una barra por esencia
+  —rojo, blanco y naranja— llena según el tiempo que le queda, el aguante del kinsecto debajo y
+  el contador `2/3` / `3/3 · completo`. La duración máxima se aprende del propio juego, así que
+  la barra no arranca llena de la nada.
+
+### Corregido
+
+- Una parte cortada o rota ya no vuelve a llenar su barra. Cuando el juego limpia el componente
+  de romper o cortar, la parte cuenta como **Roto** en vez de caer al componente de flinch, que
+  seguía lleno: parecía que se podía volver a cortar y al pegarle no pasaba nada.
+
 ## [0.8.0] - 2026-11-22
 
 ### Añadido

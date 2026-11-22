@@ -768,6 +768,11 @@ impl<'map, M: Reads> World<'map, M> {
                 .read_f32(address + IG_DEFENSE_TIMER)
                 .ok()?
                 .max(0.0),
+            // World no aprende duraciones máximas: sus barras quedan sin relleno y muestran el
+            // tiempo que queda, igual que hace el panel cuando el máximo no se conoce.
+            attack_max: 0.0,
+            speed_max: 0.0,
+            defense_max: 0.0,
             stamina: stamina.max(0.0),
             max_stamina: max_stamina.max(0.0),
         })
@@ -1210,6 +1215,7 @@ impl<'map, M: Reads> World<'map, M> {
                     severable: None,
                     health: Some(health),
                     breaks: Some(breaks),
+                    ..Part::default()
                 });
             }
         }
@@ -1241,6 +1247,7 @@ impl<'map, M: Reads> World<'map, M> {
                         severable: Some(health),
                         health: Some(health),
                         breaks: None,
+                        ..Part::default()
                     });
 
                     address += SEVERABLE_PART_STRIDE;

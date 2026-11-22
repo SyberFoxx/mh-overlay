@@ -3867,6 +3867,7 @@ fn gauge_summary(gauge: &WeaponGauge) -> Vec<(&'static str, String)> {
             defense,
             stamina,
             max_stamina,
+            ..
         } => vec![
             ("Esencias", extracts.label().to_string()),
             ("Ataque", format!("{attack:.0} s")),
@@ -4083,6 +4084,7 @@ fn part(index: usize, name: &'static str, damaged: f32, breakable: bool, severab
         severable: severable.then(|| Health::new(100.0 - damaged, 100.0)),
         health: Some(Health::new(100.0 - damaged, 100.0)),
         breaks: None,
+        ..Part::default()
     }
 }
 

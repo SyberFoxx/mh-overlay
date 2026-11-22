@@ -135,6 +135,11 @@ const IG_DEFENSE_TIMER: u64 = 0xA4C;
 /// El array trae tres huecos (rojo, blanco y naranja). Leer dos dejaba fuera la tercera
 /// esencia, que es justo la que da el bonus completo del glaive.
 const IG_EXTRACTS_COUNT: usize = 3;
+/// Ranuras propias del mapa de duraciones vistas para las esencias del glaive. Van por encima
+/// de los offsets de buffs y de `SONG_KEY` para no compartir máximo con otro temporizador.
+const IG_ATTACK_MAX_KEY: u32 = 0x20001;
+const IG_SPEED_MAX_KEY: u32 = 0x20002;
+const IG_DEFENSE_MAX_KEY: u32 = 0x20003;
 /// `MHRKinsectStaminaStructure` (Sequential): actual y máximo, en la cadena del kinsecto.
 const KINSECT_STAMINA_CURRENT: u64 = 0x00;
 const KINSECT_STAMINA_MAX: u64 = 0x04;
@@ -156,6 +161,29 @@ fn clamp_percent(value: f32) -> f32 {
     } else {
         0.0
     }
+}
+
+/// Vida que enseña una parte a partir de sus tres resistencias.
+///
+/// Si el componente de romper o cortar existe (su máximo es mayor que cero) pero su valor
+/// actual no se puede leer, la parte está rota: el juego limpia ese componente al romperla y
+/// caer al flinch volvía a llenar la barra de una parte que ya no se puede volver a cortar.
+/// El flinch solo se usa cuando la parte no tiene ninguno de los dos componentes.
+fn part_health(
+    breakable: Option<Health>,
+    severable: Option<Health>,
+    flinch: Option<Health>,
+    breakable_present: bool,
+    severable_present: bool,
+) -> Option<Health> {
+    if breakable_present {
+        return breakable;
+    }
+    if severable_present {
+        return severable;
+    }
+
+    flinch
 }
 
 /// Lector de Rise sobre un proceso ya adjuntado, o sobre una fixture en los tests.
@@ -462,11 +490,23 @@ impl<'map, M: Reads> Rise<'map, M> {
             None => (0.0, 0.0),
         };
 
+        // El juego solo guarda lo que queda de cada esencia; la duración máxima se aprende con
+        // la misma tabla que los buffs para que la barra tenga un total contra el que medirse.
+        let attack = seconds(self.memory.read_f32(address + IG_ATTACK_TIMER).ok()?);
+        let speed = seconds(self.memory.read_f32(address + IG_SPEED_TIMER).ok()?);
+        let defense = seconds(self.memory.read_f32(address + IG_DEFENSE_TIMER).ok()?);
+        let attack_max = self.remember_timer(IG_ATTACK_MAX_KEY, attack);
+        let speed_max = self.remember_timer(IG_SPEED_MAX_KEY, speed);
+        let defense_max = self.remember_timer(IG_DEFENSE_MAX_KEY, defense);
+
         Some(WeaponGauge::InsectGlaive {
             extracts,
-            attack: seconds(self.memory.read_f32(address + IG_ATTACK_TIMER).ok()?),
-            speed: seconds(self.memory.read_f32(address + IG_SPEED_TIMER).ok()?),
-            defense: seconds(self.memory.read_f32(address + IG_DEFENSE_TIMER).ok()?),
+            attack,
+            speed,
+            defense,
+            attack_max,
+            speed_max,
+            defense_max,
             stamina: current.max(0.0),
             max_stamina: max.max(0.0),
         })
@@ -846,9 +886,18 @@ impl<'map, M: Reads> Rise<'map, M> {
             let breakable_health = self.current_component(breakable[index], encoded, max_breakable);
             let severable_health = self.current_component(severable[index], encoded, max_severable);
 
-            // La vida de la parte es la del componente que rompe (el que enseña HunterPie);
-            // si esa parte no se rompe, vale la de corte y, en último caso, la de flinch.
-            let health = breakable_health.or(severable_health).or(flinch_health);
+            // El máximo positivo dice que el componente existe aunque su valor actual no se
+            // pueda leer (el juego lo limpia al romper la parte).
+            let breakable_present = max_breakable > 0.0;
+            let severable_present = max_severable > 0.0;
+
+            let health = part_health(
+                breakable_health,
+                severable_health,
+                flinch_health,
+                breakable_present,
+                severable_present,
+            );
 
             parts.push(Part {
                 index,
@@ -856,6 +905,8 @@ impl<'map, M: Reads> Rise<'map, M> {
                 flinch: flinch_health,
                 breakable: breakable_health,
                 severable: severable_health,
+                breakable_present,
+                severable_present,
                 health,
                 breaks: None,
             });
@@ -944,5 +995,67 @@ impl<'map, M: Reads> Rise<'map, M> {
             timer,
             max_timer,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mh_overlay_memory::AddressMap;
+    use std::path::Path;
+
+    fn map() -> AddressMap {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/maps");
+        let path = AddressMap::newest_for_game("MonsterHunterRise", &directory)
+            .expect("hay mapas de Rise");
+        AddressMap::load(path).expect("el mapa más nuevo parsea")
+    }
+
+    fn health(current: f32, max: f32) -> Option<Health> {
+        Some(Health::new(current, max))
+    }
+
+    #[test]
+    fn a_broken_component_does_not_fall_back_to_flinch() {
+        let flinch = health(100.0, 100.0);
+
+        // El componente de romper se lee: manda él.
+        assert_eq!(
+            part_health(health(40.0, 200.0), None, flinch, true, false),
+            health(40.0, 200.0)
+        );
+
+        // Existe (máximo > 0) pero su valor actual ya no se lee: parte rota. Caer al flinch
+        // llenaba otra vez la barra de una parte cortada.
+        assert_eq!(part_health(None, None, flinch, true, false), None);
+
+        // Sin componente de romper ni de cortar, el flinch es lo único que hay.
+        assert_eq!(part_health(None, None, flinch, false, false), flinch);
+
+        // El corte manda sobre el flinch cuando no hay componente de romper.
+        assert_eq!(
+            part_health(None, health(30.0, 300.0), flinch, false, true),
+            health(30.0, 300.0)
+        );
+        assert_eq!(part_health(None, None, flinch, false, true), None);
+    }
+
+    #[test]
+    fn the_essence_maximum_only_grows() {
+        let map = map();
+        let rise = Rise::new(crate::fixtures::Fixture::new(), &map);
+
+        assert_eq!(rise.remember_timer(IG_ATTACK_MAX_KEY, 25.0), 25.0);
+        assert_eq!(
+            rise.remember_timer(IG_ATTACK_MAX_KEY, 10.0),
+            25.0,
+            "un temporizador más corto no baja el máximo aprendido"
+        );
+        assert_eq!(rise.remember_timer(IG_ATTACK_MAX_KEY, 40.0), 40.0);
+        assert_eq!(
+            rise.remember_timer(IG_SPEED_MAX_KEY, 60.0),
+            60.0,
+            "cada esencia aprende su propio máximo"
+        );
     }
 }

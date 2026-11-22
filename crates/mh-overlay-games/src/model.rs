@@ -96,6 +96,11 @@ pub struct Part {
     pub flinch: Option<Health>,
     pub breakable: Option<Health>,
     pub severable: Option<Health>,
+    /// `true` cuando el componente de romper existe (máximo > 0) aunque su vida actual no se
+    /// haya podido leer: el juego limpia ese valor al romper la parte.
+    pub breakable_present: bool,
+    /// Lo mismo para el componente de cortar.
+    pub severable_present: bool,
     /// Vida real de la parte tal como la guarda el juego. En World es independiente del
     /// progreso de rompimiento, que se escala a los golpes del siguiente tramo.
     pub health: Option<Health>,
@@ -118,10 +123,18 @@ impl Part {
             return true;
         }
 
-        [self.breakable, self.severable]
-            .into_iter()
-            .flatten()
-            .any(|health| health.max > 0.0 && health.current <= 0.05)
+        // Un componente que existe y no se pudo leer también cuenta como roto: el juego lo
+        // limpia al romper la parte, así que su `None` no significa que la parte esté sana.
+        let breakable_broken = match self.breakable {
+            Some(health) => health.max > 0.0 && health.current <= 0.05,
+            None => self.breakable_present,
+        };
+        let severable_broken = match self.severable {
+            Some(health) => health.max > 0.0 && health.current <= 0.05,
+            None => self.severable_present,
+        };
+
+        breakable_broken || severable_broken
     }
 }
 
@@ -563,6 +576,11 @@ pub enum WeaponGauge {
         attack: f32,
         speed: f32,
         defense: f32,
+        /// Duración máxima vista de cada esencia, para rellenar su barra. `0.0` cuando todavía
+        /// no se conoce: el juego solo guarda lo que queda.
+        attack_max: f32,
+        speed_max: f32,
+        defense_max: f32,
         stamina: f32,
         max_stamina: f32,
     },
@@ -1065,6 +1083,28 @@ mod tests {
 
         assert!(part.is_broken());
         assert!(!intact.is_broken());
+    }
+
+    #[test]
+    fn a_component_that_exists_but_cannot_be_read_is_broken() {
+        // El juego limpia el valor de romper/cortar al romper la parte: el componente sigue en
+        // el array pero su `Health` ya no se puede leer. Esa parte está rota, no sana.
+        let breakable = Part {
+            breakable_present: true,
+            ..Part::default()
+        };
+        let severable = Part {
+            severable_present: true,
+            ..Part::default()
+        };
+        let flinch_only = Part {
+            flinch: Some(Health::new(50.0, 100.0)),
+            ..Part::default()
+        };
+
+        assert!(breakable.is_broken());
+        assert!(severable.is_broken());
+        assert!(!flinch_only.is_broken());
     }
 
     #[test]

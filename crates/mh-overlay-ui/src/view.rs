@@ -6,7 +6,7 @@
 
 use mh_overlay_config::{BarStyle, Color, Config, Direction, Monsters, PanelTheme, StyleSection};
 use mh_overlay_games::{
-    Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
+    Buff, Crown, Extracts, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
     WeaponDetail, WeaponGauge, part_labels,
 };
 
@@ -658,6 +658,10 @@ fn weapon_plate(config: &Config, text: &Text, geometry: &Geometry, weapon: &Weap
         height += geometry.spirit + geometry.small;
     }
 
+    if matches!(weapon.gauge, Some(WeaponGauge::InsectGlaive { .. })) {
+        height += insect_glaive_height(text, &local) + geometry.small;
+    }
+
     if rows > 0 {
         height += rows as f32 * geometry.chip
             + rows.saturating_sub(1) as f32 * geometry.chip_gap
@@ -674,6 +678,11 @@ fn weapon_plate(config: &Config, text: &Text, geometry: &Geometry, weapon: &Weap
 
     if matches!(weapon.gauge, Some(WeaponGauge::Spirit { .. })) {
         y = draw_spirit_sword(&mut canvas, config, text, &local, weapon, y);
+        y += geometry.small;
+    }
+
+    if matches!(weapon.gauge, Some(WeaponGauge::InsectGlaive { .. })) {
+        y = draw_insect_glaive(&mut canvas, config, text, &local, weapon, y);
         y += geometry.small;
     }
 
@@ -904,11 +913,14 @@ fn rows(config: &Config, monster: &Monster) -> usize {
 fn visible_parts(monster: &Monster) -> Vec<Part> {
     let mut parts: Vec<Part> = Vec::new();
 
-    for part in monster
-        .parts
-        .iter()
-        .filter(|part| part.breakable.is_some() || part.severable.is_some())
-    {
+    for part in monster.parts.iter().filter(|part| {
+        // Una parte rota conserva el componente aunque su valor ya no se lea: sigue en el
+        // panel para enseñar "Roto" en vez de desaparecer.
+        part.breakable.is_some()
+            || part.severable.is_some()
+            || part.breakable_present
+            || part.severable_present
+    }) {
         if let Some(index) = parts.iter().position(|existing| same_tail(existing, part)) {
             merge_parts(&mut parts[index], part.clone());
         } else {
@@ -945,6 +957,9 @@ fn merge_parts(target: &mut Part, other: Part) {
     if target.breakable.is_none() {
         target.breakable = other.breakable;
     }
+
+    target.breakable_present |= other.breakable_present;
+    target.severable_present |= other.severable_present;
 }
 
 /// Lado en unidades lógicas y color de la corona, o `None` si no hay ninguna.
@@ -1237,6 +1252,10 @@ fn player_height(
             height += geometry.spirit + geometry.small;
         }
 
+        if matches!(weapon.gauge, Some(WeaponGauge::InsectGlaive { .. })) {
+            height += insect_glaive_height(text, geometry) + geometry.small;
+        }
+
         let chips = weapon_chips(weapon, style);
 
         if !chips.is_empty() {
@@ -1349,6 +1368,11 @@ fn draw_player(
 
         if matches!(weapon.gauge, Some(WeaponGauge::Spirit { .. })) {
             y = draw_spirit_sword(canvas, config, text, geometry, weapon, y);
+            y += geometry.small;
+        }
+
+        if matches!(weapon.gauge, Some(WeaponGauge::InsectGlaive { .. })) {
+            y = draw_insect_glaive(canvas, config, text, geometry, weapon, y);
             y += geometry.small;
         }
 
@@ -2064,89 +2088,212 @@ fn weapon_gauge_chips(weapon: &Weapon, style: &StyleSection) -> Vec<Chip> {
                 color: meter,
             },
         ],
-        WeaponGauge::InsectGlaive {
-            extracts,
-            attack,
-            speed,
-            defense,
-            stamina,
-            max_stamina,
-        } => {
-            // Las tres esencias se ordenan como en el juego: rojo, blanco y naranja. Cada una
-            // va en su propia ficha con su color, porque un color de acento único las igualaba.
-            let essences = [
-                (
-                    extracts.attack,
-                    "rojo",
-                    *attack,
-                    Color::rgb(0xe8, 0x55, 0x4a),
-                ),
-                (
-                    extracts.speed,
-                    "blanco",
-                    *speed,
-                    Color::rgb(0xe8, 0xf0, 0xf8),
-                ),
-                (
-                    extracts.defense,
-                    "naranja",
-                    *defense,
-                    Color::rgb(0xe0, 0x8a, 0x3c),
-                ),
-            ];
-            let active: Vec<&str> = essences
-                .iter()
-                .filter(|(on, ..)| *on)
-                .map(|(_, name, ..)| *name)
-                .collect();
-            let count = active.len();
+        // El glaive tiene su propio medidor (tres barras de esencia y el aguante del kinsecto),
+        // dibujado aparte: fichas sueltas no dejan comparar los tiempos de un vistazo.
+        WeaponGauge::InsectGlaive { .. } => Vec::new(),
+    }
+}
 
-            let summary = if count == 3 {
-                "3/3 · completo".to_string()
-            } else if count == 0 {
-                "sin esencias · 0/3".to_string()
-            } else {
-                format!("{} · {count}/3", active.join(" + "))
-            };
-            let mut chips = vec![Chip {
-                glyph: BuffGlyph::Stamina,
-                label: "Esencias",
-                value: summary,
-                fraction: None,
-                color: if count == 3 { state } else { meter },
-            }];
+/// Contador de esencias del glaive, tal como lo enseña la cabecera del medidor.
+fn glaive_summary(extracts: &Extracts) -> String {
+    let active: Vec<&str> = [
+        (extracts.attack, "rojo"),
+        (extracts.speed, "blanco"),
+        (extracts.defense, "naranja"),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, name)| name)
+    .collect();
 
-            for (on, name, time, color) in essences {
-                if !on {
-                    continue;
-                }
+    match active.len() {
+        3 => "3/3 · completo".to_string(),
+        0 => "sin esencias · 0/3".to_string(),
+        count => format!("{} · {count}/3", active.join(" + ")),
+    }
+}
 
-                chips.push(Chip {
-                    glyph: BuffGlyph::Misc,
-                    label: name,
-                    value: if time > 0.0 {
-                        format!("{time:.0}s")
-                    } else {
-                        "—".to_string()
-                    },
-                    fraction: None,
+/// Fracción de la barra de una esencia, o `None` cuando todavía no se conoce su duración
+/// máxima: una barra llena al arrancar mentiría sobre el tiempo que le queda.
+fn essence_fraction(remaining: f32, max: f32) -> Option<f32> {
+    (remaining.is_finite() && max.is_finite() && max > 0.0)
+        .then(|| (remaining / max).clamp(0.0, 1.0))
+}
+
+/// Alto del medidor del glaive: contador, tres barras de esencia con su tiempo y el kinsecto.
+fn insect_glaive_height(text: &Text, geometry: &Geometry) -> f32 {
+    let scale = geometry.scale;
+    let header = text.height(11.0 * scale);
+    let essence = 5.0 * scale + 2.0 * scale + text.height(10.0 * scale);
+    let stamina = text.height(11.0 * scale).max(6.0 * scale);
+
+    header + geometry.small + essence + geometry.small + stamina
+}
+
+/// Medidor del glaive insecto: una barra por esencia con su color real y el contador, y debajo
+/// el aguante del kinsecto. Devuelve la `y` del bloque siguiente.
+fn draw_insect_glaive(
+    canvas: &mut Canvas,
+    config: &Config,
+    text: &Text,
+    geometry: &Geometry,
+    weapon: &Weapon,
+    y: f32,
+) -> f32 {
+    let Some(WeaponGauge::InsectGlaive {
+        extracts,
+        attack,
+        speed,
+        defense,
+        attack_max,
+        speed_max,
+        defense_max,
+        stamina,
+        max_stamina,
+    }) = weapon.gauge
+    else {
+        return y;
+    };
+
+    let style = &config.style;
+    let scale = geometry.scale;
+    let inner = geometry.inner_width(canvas);
+    let right = geometry.padding + inner;
+    let bar_height = 5.0 * scale;
+    let mut y = y;
+
+    // Contador, con el acento que ya tenía la ficha al completar las tres esencias.
+    let header_size = 11.0 * scale;
+    let summary = glaive_summary(&extracts);
+    let complete = extracts.attack && extracts.speed && extracts.defense;
+    let baseline = y + text.ascent(header_size);
+    text.draw(
+        canvas,
+        "Esencias",
+        geometry.padding,
+        baseline,
+        header_size,
+        style.muted,
+    );
+    text.draw(
+        canvas,
+        &summary,
+        right - text.width(&summary, header_size),
+        baseline,
+        header_size,
+        if complete { style.capture } else { style.text },
+    );
+    y += text.height(header_size) + geometry.small;
+
+    // Una barra por esencia, en el orden del juego: rojo, blanco y naranja.
+    let essence_size = 10.0 * scale;
+    let item_gap = 8.0 * scale;
+    let item_width = (inner - item_gap * 2.0).max(3.0 * scale) / 3.0;
+    let essences = [
+        (attack, attack_max, Color::rgb(0xe8, 0x55, 0x4a)),
+        (speed, speed_max, Color::rgb(0xe8, 0xf0, 0xf8)),
+        (defense, defense_max, Color::rgb(0xe0, 0x8a, 0x3c)),
+    ];
+
+    for (index, (remaining, max, color)) in essences.into_iter().enumerate() {
+        let x = geometry.padding + index as f32 * (item_width + item_gap);
+        let track = Rect::new(
+            x.round() as i32,
+            y.round() as i32,
+            item_width.round().max(1.0) as u32,
+            bar_height.round().max(1.0) as u32,
+        );
+        let radius = if style.bar_style == BarStyle::Blocks {
+            0.0
+        } else {
+            bar_height / 2.0
+        };
+
+        canvas.fill_rounded(track, radius, track_fill(style, style.panel_theme, 0.18));
+
+        if let Some(fraction) = essence_fraction(remaining, max) {
+            let filled = (track.width as f32 * fraction).round() as u32;
+            if filled > 1 {
+                canvas.fill_rounded(
+                    Rect::new(track.x, track.y, filled, track.height),
+                    radius,
                     color,
-                });
+                );
             }
+        }
 
-            if *max_stamina > 0.0 {
-                chips.push(Chip {
-                    glyph: BuffGlyph::Evasion,
-                    label: "Kinsecto",
-                    value: format!("{stamina:.0}/{max_stamina:.0}"),
-                    fraction: Some(stamina / max_stamina),
-                    color: meter,
-                });
-            }
+        // Sin máximo conocido la barra queda vacía y el tiempo sigue siendo el dato.
+        let label = if remaining > 0.0 {
+            format!("{remaining:.0}s")
+        } else {
+            "—".to_string()
+        };
+        text.draw(
+            canvas,
+            &label,
+            x,
+            y + bar_height + 2.0 * scale + text.ascent(essence_size),
+            essence_size,
+            style.muted,
+        );
+    }
+    y += bar_height + 2.0 * scale + text.height(essence_size) + geometry.small;
 
-            chips
+    // Aguante del kinsecto, con la fracción que el jugador no ve en el HUD.
+    let stamina_size = 11.0 * scale;
+    let label = "Kinsecto";
+    let value = if max_stamina > 0.0 {
+        format!("{stamina:.0}/{max_stamina:.0}")
+    } else {
+        "—".to_string()
+    };
+    let value_width = text.width(&value, stamina_size);
+    let bar_x = geometry.padding + text.width(label, stamina_size) + 6.0 * scale;
+    let bar_right = right - value_width - 6.0 * scale;
+    let bar = Rect::new(
+        bar_x.round() as i32,
+        (y + (text.height(stamina_size) - bar_height) * 0.5).round() as i32,
+        (bar_right - bar_x).round().max(1.0) as u32,
+        bar_height.round().max(1.0) as u32,
+    );
+    let radius = if style.bar_style == BarStyle::Blocks {
+        0.0
+    } else {
+        bar.height as f32 / 2.0
+    };
+    let baseline = y + text.ascent(stamina_size);
+
+    text.draw(
+        canvas,
+        label,
+        geometry.padding,
+        baseline,
+        stamina_size,
+        style.muted,
+    );
+    canvas.fill_rounded(bar, radius, track_fill(style, style.panel_theme, 0.18));
+
+    if let Some(fraction) = essence_fraction(stamina, max_stamina) {
+        let filled = (bar.width as f32 * fraction).round() as u32;
+        if filled > 1 {
+            canvas.fill_rounded(
+                Rect::new(bar.x, bar.y, filled, bar.height),
+                radius,
+                style.part,
+            );
         }
     }
+
+    text.draw(
+        canvas,
+        &value,
+        right - value_width,
+        baseline,
+        stamina_size,
+        style.text,
+    );
+
+    y + text.height(stamina_size)
 }
 
 fn horn_note_short(note: HornNote) -> &'static str {
@@ -2758,6 +2905,7 @@ mod tests {
                 severable: Some(Health::new(80.0, 100.0)),
                 health: Some(Health::new(80.0, 100.0)),
                 breaks: None,
+                ..Part::default()
             },
             Part {
                 index: 7,
@@ -2767,6 +2915,7 @@ mod tests {
                 severable: None,
                 health: Some(Health::new(50.0, 100.0)),
                 breaks: Some(Breaks::new(1, Some(3), 0, 1)),
+                ..Part::default()
             },
         ];
 
@@ -2790,6 +2939,7 @@ mod tests {
             severable: None,
             health: Some(Health::new(1_500.0, 2_000.0)),
             breaks: Some(Breaks::new(1, Some(2), 1, 2)),
+            ..Part::default()
         });
         let snapshot = Snapshot::of(vec![detailed]);
         let counter = render(&config, &text, &snapshot, None);
@@ -2837,6 +2987,7 @@ mod tests {
             severable: None,
             health: Some(Health::new(40.0, 100.0)),
             breaks: None,
+            ..Part::default()
         });
         config.overlay.bars = vec![mh_overlay_config::BarPlacement {
             id: "monster.0".to_string(),
@@ -2870,6 +3021,7 @@ mod tests {
                 severable: None,
                 health: Some(Health::new(40.0, 100.0)),
                 breaks: Some(Breaks::new(1, Some(2), 1, 2)),
+                ..Part::default()
             });
         }
         let canvas = render(&config, &text, &Snapshot::of(vec![detailed]), None);
@@ -3208,6 +3360,7 @@ mod tests {
             severable: None,
             health: Some(Health::new(40.0, 100.0)),
             breaks: Some(Breaks::new(1, Some(2), 1, 2)),
+            ..Part::default()
         });
         detailed.ailments.push(Ailment {
             name: "veneno",
@@ -3344,68 +3497,177 @@ mod tests {
         }
     }
 
-    fn glaive(extracts: Extracts, attack: f32, speed: f32, defense: f32) -> Weapon {
+    fn glaive(
+        extracts: Extracts,
+        attack: (f32, f32),
+        speed: (f32, f32),
+        defense: (f32, f32),
+    ) -> Weapon {
         Weapon {
             kind: WeaponKind::InsectGlaive,
             sharpness: None,
             gauge: Some(WeaponGauge::InsectGlaive {
                 extracts,
-                attack,
-                speed,
-                defense,
-                stamina: 0.0,
-                max_stamina: 0.0,
+                attack: attack.0,
+                attack_max: attack.1,
+                speed: speed.0,
+                speed_max: speed.1,
+                defense: defense.0,
+                defense_max: defense.1,
+                stamina: 80.0,
+                max_stamina: 100.0,
             }),
             detail: WeaponDetail::default(),
         }
     }
 
     #[test]
-    fn the_glaive_essences_show_name_color_and_time_per_chip() {
-        let style = StyleSection::default();
-        let weapon = glaive(
-            Extracts {
+    fn the_glaive_counter_says_what_is_active() {
+        assert_eq!(
+            glaive_summary(&Extracts {
                 attack: true,
                 speed: true,
                 defense: false,
                 heal: false,
-            },
-            30.0,
-            45.0,
-            0.0,
+            }),
+            "rojo + blanco · 2/3"
         );
-        let chips = weapon_gauge_chips(&weapon, &style);
-
-        assert_eq!(chips[0].label, "Esencias");
-        assert_eq!(chips[0].value, "rojo + blanco · 2/3");
-        assert_eq!(chips[0].color, style.part);
-        assert_eq!(chips[1].label, "rojo");
-        assert_eq!(chips[1].value, "30s");
-        assert_eq!(chips[2].label, "blanco");
-        assert_eq!(chips[2].value, "45s");
-        assert_ne!(chips[1].color, chips[2].color);
-        assert_eq!(chips.len(), 3);
     }
 
     #[test]
-    fn the_third_essence_completes_the_glaive_and_turns_the_chip_accent() {
-        let style = StyleSection::default();
-        let weapon = glaive(
+    fn a_full_glaive_reads_as_complete_and_an_empty_one_as_none() {
+        assert_eq!(
+            glaive_summary(&Extracts {
+                attack: true,
+                speed: true,
+                defense: true,
+                heal: false,
+            }),
+            "3/3 · completo"
+        );
+        assert_eq!(glaive_summary(&Extracts::default()), "sin esencias · 0/3");
+    }
+
+    #[test]
+    fn an_essence_bar_is_only_filled_when_its_maximum_is_known() {
+        assert_eq!(essence_fraction(60.0, 120.0), Some(0.5));
+        assert_eq!(essence_fraction(10.0, 0.0), None);
+        assert_eq!(essence_fraction(150.0, 120.0), Some(1.0));
+    }
+
+    #[test]
+    fn the_glaive_meter_paints_an_essence_only_with_a_known_maximum() {
+        let (config, text) = config();
+        let geometry = Geometry::new(1.0);
+        let known = glaive(
             Extracts {
                 attack: true,
                 speed: true,
                 defense: true,
                 heal: false,
             },
-            30.0,
-            45.0,
-            20.0,
+            (60.0, 120.0),
+            (60.0, 90.0),
+            (30.0, 60.0),
         );
+        let unknown = glaive(
+            Extracts {
+                attack: true,
+                ..Extracts::default()
+            },
+            (30.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+        );
+        let red = Color::rgb(0xe8, 0x55, 0x4a).to_argb() | 0xff00_0000;
+
+        let mut with_max = Canvas::new(400, 120);
+        draw_insect_glaive(&mut with_max, &config, &text, &geometry, &known, 0.0);
+        let mut without_max = Canvas::new(400, 120);
+        draw_insect_glaive(&mut without_max, &config, &text, &geometry, &unknown, 0.0);
+
+        assert!(
+            with_max.pixels().contains(&red),
+            "la esencia roja con máximo conocido no se dibuja"
+        );
+        assert!(
+            !without_max.pixels().contains(&red),
+            "sin máximo la barra no debe arrancar rellena"
+        );
+    }
+
+    #[test]
+    fn the_glaive_meter_height_matches_what_is_drawn() {
+        let (config, text) = config();
+        let geometry = Geometry::new(1.0);
+        let player = Player {
+            health: Health::new(800.0, 1000.0),
+            stamina: Health::new(100.0, 150.0),
+            recoverable: None,
+            weapon: Some(glaive(
+                Extracts {
+                    attack: true,
+                    speed: true,
+                    defense: false,
+                    heal: false,
+                },
+                (30.0, 60.0),
+                (45.0, 90.0),
+                (0.0, 0.0),
+            )),
+            buffs: Vec::new(),
+        };
+
+        let inner = BASE_WIDTH - geometry.padding * 2.0;
+        let measured = player_height(&text, &player, &geometry, inner, &config.style);
+        let mut canvas = Canvas::new(BASE_WIDTH as u32, 800);
+        let drawn = draw_player(
+            &mut canvas,
+            &config,
+            &text,
+            &geometry,
+            &player,
+            geometry.padding,
+        );
+
+        assert_eq!((drawn - geometry.padding).round(), measured.round());
+    }
+
+    #[test]
+    fn the_other_gauges_keep_their_chips() {
+        // El medidor propio del glaive no debe cambiar las fichas de las demás clases.
+        let style = StyleSection::default();
+        let weapon = Weapon {
+            kind: WeaponKind::ChargeBlade,
+            sharpness: None,
+            gauge: Some(WeaponGauge::ChargeBlade {
+                phials: 3,
+                max_phials: 5,
+                charge: 62.0,
+                shield: 30.0,
+                sword: 12.0,
+                axe: 0.0,
+            }),
+            detail: WeaponDetail::default(),
+        };
         let chips = weapon_gauge_chips(&weapon, &style);
 
-        assert_eq!(chips[0].value, "3/3 · completo");
-        assert_eq!(chips[0].color, style.capture);
-        assert_eq!(chips[3].label, "naranja");
-        assert_eq!(chips[3].value, "20s");
+        assert_eq!(chips[0].label, "Carga");
+        assert_eq!(chips[1].label, "Frascos");
+        assert_eq!(chips[1].value, "3/5");
+    }
+
+    #[test]
+    fn a_part_with_only_flinch_still_has_no_row() {
+        // El componente de flinch no alcanza para enseñar una parte: solo romper o cortar.
+        let mut monster = monster(50.0);
+        monster.parts.push(Part {
+            index: 2,
+            name: Some("Cuello"),
+            flinch: Some(Health::new(90.0, 100.0)),
+            ..Part::default()
+        });
+
+        assert!(visible_parts(&monster).is_empty());
     }
 }
