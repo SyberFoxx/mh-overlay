@@ -3,6 +3,13 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.9.1] - 2026-11-22
+
+### Corregido
+
+- Los cordópteros también se pueden colocar como barra suelta (`player.wirebugs`). Antes solo
+  existían dentro del panel completo, así que con `layout = "free"` no aparecían por ningún lado.
+
 ## [0.9.0] - 2026-11-22
 
 ### Añadido

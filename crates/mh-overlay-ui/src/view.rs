@@ -330,6 +330,31 @@ fn free_plates(
         place("player.stamina", &stamina, origin.0, origin.1);
         cursor.1 = cursor.1.max(origin.1 + stamina.height() as i32 + gap);
 
+        if let Some(wirebugs) = player.wirebugs {
+            // En layout libre cada pieza se coloca sola: sin esta entrada, los cordópteros solo
+            // existirían en el panel completo y quien usa barras sueltas no los vería.
+            let plate = row_plate(
+                config,
+                text,
+                &geometry,
+                Row {
+                    label: "Cordópteros",
+                    fraction: wirebugs.fraction(),
+                    color: if wirebugs.blocked {
+                        config.style.low_health
+                    } else {
+                        config.style.text
+                    },
+                    recoverable: 0.0,
+                    segments: Some(u32::from(wirebugs.max)),
+                    value: Some(wirebugs.label()),
+                },
+            );
+            let origin = bar_origin(config, "player.wirebugs").unwrap_or(cursor);
+            place("player.wirebugs", &plate, origin.0, origin.1);
+            cursor.1 = cursor.1.max(origin.1 + plate.height() as i32 + gap);
+        }
+
         if let Some(weapon) = &player.weapon {
             let plate = weapon_plate(config, text, &geometry, weapon);
             let origin = bar_origin(config, "weapon").unwrap_or(cursor);

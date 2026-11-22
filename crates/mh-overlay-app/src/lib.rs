@@ -3932,10 +3932,11 @@ fn builtin_presets() -> Vec<LayoutPreset> {
 }
 
 /// Barras fijas que el hub puede colocar sin editar el TOML a mano.
-const FREE_BARS: [&str; 10] = [
+const FREE_BARS: [&str; 11] = [
     "hunt",
     "player.health",
     "player.stamina",
+    "player.wirebugs",
     "weapon",
     "buffs",
     "status",
