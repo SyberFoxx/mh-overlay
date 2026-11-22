@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use mh_overlay_config::{
     Backdrop, BarPlacement, BarStyle, Color, Config, Direction, Layout, LayoutPreset, Monsters,
-    OverlaySection, Position, StylePreset, StyleSection, Theme,
+    OverlaySection, PanelTheme, Position, StylePreset, StyleSection, Theme,
 };
 use mh_overlay_games::{
     Ailment, Buff, Crown, GameKind, Health, Hunt, Monster, Part, Player, Sharpness, SharpnessLevel,
@@ -2974,6 +2974,21 @@ impl Hub {
                         .clicked()
                     {
                         self.config.style.bar_style = bars;
+                    }
+                }
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Tema").color(self.palette.muted));
+                for theme in PanelTheme::ALL {
+                    if ui
+                        .selectable_label(self.config.style.panel_theme == theme, theme.label())
+                        .on_hover_text(
+                            "Cambia el fondo, el borde y la cabecera del panel; no toca los colores",
+                        )
+                        .clicked()
+                    {
+                        self.config.style.panel_theme = theme;
                     }
                 }
             });

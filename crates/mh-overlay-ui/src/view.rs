@@ -4,7 +4,7 @@
 //! dominante con la marca del umbral de captura y, debajo, barras finas de partes y estados.
 //! El texto dice el número; las barras solo lo hacen comparable de un vistazo.
 
-use mh_overlay_config::{BarStyle, Color, Config, Direction, Monsters, StyleSection};
+use mh_overlay_config::{BarStyle, Color, Config, Direction, Monsters, PanelTheme, StyleSection};
 use mh_overlay_games::{
     Buff, Crown, HornNote, Hunt, Monster, Part, Player, SharpnessLevel, Snapshot, Weapon,
     WeaponDetail, WeaponGauge, part_labels,
@@ -63,21 +63,15 @@ pub fn render(config: &Config, text: &Text, snapshot: &Snapshot, status: Option<
     let width = geometry.width(config, text, snapshot, &monsters);
     let mut canvas = Canvas::new(width, geometry.height(config, text, snapshot, &monsters));
 
-    // Borde de un píxel: sobre un juego claro o oscuro, es lo que separa el panel del fondo.
-    canvas.fill_rounded(
-        Rect::new(0, 0, canvas.width(), canvas.height()),
+    // La superficie cambia de un vistazo: tarjeta oscura, cristal con borde de acento o cartel
+    // de bloques rectos. Es lo primero que se pinta y lo que fija el tono del resto.
+    paint_surface(
+        &mut canvas,
+        &config.style,
         RADIUS * geometry.scale,
-        lighten(config.style.panel, 0.18),
-    );
-    canvas.fill_rounded(
-        Rect::new(
-            1,
-            1,
-            canvas.width().saturating_sub(2),
-            canvas.height().saturating_sub(2),
-        ),
-        RADIUS * geometry.scale - 1.0,
-        config.style.panel,
+        geometry.scale,
+        true,
+        false,
     );
 
     let mut y = geometry.padding;
@@ -434,21 +428,96 @@ fn bar_origin(config: &Config, id: &str) -> Option<(i32, i32)> {
         .map(|bar| (bar.x, bar.y))
 }
 
+/// Color de acento de la interfaz: el borde del cristal y la franja a su izquierda.
+fn accent(style: &StyleSection) -> Color {
+    style.capture.with_alpha(0xff)
+}
+
+/// Fondo del tema `glass`: gris azulado claro y translúcido, no otro bloque oscuro.
+fn glass_fill(style: &StyleSection) -> Color {
+    lighten(style.panel, 0.3).with_alpha(0xd2)
+}
+
+/// Pista de una barra: en cristal apenas un velo; en brutal, un negro sólido.
+fn track_fill(style: &StyleSection, theme: PanelTheme, classic: f32) -> Color {
+    match theme {
+        PanelTheme::Classic => lighten(style.panel, classic),
+        PanelTheme::Glass => Color::rgb(0xff, 0xff, 0xff).with_alpha(26),
+        PanelTheme::Brutal => Color::rgb(0x00, 0x00, 0x00),
+    }
+}
+
+/// En `brutal` todo bloque va recto y sin degradado, aunque la barra sea redondeada.
+fn is_blocky(theme: PanelTheme, style: BarStyle) -> bool {
+    theme == PanelTheme::Brutal || style == BarStyle::Blocks
+}
+
+/// Fondo y borde de una superficie: el panel entero o una placa del modo libre.
+///
+/// `clear_inside` es para las placas: su lienzo es transparente y el fondo se pinta encima de
+/// un borde que, sin borrar, duplicaría el alfa y lo volvería casi opaco.
+fn paint_surface(
+    canvas: &mut Canvas,
+    style: &StyleSection,
+    radius: f32,
+    scale: f32,
+    stripe: bool,
+    clear_inside: bool,
+) {
+    let theme = style.panel_theme;
+    let full = Rect::new(0, 0, canvas.width(), canvas.height());
+    let radius = radius.max(0.0);
+
+    if theme == PanelTheme::Brutal {
+        // Esquinas rectas y marco duro: el panel se lee como un cartel, no como una tarjeta.
+        let edge = (3.0 * scale).round().max(1.0) as i32;
+        canvas.fill_rect(full, lighten(style.panel, 0.55));
+        canvas.fill_rect(full.inset(edge, edge), style.panel);
+        return;
+    }
+
+    let (border, edge) = match theme {
+        PanelTheme::Glass => (accent(style), (2.0 * scale).round().max(1.0)),
+        _ => (lighten(style.panel, 0.18), 1.0),
+    };
+    let inner = full.inset(edge as i32, edge as i32);
+    let inner_radius = (radius - edge).max(0.0);
+    let fill = if theme == PanelTheme::Glass {
+        glass_fill(style)
+    } else {
+        style.panel
+    };
+
+    canvas.fill_rounded(full, radius, border);
+
+    if clear_inside {
+        canvas.clear_rounded(inner, inner_radius);
+    }
+
+    canvas.fill_rounded(inner, inner_radius, fill);
+
+    if stripe {
+        let width = (3.0 * scale).round().max(1.0) as u32;
+        canvas.fill_rect(
+            Rect::new(inner.x, inner.y, width, inner.height),
+            accent(style),
+        );
+    }
+}
+
 /// Lienzo transparente con el borde y el fondo de una placa.
 fn plate_canvas(width: f32, height: f32, geometry: &Geometry, style: &StyleSection) -> Canvas {
     let width = width.round().max(1.0) as u32;
     let height = height.round().max(1.0) as u32;
     let mut canvas = Canvas::transparent(width, height);
-    let radius = 8.0 * geometry.scale;
-
-    canvas.fill_rounded(
-        Rect::new(0, 0, width, height),
-        radius,
-        lighten(style.panel, 0.18),
+    paint_surface(
+        &mut canvas,
+        style,
+        8.0 * geometry.scale,
+        geometry.scale,
+        false,
+        true,
     );
-    let inner = Rect::new(1, 1, width.saturating_sub(2), height.saturating_sub(2));
-    canvas.clear_rounded(inner, (radius - 1.0).max(0.0));
-    canvas.fill_rounded(inner, (radius - 1.0).max(0.0), style.panel);
 
     canvas
 }
@@ -542,7 +611,10 @@ fn monster_plate_width(
     monster: &Monster,
 ) -> f32 {
     let scale = geometry.scale;
-    let name = text.width(&monster_label(monster), 17.0 * scale);
+    let name = text.width(
+        &title_label(config.style.panel_theme, monster),
+        17.0 * scale,
+    );
     let percent = text.width(&percent_label(monster), 14.0 * scale);
     let crown = if monster.crown == Crown::None {
         0.0
@@ -717,7 +789,7 @@ impl Geometry {
         let mut logical = BASE_WIDTH;
 
         for monster in monsters {
-            let name = text.width(&monster_label(monster), name_size);
+            let name = text.width(&title_label(config.style.panel_theme, monster), name_size);
             let percent = text.width(&percent_label(monster), percent_size);
             let crown = if monster.crown == Crown::None {
                 0.0
@@ -892,6 +964,17 @@ fn monster_label(monster: &Monster) -> String {
     }
 }
 
+/// Nombre del monstruo como lo pinta el tema: `brutal` lo pasa a mayúsculas.
+fn title_label(theme: PanelTheme, monster: &Monster) -> String {
+    let label = monster_label(monster);
+
+    if theme == PanelTheme::Brutal {
+        label.to_uppercase()
+    } else {
+        label
+    }
+}
+
 fn percent_label(monster: &Monster) -> String {
     format!("{:.1}%", monster.health.percent())
 }
@@ -906,9 +989,32 @@ fn draw_title(
     y: f32,
 ) -> f32 {
     let style = &config.style;
+    let theme = style.panel_theme;
+    let scale = geometry.scale;
     let name_size = 17.0 * geometry.scale;
     let percent_size = 14.0 * geometry.scale;
-    let label = monster_label(monster);
+    let label = title_label(theme, monster);
+
+    // En brutal el título se apoya en una banda sólida con su bloque de acento: se lee como
+    // cabecera de cartel y no como texto suelto sobre el fondo.
+    if theme == PanelTheme::Brutal {
+        let band = Rect::new(
+            0,
+            y.round() as i32,
+            canvas.width(),
+            geometry.header.round().max(1.0) as u32,
+        );
+        canvas.fill_rect(band, lighten(style.panel, 0.26));
+        canvas.fill_rect(
+            Rect::new(
+                0,
+                band.y,
+                (4.0 * scale).round().max(1.0) as u32,
+                band.height,
+            ),
+            accent(style),
+        );
+    }
 
     let name_width = text.width(&label, name_size);
     text.draw(
@@ -993,6 +1099,7 @@ fn draw_health_bar(
     y: f32,
 ) -> f32 {
     let style = &config.style;
+    let theme = style.panel_theme;
     let scale = geometry.scale;
     let bar = Rect::new(
         geometry.padding as i32,
@@ -1000,18 +1107,28 @@ fn draw_health_bar(
         geometry.inner_width(canvas).max(1.0) as u32,
         geometry.bar.max(4.0) as u32,
     );
-    let radius = match style.bar_style {
-        BarStyle::Rounded => 3.0 * scale,
-        BarStyle::Blocks => 0.0,
-        BarStyle::Pill => bar.height as f32 / 2.0,
+    let radius = if theme == PanelTheme::Brutal {
+        0.0
+    } else {
+        match style.bar_style {
+            BarStyle::Rounded => 3.0 * scale,
+            BarStyle::Blocks => 0.0,
+            BarStyle::Pill => bar.height as f32 / 2.0,
+        }
     };
 
-    // El borde claro separa la barra del panel y la pista queda hundida un píxel.
-    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.26));
+    // El borde separa la barra del panel y la pista queda hundida un píxel. En brutal el
+    // marco es claro y la pista negra: bloques duros en vez de una ranura.
+    let frame = if theme == PanelTheme::Brutal {
+        lighten(style.panel, 0.55)
+    } else {
+        track_fill(style, theme, 0.26)
+    };
+    canvas.fill_rounded(bar, radius, frame);
     canvas.fill_rounded(
         bar.inset(1, 1),
         (radius - 1.0).max(0.0),
-        lighten(style.panel, 0.06),
+        track_fill(style, theme, 0.06),
     );
 
     let fraction = (monster.health.percent() / 100.0).clamp(0.0, 1.0);
@@ -1032,7 +1149,7 @@ fn draw_health_bar(
         let inner_radius = (radius - 1.0).max(0.0);
         // En tramos el relleno va plano: el degradado suaviza los cortes y aquí se busca lo
         // contrario, que cada tramo se lea como un bloque.
-        if style.bar_style == BarStyle::Blocks {
+        if is_blocky(theme, style.bar_style) {
             canvas.fill_rounded(fill, inner_radius, base);
         } else {
             canvas.fill_rounded_gradient(fill, inner_radius, lighten(base, 0.34), base);
@@ -1040,12 +1157,14 @@ fn draw_health_bar(
     }
 
     // Marcas cada 10 %: la barra se lee como una escala y no como una mancha de color.
-    let tick = if style.bar_style == BarStyle::Blocks {
+    let tick = if theme == PanelTheme::Brutal {
+        Color::rgb(0x00, 0x00, 0x00)
+    } else if style.bar_style == BarStyle::Blocks {
         style.panel
     } else {
         lighten(style.panel, 0.5).with_alpha(60)
     };
-    let tick_width = if style.bar_style == BarStyle::Blocks {
+    let tick_width = if is_blocky(theme, style.bar_style) {
         (scale * 2.0).max(2.0)
     } else {
         scale.max(1.0)
@@ -1147,14 +1266,21 @@ fn buff_rows(buffs: usize) -> usize {
 
 /// Separador de una sección, del ancho interior del panel.
 fn draw_divider(canvas: &mut Canvas, config: &Config, geometry: &Geometry, y: f32) {
+    let style = &config.style;
+    let (color, height) = match style.panel_theme {
+        PanelTheme::Classic => (lighten(style.panel, 0.12), geometry.divider),
+        PanelTheme::Glass => (accent(style).with_alpha(96), geometry.divider),
+        PanelTheme::Brutal => (lighten(style.panel, 0.35), (2.0 * geometry.scale).max(1.0)),
+    };
+
     canvas.fill_rect(
         Rect::new(
             geometry.padding as i32,
             y.round() as i32,
             (canvas.width() as f32 - geometry.padding * 2.0).max(1.0) as u32,
-            geometry.divider.max(1.0) as u32,
+            height.max(1.0) as u32,
         ),
-        lighten(config.style.panel, 0.12),
+        color,
     );
 }
 
@@ -1510,7 +1636,11 @@ fn draw_spirit_sword(
     y + geometry.spirit
 }
 
-/// Barra de filo con un hueco entre colores y la posición actual marcada.
+/// Barra de filo: guiones del color de cada nivel y una punta sobre el filo actual.
+///
+/// Los guiones a la izquierda de la punta son lo que queda; los de la derecha, el filo ya
+/// gastado, se apagan. Así el color vigente y cuánto resta se leen sin números, y la punta da
+/// el punto exacto sin tapar el color.
 fn draw_sharpness(
     canvas: &mut Canvas,
     config: &Config,
@@ -1519,69 +1649,118 @@ fn draw_sharpness(
     y: f32,
 ) {
     let style = &config.style;
+    let theme = style.panel_theme;
     let scale = geometry.scale;
-    let height = SHARPNESS_BAR * scale;
+    let height = (SHARPNESS_BAR * scale).max(3.0);
     let bar = Rect::new(
         geometry.padding as i32,
         y.round() as i32,
         geometry.inner_width(canvas).max(1.0) as u32,
-        height.max(3.0) as u32,
+        height.round() as u32,
     );
-    let radius = 2.0 * scale;
+    let radius = if theme == PanelTheme::Brutal {
+        0.0
+    } else {
+        match style.bar_style {
+            BarStyle::Rounded => (2.0 * scale).max(0.0),
+            BarStyle::Blocks => 0.0,
+            BarStyle::Pill => height / 2.0,
+        }
+    };
 
-    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.22));
+    canvas.fill_rounded(bar, radius, track_fill(style, theme, 0.22));
 
     let total = sharpness.total();
     if total <= 0.0 {
         return;
     }
 
-    // El relleno llega hasta el filo actual y no hasta el máximo del arma: en el juego la
-    // franja del color vigente se encoge con cada golpe, y una barra llena con un marcador de
-    // dos píxeles se ve inmóvil aunque el valor baje.
-    let marker_x = bar.x as f32 + bar.width as f32 * sharpness.fraction();
-    let empty = lighten(style.panel, 0.10);
+    // La punta marca el filo actual: a su izquierda queda lo que el arma todavía aguanta.
+    let marker_x = (bar.x as f32 + bar.width as f32 * sharpness.fraction())
+        .clamp(bar.x as f32 + 1.0, bar.right() as f32 - 1.0);
+    let dash = (5.0 * scale).max(2.0);
+    let gap = (2.0 * scale).max(1.0);
     let mut x = bar.x as f32;
 
     for (index, level) in SharpnessLevel::ALL.iter().enumerate() {
         let length = f32::from(sharpness.lengths[index]);
-        let width = bar.width as f32 * length / total;
 
-        if width >= 1.5 {
-            let inner = Rect::new(
-                (x + scale).round() as i32,
-                bar.y + scale.round() as i32,
-                (width - scale * 2.0).max(1.0) as u32,
-                bar.height.saturating_sub((2.0 * scale).round() as u32),
-            );
-
-            canvas.fill_rounded(inner, radius, empty);
-
-            let filled = (marker_x - x - scale).clamp(0.0, inner.width as f32);
-            if filled >= 1.5 {
-                let color = sharpness_color(*level);
-                let segment = Rect::new(inner.x, inner.y, filled.round() as u32, inner.height);
-
-                canvas.fill_rounded_gradient(segment, radius, lighten(color, 0.32), color);
-            }
+        if length <= 0.0 {
+            continue;
         }
 
-        x += width;
+        let width = bar.width as f32 * length / total;
+        let end = x + width;
+        let color = sharpness_color(*level);
+        let spent = mix_with(color, style.panel, 0.72);
+        let mut start = x;
+
+        while start < end - 0.5 {
+            let stop = (start + dash).min(end);
+            let cut = marker_x.clamp(start, stop);
+
+            if cut > start {
+                draw_dash(canvas, bar, start, cut, radius, color);
+            }
+
+            if stop > cut {
+                draw_dash(canvas, bar, cut.max(start), stop, radius, spent);
+            }
+
+            start += dash + gap;
+        }
+
+        x = end;
     }
+
+    // Remate en punta: un chevrón sobre la barra y una línea de un píxel que la atraviesa.
+    let tip = bar.y as f32 - scale;
+    let base = tip - (6.0 * scale);
+    let half = (4.0 * scale).max(2.0);
+    let stroke = (1.6 * scale).max(1.0);
+    canvas.fill_line((marker_x, tip), (marker_x - half, base), stroke, style.text);
+    canvas.fill_line((marker_x, tip), (marker_x + half, base), stroke, style.text);
     canvas.fill_rect(
         Rect::new(
-            marker_x.round() as i32 - 1,
-            bar.y - scale.round() as i32,
-            (scale * 2.0).max(2.0) as u32,
-            bar.height + (scale * 2.0).round() as u32,
+            marker_x.round() as i32,
+            bar.y,
+            scale.round().max(1.0) as u32,
+            bar.height,
         ),
         style.text,
     );
-    canvas.fill_diamond(
-        (marker_x, bar.y as f32 - 3.0 * scale),
-        2.0 * scale,
-        style.text,
+}
+
+/// Un guion de la barra de filo, ya recortado al espacio entre la punta y el nivel.
+fn draw_dash(canvas: &mut Canvas, bar: Rect, start: f32, stop: f32, radius: f32, color: Color) {
+    let left = start.round() as i32;
+    let right = stop.round() as i32;
+
+    if right - left < 1 {
+        return;
+    }
+
+    canvas.fill_rounded(
+        Rect::new(left, bar.y, (right - left) as u32, bar.height),
+        radius.min((right - left) as f32 / 2.0),
+        color,
     );
+}
+
+/// Mezcla `color` con `towards`; apaga el filo gastado sin perder el tono del nivel.
+fn mix_with(color: Color, towards: Color, amount: f32) -> Color {
+    let mix = |from: u8, to: u8| -> u8 {
+        (f32::from(from) + (f32::from(to) - f32::from(from)) * amount)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+
+    Color {
+        r: mix(color.r, towards.r),
+        g: mix(color.g, towards.g),
+        b: mix(color.b, towards.b),
+        a: 0xff,
+    }
 }
 
 /// Ficha compacta de un dato del arma.
@@ -1893,28 +2072,66 @@ fn weapon_gauge_chips(weapon: &Weapon, style: &StyleSection) -> Vec<Chip> {
             stamina,
             max_stamina,
         } => {
+            // Las tres esencias se ordenan como en el juego: rojo, blanco y naranja. Cada una
+            // va en su propia ficha con su color, porque un color de acento único las igualaba.
+            let essences = [
+                (
+                    extracts.attack,
+                    "rojo",
+                    *attack,
+                    Color::rgb(0xe8, 0x55, 0x4a),
+                ),
+                (
+                    extracts.speed,
+                    "blanco",
+                    *speed,
+                    Color::rgb(0xe8, 0xf0, 0xf8),
+                ),
+                (
+                    extracts.defense,
+                    "naranja",
+                    *defense,
+                    Color::rgb(0xe0, 0x8a, 0x3c),
+                ),
+            ];
+            let active: Vec<&str> = essences
+                .iter()
+                .filter(|(on, ..)| *on)
+                .map(|(_, name, ..)| *name)
+                .collect();
+            let count = active.len();
+
+            let summary = if count == 3 {
+                "3/3 · completo".to_string()
+            } else if count == 0 {
+                "sin esencias · 0/3".to_string()
+            } else {
+                format!("{} · {count}/3", active.join(" + "))
+            };
             let mut chips = vec![Chip {
                 glyph: BuffGlyph::Stamina,
                 label: "Esencias",
-                value: extracts.label(),
+                value: summary,
                 fraction: None,
-                color: state,
+                color: if count == 3 { state } else { meter },
             }];
 
-            for (label, time) in [
-                ("Ataque", attack),
-                ("Velocidad", speed),
-                ("Defensa", defense),
-            ] {
-                if *time > 0.0 {
-                    chips.push(Chip {
-                        glyph: BuffGlyph::Misc,
-                        label,
-                        value: format!("{time:.0}s"),
-                        fraction: None,
-                        color: timer,
-                    });
+            for (on, name, time, color) in essences {
+                if !on {
+                    continue;
                 }
+
+                chips.push(Chip {
+                    glyph: BuffGlyph::Misc,
+                    label: name,
+                    value: if time > 0.0 {
+                        format!("{time:.0}s")
+                    } else {
+                        "—".to_string()
+                    },
+                    fraction: None,
+                    color,
+                });
             }
 
             if *max_stamina > 0.0 {
@@ -2289,12 +2506,17 @@ fn draw_row(
         (inner - LABEL_WIDTH * geometry.scale - value_width).max(1.0) as u32,
         bar_height as u32,
     );
-    let radius = match style.bar_style {
-        BarStyle::Rounded | BarStyle::Pill => bar.height as f32 / 2.0,
-        BarStyle::Blocks => 0.0,
+    let theme = style.panel_theme;
+    let radius = if theme == PanelTheme::Brutal {
+        0.0
+    } else {
+        match style.bar_style {
+            BarStyle::Rounded | BarStyle::Pill => bar.height as f32 / 2.0,
+            BarStyle::Blocks => 0.0,
+        }
     };
 
-    canvas.fill_rounded(bar, radius, lighten(style.panel, 0.18));
+    canvas.fill_rounded(bar, radius, track_fill(style, theme, 0.18));
 
     // La vida recuperable se dibuja detrás del relleno: es la parte que aún se puede curar.
     if row.recoverable > 0.0 {
@@ -2311,12 +2533,14 @@ fn draw_row(
 
     let filled = (bar.width as f32 * fraction).round() as u32;
     if filled > 1 {
-        canvas.fill_rounded_gradient(
-            Rect::new(bar.x, bar.y, filled, bar.height),
-            radius,
-            lighten(color, 0.3),
-            color,
-        );
+        let filled_bar = Rect::new(bar.x, bar.y, filled, bar.height);
+
+        // Brutal pinta bloques planos: el degradado es justo lo que ablanda el cartel.
+        if theme == PanelTheme::Brutal {
+            canvas.fill_rounded(filled_bar, radius, color);
+        } else {
+            canvas.fill_rounded_gradient(filled_bar, radius, lighten(color, 0.3), color);
+        }
     }
 
     // Un hueco por cada rompimiento: se ve cuántos aguanta la parte y cuál es el siguiente.
@@ -2330,7 +2554,7 @@ fn draw_row(
                     geometry.scale.round().max(1.0) as u32,
                     bar.height,
                 ),
-                lighten(style.panel, 0.04),
+                track_fill(style, theme, 0.04),
             );
         }
     }
@@ -2423,7 +2647,9 @@ fn lighten(color: Color, amount: f32) -> Color {
 mod tests {
     use super::*;
     use mh_overlay_config::Layout;
-    use mh_overlay_games::{Ailment, Breaks, Buff, Health, Sharpness, WeaponGauge, WeaponKind};
+    use mh_overlay_games::{
+        Ailment, Breaks, Buff, Extracts, Health, Sharpness, WeaponGauge, WeaponKind,
+    };
 
     fn monster(percent: f32) -> Monster {
         Monster::new(7, Health::new(percent, 100.0))
@@ -3015,5 +3241,171 @@ mod tests {
         let wanted = config.style.capture.to_argb() | 0xff00_0000;
 
         assert!(canvas.pixels().contains(&wanted));
+    }
+
+    #[test]
+    fn the_panel_theme_changes_the_surface_at_a_glance() {
+        let (mut config, text) = config();
+        let snapshot = Snapshot::of(vec![monster(50.0)]);
+        let classic = render(&config, &text, &snapshot, None);
+
+        assert_eq!(config.style.panel_theme, PanelTheme::Classic);
+        assert_eq!(
+            classic.pixel(0, 0),
+            Some(0xff00_0000),
+            "el clásico conserva las esquinas recortadas"
+        );
+
+        config.style.panel_theme = PanelTheme::Glass;
+        let glass = render(&config, &text, &snapshot, None);
+        config.style.panel_theme = PanelTheme::Brutal;
+        let brutal = render(&config, &text, &snapshot, None);
+
+        let changed = |other: &Canvas| {
+            classic
+                .pixels()
+                .iter()
+                .zip(other.pixels())
+                .filter(|(left, right)| left != right)
+                .count()
+        };
+
+        assert!(
+            changed(&glass) > 2000,
+            "cristal cambia {} px",
+            changed(&glass)
+        );
+        assert!(
+            changed(&brutal) > 2000,
+            "brutal cambia {} px",
+            changed(&brutal)
+        );
+        assert_eq!(
+            glass.pixel(0, 0),
+            Some(0xff00_0000),
+            "cristal mantiene la esquina redondeada"
+        );
+        assert_ne!(
+            brutal.pixel(0, 0),
+            Some(0xff00_0000),
+            "brutal deja la esquina recta y pintada"
+        );
+    }
+
+    #[test]
+    fn the_free_plates_follow_the_panel_theme() {
+        let (mut config, text) = config();
+        let snapshot = Snapshot::of(vec![monster(50.0)]);
+        let classic = render_free(&config, &text, &snapshot, None, (640, 480));
+
+        config.style.panel_theme = PanelTheme::Brutal;
+        let brutal = render_free(&config, &text, &snapshot, None, (640, 480));
+
+        // La placa del monstruo arranca en el margen: el clásico le corta la esquina y brutal
+        // la deja recta, igual que el panel.
+        assert_eq!(alpha(&classic, 24, 24), 0);
+        assert!(alpha(&brutal, 24, 24) > 0);
+    }
+
+    #[test]
+    fn the_sharpness_bar_keeps_its_dashes_with_every_bar_style() {
+        let sharpness = Sharpness {
+            lengths: [40, 30, 30, 30, 30, 20, 0],
+            level: SharpnessLevel::White,
+            max_level: SharpnessLevel::White,
+            current: 180.0,
+        };
+        let geometry = Geometry::new(1.0);
+        let mut reference = Canvas::new(1, 1);
+        reference.fill_rect(
+            Rect::new(0, 0, 1, 1),
+            track_fill(&Config::default().style, PanelTheme::Classic, 0.22),
+        );
+        let track = reference.pixel(0, 0).unwrap();
+
+        for bar_style in BarStyle::ALL {
+            let mut config = Config::default();
+            config.style.bar_style = bar_style;
+            let mut canvas = Canvas::new(320, 40);
+            draw_sharpness(&mut canvas, &config, &geometry, &sharpness, 4.0);
+
+            let row: Vec<u32> = (14..306).filter_map(|x| canvas.pixel(x, 8)).collect();
+            let gaps = row.iter().filter(|pixel| **pixel == track).count();
+            let white = sharpness_color(SharpnessLevel::White).to_argb() | 0xff00_0000;
+
+            assert!(
+                gaps > 40,
+                "{bar_style:?}: solo {gaps} píxeles de hueco entre guiones"
+            );
+            assert!(
+                row.contains(&white),
+                "{bar_style:?}: falta el color del filo actual"
+            );
+        }
+    }
+
+    fn glaive(extracts: Extracts, attack: f32, speed: f32, defense: f32) -> Weapon {
+        Weapon {
+            kind: WeaponKind::InsectGlaive,
+            sharpness: None,
+            gauge: Some(WeaponGauge::InsectGlaive {
+                extracts,
+                attack,
+                speed,
+                defense,
+                stamina: 0.0,
+                max_stamina: 0.0,
+            }),
+            detail: WeaponDetail::default(),
+        }
+    }
+
+    #[test]
+    fn the_glaive_essences_show_name_color_and_time_per_chip() {
+        let style = StyleSection::default();
+        let weapon = glaive(
+            Extracts {
+                attack: true,
+                speed: true,
+                defense: false,
+                heal: false,
+            },
+            30.0,
+            45.0,
+            0.0,
+        );
+        let chips = weapon_gauge_chips(&weapon, &style);
+
+        assert_eq!(chips[0].label, "Esencias");
+        assert_eq!(chips[0].value, "rojo + blanco · 2/3");
+        assert_eq!(chips[0].color, style.part);
+        assert_eq!(chips[1].label, "rojo");
+        assert_eq!(chips[1].value, "30s");
+        assert_eq!(chips[2].label, "blanco");
+        assert_eq!(chips[2].value, "45s");
+        assert_ne!(chips[1].color, chips[2].color);
+        assert_eq!(chips.len(), 3);
+    }
+
+    #[test]
+    fn the_third_essence_completes_the_glaive_and_turns_the_chip_accent() {
+        let style = StyleSection::default();
+        let weapon = glaive(
+            Extracts {
+                attack: true,
+                speed: true,
+                defense: true,
+                heal: false,
+            },
+            30.0,
+            45.0,
+            20.0,
+        );
+        let chips = weapon_gauge_chips(&weapon, &style);
+
+        assert_eq!(chips[0].value, "3/3 · completo");
+        assert_eq!(chips[0].color, style.capture);
+        assert_eq!(chips[3].label, "naranja");
+        assert_eq!(chips[3].value, "20s");
     }
 }

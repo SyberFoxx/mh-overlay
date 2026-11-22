@@ -7,7 +7,7 @@ use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 
 use clap::Parser;
-use mh_overlay_config::{Config, ConfigError, Layout, Loaded, Origin, Position};
+use mh_overlay_config::{Config, ConfigError, Layout, Loaded, Origin, PanelTheme, Position};
 use mh_overlay_games::{GameKind, Hunt, Player, Snapshot, WeaponGauge, part_labels};
 use mh_overlay_memory::{AddressMap, MapValidation, Memory, MemoryError, Process, maps_directory};
 use mh_overlay_ui::editor::Editor;
@@ -511,7 +511,12 @@ fn run_overlay(
                 (canvas.width(), canvas.height()),
                 (config.overlay.margin_x, config.overlay.margin_y),
             );
-            window.present(&canvas, origin, true, config.overlay.click_through)?;
+            window.present(
+                &canvas,
+                origin,
+                config.style.panel_theme != PanelTheme::Brutal,
+                config.overlay.click_through,
+            )?;
         }
 
         sleep(Duration::from_millis(config.game.interval_ms));

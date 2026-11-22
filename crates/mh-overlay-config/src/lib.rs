@@ -115,6 +115,9 @@ low_health_percent = 25.0
 capture = "#e6b45e"
 part = "#4f8dd6"
 severable = "#d69a4f"
+# Tema del panel: classic (tarjeta oscura), glass (cristal con borde de acento) o
+# brutal (esquinas rectas, bloques sólidos y títulos en mayúsculas).
+panel_theme = "classic"
 "##;
 
 /// Sección `[game]`.
@@ -248,6 +251,8 @@ pub struct StyleSection {
     pub severable: Color,
     /// Forma de las barras del panel.
     pub bar_style: BarStyle,
+    /// Tema de la superficie del panel: fondo, borde y cabecera del monstruo.
+    pub panel_theme: PanelTheme,
 }
 
 /// Forma de las barras del panel.
@@ -273,6 +278,33 @@ impl BarStyle {
             Self::Rounded => "Redondeada",
             Self::Blocks => "Tramos",
             Self::Pill => "Cápsula",
+        }
+    }
+}
+
+/// Tema de la superficie del panel: el fondo, el borde y la cabecera del monstruo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelTheme {
+    /// La tarjeta oscura de siempre: borde tenue y esquinas redondeadas.
+    #[default]
+    Classic,
+    /// Cristal: fondo más claro y translúcido, borde de acento y franja a la izquierda.
+    Glass,
+    /// Cartel: esquinas rectas, bloques sólidos y títulos en mayúsculas sobre una banda.
+    Brutal,
+}
+
+impl PanelTheme {
+    /// Los temas en el orden en que se ofrecen.
+    pub const ALL: [Self; 3] = [Self::Classic, Self::Glass, Self::Brutal];
+
+    /// Nombre corto para la interfaz.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "Clásico",
+            Self::Glass => "Cristal",
+            Self::Brutal => "Brutal",
         }
     }
 }
@@ -346,6 +378,7 @@ impl Default for StyleSection {
             part: Color::rgb(0x4f, 0x8d, 0xd6),
             severable: Color::rgb(0xd6, 0x9a, 0x4f),
             bar_style: BarStyle::default(),
+            panel_theme: PanelTheme::default(),
         }
     }
 }

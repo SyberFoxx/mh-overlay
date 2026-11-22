@@ -135,6 +135,30 @@ mod tests {
     }
 
     #[test]
+    fn every_panel_theme_has_a_name_and_round_trips_through_the_toml() {
+        for (theme, name) in [
+            (crate::PanelTheme::Classic, "classic"),
+            (crate::PanelTheme::Glass, "glass"),
+            (crate::PanelTheme::Brutal, "brutal"),
+        ] {
+            let config: crate::Config =
+                crate::Config::from_toml(&format!("[style]\npanel_theme = \"{name}\"\n"), "prueba")
+                    .unwrap();
+
+            assert_eq!(config.style.panel_theme, theme);
+            assert!(!theme.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn an_old_file_without_a_panel_theme_keeps_the_classic_one() {
+        let config: crate::Config =
+            crate::Config::from_toml("[style]\nhealth = \"#112233\"\n", "prueba").unwrap();
+
+        assert_eq!(config.style.panel_theme, crate::PanelTheme::Classic);
+    }
+
+    #[test]
     fn the_theme_names_accept_spanish_and_english() {
         assert_eq!("auto".parse::<Theme>().unwrap(), Theme::Auto);
         assert_eq!("Sistema".parse::<Theme>().unwrap(), Theme::Auto);

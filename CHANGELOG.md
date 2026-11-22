@@ -3,6 +3,26 @@
 Todos los cambios visibles para quien usa `mh-overlay`. El workflow de release usa la sección
 de la versión etiquetada como cuerpo de la release de GitHub y falla si no existe.
 
+## [0.8.0] - 2026-11-22
+
+### Añadido
+
+- Tres temas de superficie para el panel, elegibles en **Ajustes**: **clásico** (la tarjeta de
+  siempre), **cristal** (fondo claro, borde de acento y franja lateral) y **brutal** (esquinas
+  rectas, bloques sólidos y la cabecera del monstruo en mayúsculas sobre una banda). Cambian el
+  panel completo y las placas sueltas.
+- Las esencias del glaive insecto se ven con su color y su tiempo —rojo, blanco y naranja—, con
+  el contador `2/3` y `3/3 · completo` cuando están las tres.
+- Barra de filo rediseñada: un guion por nivel, el tramo ya gastado apagado y una punta que marca
+  el punto exacto del filo.
+
+### Corregido
+
+- El objetivo de la cacería se compara contra el puntero del monstruo y no contra la dirección
+  del campo, así que «solo el objetivo» ya fija el monstruo elegido en vez de caer siempre a la
+  zona entera.
+- Se leen las tres esencias del glaive; antes se recorrían dos y la naranja no aparecía nunca.
+
 ## [0.7.0] - 2026-11-22
 
 ### Añadido
